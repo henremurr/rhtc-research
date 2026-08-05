@@ -1,0 +1,49 @@
+{
+  "AI/I": [
+    "MU",
+    "ORCL",
+    "MRVL",
+    "SMCI",
+    "RGTI",
+    "AVGO",
+    "DELL",
+    "IBM",
+    "SNOW",
+    "LITE",
+    "OKTA",
+    "MSFT",
+    "CRWD",
+    "AMKR"
+  ],
+  "EFM/I": [
+    "OKLO",
+    "VG",
+    "ET",
+    "CCJ",
+    "LEU"
+  ],
+  "DS/I": [
+    "LMT",
+    "NOC",
+    "RTX",
+    "LHX",
+    "GE",
+    "KTOS",
+    "AVAV",
+    "RKLB",
+    "PL",
+    "RDW",
+    "RCAT",
+    "BA",
+    "BWXT",
+    "ASTS",
+    "PLTR",
+    "LDOS",
+    "ONDS",
+    "UMAC",
+    "HII"
+  ],
+  "Other": [
+    "SPCX"
+  ]
+}
