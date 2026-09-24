@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>RHTC Options Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/options/static/app.css">
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand"><div class="brand-mark"><span>RH</span></div><div><b>ROCKING HORSE</b><small>TRADING CO. <i>·</i> RESEARCH</small></div></div>
+    <div class="nav-label">WORKSPACE</div>
+    <button class="nav-item active"><span class="nav-icon">▦</span> Options overview <span class="nav-count">127</span></button>
+    <button class="nav-item" data-filter="holdings"><span class="nav-icon">◈</span> Focus symbols</button>
+    <button class="nav-item" data-filter="history"><span class="nav-icon">◷</span> Snapshot history</button>
+    <div class="nav-label peaks-label">THREE PEAKS</div>
+    <button class="peak-item selected" data-peak="All Peaks"><span class="peak-dot all"></span> All watchlist <span class="peak-count" id="count-all">127</span></button>
+    <button class="peak-item" data-peak="AI/I"><span class="peak-dot ai"></span> AI / Infrastructure <span class="peak-count" id="count-ai">54</span></button>
+    <button class="peak-item" data-peak="EFM/I"><span class="peak-dot efm"></span> Energy / Infrastructure <span class="peak-count" id="count-efm">47</span></button>
+    <button class="peak-item" data-peak="DS/I"><span class="peak-dot defense"></span> Defense / Space <span class="peak-count" id="count-ds">24</span></button>
+    <button class="peak-item" data-peak="Other"><span class="peak-dot other"></span> Outside the Peaks <span class="peak-count">2</span></button>
+    <div class="sidebar-bottom"><div class="sync-dot"></div><div><b>Data connection</b><small id="provider-side">Demo mode · sample values</small></div><button class="settings" title="Data settings" onclick="showSettings()">⚙</button></div>
+  </aside>
+  <main class="main">
+    <header class="topbar"><div class="crumb">RESEARCH <span>/</span> OPTIONS</div><div class="top-actions"><div class="market-state"><span class="market-dot"></span><span>US MARKET</span><span class="sep">·</span><span id="market-clock">--:-- ET</span></div><button class="user-avatar" title="RHTC">RH</button></div></header>
+    <div class="content">
+      <div class="page-head"><div><div class="eyebrow">THREE PEAKS · INCOME ENGINE</div><h1>Options overview</h1><p class="subhead">Screening ratios across the RHTC research watchlist.</p></div><div class="head-actions"><span class="source-pill" id="source-pill"><span class="source-dot"></span> DEMO DATA</span><button class="refresh-btn" id="refresh"><span class="refresh-icon">↻</span> Refresh quotes</button></div></div>
+      <div class="demo-alert" id="demo-alert"><span class="alert-symbol">ⓘ</span><div><b>Preview data only</b><span>Sample values are shown. Add your Tradier API token in the deployment environment to load market data.</span></div><button onclick="this.parentElement.remove()" aria-label="Dismiss">×</button></div>
+      <section class="metric-grid">
+        <article class="metric-card"><div class="metric-label">WATCHLIST UNIVERSE <span class="metric-icon">◫</span></div><div class="metric-value" id="universe-value">127 <small>symbols</small></div><div class="metric-foot"><span class="gold-text">3 Peaks + 2</span><span>RHTC master list</span></div></article>
+        <article class="metric-card"><div class="metric-label">CALLS TO REVIEW <span class="metric-icon">↗</span></div><div class="metric-value" id="review-value">—</div><div class="metric-foot"><span>Nearest expiry</span><span>·</span><span>OTM calls</span></div></article>
+        <article class="metric-card"><div class="metric-label">MEDIAN BID YIELD <span class="metric-icon">％</span></div><div class="metric-value" id="median-value">— <small>%</small></div><div class="metric-foot"><span>Bid ÷ share price</span><span class="muted">Simple premium ratio</span></div></article>
+        <article class="metric-card"><div class="metric-label">DATA AS OF <span class="metric-icon">◷</span></div><div class="metric-value asof" id="asof-value">--:--</div><div class="metric-foot"><span id="asof-date">Waiting for refresh</span><span class="status-ok">●</span></div></article>
+      </section>
+      <section class="content-card">
+        <div class="table-header"><div><h2>Call candidates</h2><p>Nearest listed expiry · nearest out-of-the-money call · sorted by bid yield</p></div><div class="table-controls"><label class="searchbox"><span>⌕</span><input id="search" type="search" placeholder="Search ticker" autocomplete="off"></label><select id="sort"><option value="premium_yield">Highest bid yield</option><option value="dte">Soonest expiry</option><option value="open_interest">Open interest</option><option value="iv">Implied volatility</option></select></div></div>
+        <div class="table-wrap"><table><thead><tr><th>TICKER</th><th>PEAK / THEME</th><th>SHARE PRICE</th><th>CALL CONTRACT</th><th>BID / ASK</th><th>BID YIELD</th><th>DELTA</th><th>OI / VOL</th><th></th></tr></thead><tbody id="rows"><tr><td colspan="9" class="loading">Loading watchlist…</td></tr></tbody></table></div>
+        <div class="table-footer"><span id="showing">—</span><span>Yield uses bid premium ÷ underlying share price. Review quote freshness and liquidity before acting.</span></div>
+      </section>
+      <section class="content-card summary-card"><div class="summary-heading"><h2>AI research note</h2><span class="summary-label" id="ai-summary-mode">SUMMARY</span></div><p class="summary-text" id="ai-summary-text">Waiting for the first refresh.</p></section>
+      <section class="lower-grid">
+        <article class="content-card peak-card"><div class="section-title"><div><h2>Screened symbols by peak</h2><p>Distribution in the displayed scan</p></div><span class="tiny-badge" id="screened-total">— SCREENED</span></div><div class="peak-bars" id="peak-bars"></div></article>
+        <article class="content-card note-card"><div class="section-title"><div><h2>Screening notes</h2><p>How candidate rows are selected</p></div><span class="note-icon">✳</span></div><div class="note-list"><div><span class="note-num">01</span><p><b>Nearest listed expiry</b><br>Uses the first available expiration on or after today.</p></div><div><span class="note-num">02</span><p><b>Nearest out-of-the-money call</b><br>Selects the closest call strike above the share price.</p></div><div><span class="note-num">03</span><p><b>Premium ratio, not a return forecast</b><br>Bid ÷ share price; excludes assignment, tax, and opportunity-cost assumptions.</p></div></div></article>
+      </section>
+      <footer class="footer"><span>RHTC OPTIONS MONITOR <i>·</i> INTERNAL RESEARCH</span><span id="foot-source">Data mode: demo</span></footer>
+    </div>
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+<div class="modal-backdrop" id="settings-modal" onclick="if(event.target===this)hideSettings()"><div class="modal"><button class="modal-close" onclick="hideSettings()">×</button><div class="eyebrow">CONNECTION SETTINGS</div><h2>Market data source</h2><p>This dashboard reads <code>TRADIER_API_TOKEN</code> from the server environment. The token is never sent to the browser. Without it, the interface uses clearly labeled demo values.</p><div class="setting-row"><span>Provider</span><b>Tradier Brokerage API</b></div><div class="setting-row"><span>Current mode</span><b id="modal-mode">Demo</b></div><div class="setting-hint">For live data, configure the sandbox token in Railway Variables when deployment is approved. Sandbox quotes are delayed by about 15 minutes. Refresh loads the RHTC watchlist from the server.</div><button class="refresh-btn modal-done" onclick="hideSettings()">Done</button></div></div>
+<div class="modal-backdrop" id="detail-modal" onclick="if(event.target===this)hideDetail()"><div class="modal detail-modal"><button class="modal-close" onclick="hideDetail()">×</button><div class="eyebrow">OPTION CANDIDATE</div><h2 id="detail-title">Covered-call screen</h2><p id="detail-subtitle"></p><div id="detail-content"></div><button class="refresh-btn modal-done" onclick="hideDetail()">Close</button></div></div>
+<script src="/options/static/app.js"></script>
+</body>
+</html>
