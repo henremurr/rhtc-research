@@ -1,0 +1,69 @@
+import asyncio
+import os
+import unittest
+from unittest.mock import patch
+
+import httpx
+
+from main import app
+from app.options.api import Tradier, WATCHLIST
+
+
+class OptionsRoutesTest(unittest.TestCase):
+    def request(self, method, path, **kwargs):
+        async def run():
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+                return await client.request(method, path, **kwargs)
+        return asyncio.run(run())
+
+    def test_existing_routes_and_dashboard_assets(self):
+        self.assertEqual(self.request("GET", "/health").status_code, 200)
+        page = self.request("GET", "/options/")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("/options/static/app.js", page.text)
+        self.assertEqual(self.request("GET", "/options/static/app.js").status_code, 200)
+        self.assertEqual(self.request("GET", "/options/api/health").json()["watchlist_count"], 127)
+
+    def test_demo_scan_and_summary(self):
+        with patch.dict(os.environ, {}, clear=True):
+            response = self.request("GET", "/options/api/opportunities?limit=2")
+            data = response.json()
+            self.assertEqual(data["source"], "demo")
+            self.assertEqual(data["count"], 2)
+            self.assertEqual(data["total"], len(WATCHLIST))
+            self.assertTrue(all(row["quote_time"] == "DEMO DATA" for row in data["rows"]))
+            summary = self.request("POST", "/options/api/summary", json={"source": "demo", "rows": data["rows"]})
+            self.assertEqual(summary.json()["mode"], "rules")
+            self.assertIn("Illustrative", summary.json()["summary"])
+
+    def test_tradier_selection_and_error_rows(self):
+        async def provider_get(provider, path, params):
+            if path.endswith("/quotes"):
+                return {"quotes": {"quote": {"last": 100, "change_percentage": 1}}}
+            if path.endswith("/expirations"):
+                return {"expirations": {"date": ["2099-01-01"]}}
+            return {"options": {"option": [
+                {"option_type": "call", "strike": 105, "bid": 2, "ask": 2.2, "open_interest": 80},
+                {"option_type": "call", "strike": 110, "bid": 4, "ask": 4.2, "open_interest": 90},
+            ]}}
+
+        with patch.dict(os.environ, {"TRADIER_API_TOKEN": "test-token"}, clear=True), patch.object(Tradier, "get", provider_get):
+            data = self.request("GET", "/options/api/opportunities?limit=1").json()
+        self.assertEqual(data["source"], "tradier_sandbox")
+        self.assertEqual(data["rows"][0]["strike"], 105)
+        self.assertEqual(data["rows"][0]["premium_yield"], 2)
+
+        with patch.dict(os.environ, {"TRADIER_API_TOKEN": "test-token"}, clear=True), patch.object(Tradier, "get", provider_get):
+            capped = self.request("GET", "/options/api/opportunities?limit=127").json()
+        self.assertEqual(capped["count"], 10)
+
+        async def failing_get(provider, path, params):
+            raise httpx.ConnectError("provider offline")
+        with patch.dict(os.environ, {"TRADIER_API_TOKEN": "test-token"}, clear=True), patch.object(Tradier, "get", failing_get):
+            data = self.request("GET", "/options/api/opportunities?limit=1").json()
+        self.assertEqual(data["rows"][0]["source"], "error")
+        self.assertNotIn("premium_yield", data["rows"][0])
+
+
+if __name__ == "__main__":
+    unittest.main()

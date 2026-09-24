@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 
 from app.models import BatchRequest
+from app.options.api import app as options_app
 from app.perplexity_client import analyze_one
 from app.reporting import create_pdf
 from app.three_peaks import (
@@ -26,6 +27,7 @@ app = FastAPI(
     version="1.0.0",
     description="Three Peaks batch research, classification, and PDF reporting.",
 )
+app.mount("/options", options_app)
 
 HOLDINGS_PATH = Path("config/holdings.json")
 REPORT_DIR = Path("reports")
