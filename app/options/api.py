@@ -75,6 +75,14 @@ def validate_watchlist(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
     return cleaned
 
 
+def watchlist_storage_ready() -> bool:
+    data_dir = os.getenv("RHTC_DATA_DIR")
+    volume_mount = os.getenv("RAILWAY_VOLUME_MOUNT_PATH")
+    if not data_dir or not volume_mount:
+        return False
+    return Path(data_dir).resolve() == Path(volume_mount).resolve()
+
+
 def replace_watchlist(rows: list[dict[str, str]]) -> None:
     with closing(connect_watchlist_db()) as connection:
         connection.execute("DELETE FROM symbols")
@@ -89,6 +97,8 @@ def require_watchlist_admin(token: str | None) -> None:
         raise HTTPException(503, "Set RHTC_WATCHLIST_ADMIN_TOKEN in Railway Variables before editing the shared list.")
     if not os.getenv("RHTC_DATA_DIR"):
         raise HTTPException(503, "Attach a Railway Volume at /data and set RHTC_DATA_DIR=/data before editing the shared list.")
+    if not watchlist_storage_ready():
+        raise HTTPException(503, "Railway does not report a Volume mounted at RHTC_DATA_DIR. Attach the Volume at /data and redeploy.")
     if not token or not hmac.compare_digest(token, expected):
         raise HTTPException(401, "The RHTC watchlist admin token is missing or incorrect.")
 
@@ -256,7 +266,7 @@ async def get_watchlist(peak: str | None = None, q: str | None = None):
         "rows": rows,
         "count": len(rows),
         "migration_open": bool(state and state["value"] == "1"),
-        "editing_enabled": bool(os.getenv("RHTC_WATCHLIST_ADMIN_TOKEN") and os.getenv("RHTC_DATA_DIR")),
+        "editing_enabled": bool(os.getenv("RHTC_WATCHLIST_ADMIN_TOKEN") and watchlist_storage_ready()),
     }
 
 

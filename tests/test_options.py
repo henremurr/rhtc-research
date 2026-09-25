@@ -19,7 +19,7 @@ class OptionsRoutesTest(unittest.TestCase):
 
     def request(self, method, path, **kwargs):
         async def run():
-            with patch.dict(os.environ, {"RHTC_DATA_DIR": self.data_dir.name}, clear=False):
+            with patch.dict(os.environ, {"RHTC_DATA_DIR": self.data_dir.name, "RAILWAY_VOLUME_MOUNT_PATH": self.data_dir.name}, clear=False):
                 async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
                     return await client.request(method, path, **kwargs)
         return asyncio.run(run())
