@@ -52,8 +52,12 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertLess(page.text.index('Max Last'), page.text.index('<span>Order by</span>'))
         self.assertIn('<th>CHG $</th><th>CHG %</th>', page.text)
         self.assertIn('title="Cost basis: share price × quantity from Manage symbols">COST</th>', page.text)
-        self.assertIn('colspan="12"', page.text)
-        self.assertEqual(self.request("GET", "/options/static/app.js").status_code, 200)
+        self.assertIn('colspan="11"', page.text)
+        self.assertNotIn('<th></th>', page.text)
+        script = self.request("GET", "/options/static/app.js").text
+        self.assertIn('ticker-details-btn', script)
+        self.assertIn('class="ticker"><b>${safe(r.symbol)}</b>', script)
+        self.assertNotIn('title="View chain"', script)
         css = self.request("GET", "/options/static/app.css").text
         self.assertIn('.review-limit-control{height:31px;display:flex;align-items:center;', css)
         self.assertIn('.sort-control{height:31px;display:flex;align-items:center;', css)
