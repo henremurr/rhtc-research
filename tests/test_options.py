@@ -51,6 +51,8 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertLess(page.text.index('<span>Rows</span>'), page.text.index('id="review-limit"'))
         self.assertIn('<span>Order by</span><select id="sort">', page.text)
         self.assertLess(page.text.index('Max Last'), page.text.index('<span>Order by</span>'))
+        self.assertIn('app.css?v=fit-columns-1', page.text)
+        self.assertIn('app.js?v=fit-columns-1', page.text)
         self.assertIn('<th>CHG $</th><th>CHG %</th>', page.text)
         self.assertIn('title="Cost basis: share price × quantity from Manage symbols">COST</th>', page.text)
         self.assertIn('colspan="11"', page.text)
@@ -62,10 +64,15 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('>${safe(r.symbol)}</button>', script)
         self.assertIn('title="View ${safe(r.symbol)} option details" aria-label="View ${safe(r.symbol)} option details"', script)
         self.assertNotIn('title="View chain"', script)
+        for label in ('Ticker', 'Peak', 'Last', 'Change $', 'Change %', 'Cost', 'Call contract', 'Bid / ask', 'Bid / ask yield', 'Income', 'OI / Vol'):
+            self.assertIn(f'data-label="{label}"', script)
         css = self.request("GET", "/options/static/app.css").text
         self.assertIn('.review-limit-control{height:31px;display:flex;align-items:center;', css)
         self.assertIn('.sort-control{height:31px;display:flex;align-items:center;', css)
         self.assertIn('.ticker-details-btn{padding:0;border:0;background:transparent;', css)
+        self.assertIn('table-layout:fixed', css)
+        self.assertIn('th,td{white-space:normal;overflow-wrap:anywhere}', css)
+        self.assertIn('@media(max-width:900px){.table-wrap{max-height:none;overflow:visible}', css)
         self.assertEqual(self.request("GET", "/options/api/health").json()["watchlist_count"], 129)
 
     def test_demo_scan_and_summary(self):
