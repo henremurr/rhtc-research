@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import random
 import math
+import re
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -25,6 +27,8 @@ GROUPS = {
     "Other": "HOOD PG",
 }
 WATCHLIST = [{"symbol": s, "peak": peak} for peak, symbols in GROUPS.items() for s in symbols.split()]
+VALID_PEAKS = {"AI/I", "EFM/I", "DS/I", "Other"}
+SYMBOL_PATTERN = re.compile(r"^[A-Z][A-Z0-9.-]{0,9}$")
 
 # Illustrative prices and option values are generated for UI testing only.
 # They are never labeled as live; set TRADIER_API_TOKEN to fetch provider data.
@@ -186,10 +190,30 @@ async def get_watchlist(peak: str | None = None, q: str | None = None):
 @app.get("/api/opportunities")
 async def opportunities(
     peak: str = "All Peaks", q: str = "", sort: str = "premium_yield",
-    limit: int = Query(default=25, ge=1, le=len(WATCHLIST)),
+    limit: int = Query(default=25, ge=1, le=200),
     expiration_set: int = Query(default=1, ge=1, le=4),
+    symbols: str | None = Query(default=None, max_length=16000),
 ):
-    selected = [r for r in WATCHLIST if (peak == "All Peaks" or r["peak"] == peak) and q.upper() in r["symbol"]][:limit]
+    universe = WATCHLIST
+    if symbols is not None:
+        try:
+            parsed = json.loads(symbols)
+            if not isinstance(parsed, list) or len(parsed) > 200:
+                raise ValueError
+            universe = []
+            seen = set()
+            for item in parsed:
+                if not isinstance(item, dict):
+                    raise ValueError
+                ticker = str(item.get("symbol", "")).strip().upper()
+                item_peak = str(item.get("peak", "Other"))
+                if not SYMBOL_PATTERN.fullmatch(ticker) or item_peak not in VALID_PEAKS or ticker in seen:
+                    raise ValueError
+                seen.add(ticker)
+                universe.append({"symbol": ticker, "peak": item_peak})
+        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+            raise HTTPException(400, "Invalid symbol list. Use up to 200 unique ticker and peak entries.") from exc
+    selected = [r for r in universe if (peak == "All Peaks" or r["peak"] == peak) and q.upper() in r["symbol"]][:limit]
     token = os.getenv("TRADIER_API_TOKEN")
     if token and data_source() == "tradier_sandbox":
         limit = min(limit, 10)
@@ -216,7 +240,7 @@ async def opportunities(
     for row in rows:
         row["coverage_status"] = "Needs review" if row.get("open_interest", 0) < 25 else "Liquid enough to review"
     rows.sort(key=lambda row: parse_number(row.get(sort)), reverse=(sort != "dte"))
-    return {"rows": rows, "count": len(rows), "total": len(WATCHLIST), "source": source, "as_of": utc_now().isoformat()}
+    return {"rows": rows, "count": len(rows), "total": len(universe), "source": source, "as_of": utc_now().isoformat()}
 
 
 @app.get("/api/chain/{symbol}")
@@ -224,7 +248,9 @@ async def chain(symbol: str):
     symbol = symbol.upper()
     item = next((r for r in WATCHLIST if r["symbol"] == symbol), None)
     if not item:
-        raise HTTPException(404, "Symbol is not in the RHTC watchlist")
+        if not SYMBOL_PATTERN.fullmatch(symbol):
+            raise HTTPException(404, "Invalid ticker symbol")
+        item = {"symbol": symbol, "peak": "Other"}
     token = os.getenv("TRADIER_API_TOKEN")
     if not token:
         today = date.today()
@@ -245,7 +271,7 @@ async def chain(symbol: str):
 
 class SummaryInput(BaseModel):
     source: str = "demo"
-    rows: list[dict[str, Any]] = Field(default_factory=list, max_length=127)
+    rows: list[dict[str, Any]] = Field(default_factory=list, max_length=200)
 
 
 def basic_summary(rows: list[dict[str, Any]], source: str) -> str:

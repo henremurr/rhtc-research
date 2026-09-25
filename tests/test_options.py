@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import unittest
 from unittest.mock import patch
@@ -35,6 +36,25 @@ class OptionsRoutesTest(unittest.TestCase):
             summary = self.request("POST", "/options/api/summary", json={"source": "demo", "rows": data["rows"]})
             self.assertEqual(summary.json()["mode"], "rules")
             self.assertIn("Illustrative", summary.json()["summary"])
+
+    def test_custom_symbol_list_is_used_by_dashboard_scan(self):
+        symbols = [{"symbol": "MU", "peak": "AI/I"}, {"symbol": "NEWCO", "peak": "Other"}]
+        with patch.dict(os.environ, {}, clear=True):
+            response = self.request("GET", "/options/api/opportunities", params={"limit": 200, "symbols": json.dumps(symbols)})
+            chain = self.request("GET", "/options/api/chain/NEWCO")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["total"], 2)
+        self.assertEqual({row["symbol"] for row in data["rows"]}, {"MU", "NEWCO"})
+        self.assertEqual(chain.status_code, 200)
+        self.assertEqual(chain.json()["symbol"], "NEWCO")
+
+    def test_custom_symbol_list_rejects_duplicate_or_invalid_peaks(self):
+        duplicate = [{"symbol": "MU", "peak": "AI/I"}, {"symbol": "MU", "peak": "Other"}]
+        invalid_peak = [{"symbol": "MU", "peak": "Unknown"}]
+        for symbols in (duplicate, invalid_peak):
+            response = self.request("GET", "/options/api/opportunities", params={"symbols": json.dumps(symbols)})
+            self.assertEqual(response.status_code, 400)
 
     def test_tradier_selection_and_error_rows(self):
         async def provider_get(provider, path, params):

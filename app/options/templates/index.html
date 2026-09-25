@@ -5,14 +5,14 @@
   <title>RHTC Options Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/options/static/app.css?v=dark-mode-2">
+  <link rel="stylesheet" href="/options/static/app.css?v=symbol-manager-1">
 </head>
 <body>
 <div class="shell">
   <aside class="sidebar">
     <div class="brand"><div class="brand-mark"><span>RH</span></div><div><b>ROCKING HORSE</b><small>TRADING CO. <i>·</i> RESEARCH</small></div></div>
     <div class="nav-label">WORKSPACE</div>
-    <button class="nav-item active"><span class="nav-icon">▦</span> Options overview <span class="nav-count">127</span></button>
+    <button class="nav-item active"><span class="nav-icon">▦</span> Options overview <span class="nav-count" id="count-overview">127</span></button>
     <button class="nav-item" data-filter="holdings"><span class="nav-icon">◈</span> Focus symbols</button>
     <button class="nav-item" data-filter="history"><span class="nav-icon">◷</span> Snapshot history</button>
     <div class="nav-label peaks-label">THREE PEAKS</div>
@@ -20,13 +20,13 @@
     <button class="peak-item" data-peak="AI/I"><span class="peak-dot ai"></span> AI / Infrastructure <span class="peak-count" id="count-ai">54</span></button>
     <button class="peak-item" data-peak="EFM/I"><span class="peak-dot efm"></span> Energy / Infrastructure <span class="peak-count" id="count-efm">47</span></button>
     <button class="peak-item" data-peak="DS/I"><span class="peak-dot defense"></span> Defense / Space <span class="peak-count" id="count-ds">24</span></button>
-    <button class="peak-item" data-peak="Other"><span class="peak-dot other"></span> Outside the Peaks <span class="peak-count">2</span></button>
+    <button class="peak-item" data-peak="Other"><span class="peak-dot other"></span> Outside the Peaks <span class="peak-count" id="count-other">2</span></button>
     <div class="sidebar-bottom"><div class="sync-dot"></div><div><b>Data connection</b><small id="provider-side">Demo mode · sample values</small></div><button class="settings" title="Data settings" onclick="showSettings()">⚙</button></div>
   </aside>
   <main class="main">
     <header class="topbar"><div class="crumb">RESEARCH <span>/</span> OPTIONS</div><div class="top-actions"><div class="market-state"><span class="market-dot"></span><span>US MARKET</span><span class="sep">·</span><span id="market-clock">--:-- ET</span></div><button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch to dark mode" title="Switch to dark mode">☾</button><button class="user-avatar" title="RHTC">RH</button></div></header>
     <div class="content">
-      <div class="page-head"><div><div class="eyebrow">THREE PEAKS · INCOME ENGINE</div><h1>Options overview</h1><p class="subhead">Screening ratios across the RHTC research watchlist.</p></div><div class="head-actions"><span class="source-pill" id="source-pill"><span class="source-dot"></span> DEMO DATA</span><button class="refresh-btn" id="refresh"><span class="refresh-icon">↻</span> Refresh quotes</button></div></div>
+      <div class="page-head"><div><div class="eyebrow">THREE PEAKS · INCOME ENGINE</div><h1>Options overview</h1><p class="subhead">Screening ratios across the RHTC research watchlist.</p></div><div class="head-actions"><span class="source-pill" id="source-pill"><span class="source-dot"></span> DEMO DATA</span><button class="manage-symbols-btn" id="manage-symbols" type="button">Manage symbols</button><button class="refresh-btn" id="refresh"><span class="refresh-icon">↻</span> Refresh quotes</button></div></div>
       <div class="demo-alert" id="demo-alert"><span class="alert-symbol">ⓘ</span><div><b>Preview data only</b><span>Sample values are shown. Add your Tradier API token in the deployment environment to load market data.</span></div><button onclick="this.parentElement.remove()" aria-label="Dismiss">×</button></div>
       <section class="metric-grid">
         <article class="metric-card"><div class="metric-label">WATCHLIST UNIVERSE <span class="metric-icon">◫</span></div><div class="metric-value" id="universe-value">127 <small>symbols</small></div><div class="metric-foot"><span class="gold-text">3 Peaks + 2</span><span>RHTC master list</span></div></article>
@@ -50,8 +50,9 @@
   </main>
 </div>
 <div class="toast" id="toast"></div>
+<div class="modal-backdrop" id="symbols-modal" onclick="if(event.target===this)hideSymbols()"><div class="modal symbols-modal"><button class="modal-close" onclick="hideSymbols()" aria-label="Close symbol manager">×</button><div class="eyebrow">RHTC WATCHLIST</div><h2>Manage symbols</h2><p>Change the tickers and Three Peaks category used by this dashboard. Edits are saved in this browser.</p><div class="symbol-add-form"><label for="new-symbol">Ticker<input id="new-symbol" type="text" maxlength="10" placeholder="e.g. MU" autocomplete="off"></label><label for="new-peak">Peak<select id="new-peak"><option value="AI/I">AI / Infrastructure</option><option value="EFM/I">Energy / Infrastructure</option><option value="DS/I">Defense / Space</option><option value="Other">Outside the Peaks</option></select></label><button id="add-symbol" type="button">+ Add</button></div><div class="symbol-manager-toolbar"><span id="symbol-count">— symbols</span><label class="searchbox"><span>⌕</span><input id="symbol-filter" type="search" placeholder="Find a ticker" autocomplete="off"></label></div><div id="symbol-list" class="symbol-list"></div><div id="symbol-error" class="symbol-error" role="status" aria-live="polite"></div><button class="refresh-btn modal-done" onclick="hideSymbols()">Done</button><div class="clear-fix"></div></div></div>
 <div class="modal-backdrop" id="settings-modal" onclick="if(event.target===this)hideSettings()"><div class="modal"><button class="modal-close" onclick="hideSettings()">×</button><div class="eyebrow">CONNECTION SETTINGS</div><h2>Market data source</h2><p>This dashboard reads <code>TRADIER_API_TOKEN</code> from the server environment. The token is never sent to the browser. Without it, the interface uses clearly labeled demo values.</p><div class="setting-row"><span>Provider</span><b>Tradier Brokerage API</b></div><div class="setting-row"><span>Current mode</span><b id="modal-mode">Demo</b></div><div class="setting-hint">For live data, configure the sandbox token in Railway Variables when deployment is approved. Sandbox quotes are delayed by about 15 minutes. Refresh loads the RHTC watchlist from the server.</div><button class="refresh-btn modal-done" onclick="hideSettings()">Done</button></div></div>
 <div class="modal-backdrop" id="detail-modal" onclick="if(event.target===this)hideDetail()"><div class="modal detail-modal"><button class="modal-close" onclick="hideDetail()">×</button><div class="eyebrow">OPTION CANDIDATE</div><h2 id="detail-title">Covered-call screen</h2><p id="detail-subtitle"></p><div class="chain-pager"><button id="chain-prev" type="button" aria-label="Previous expiration">‹ Previous</button><span id="chain-page">Expiration set 1 of 4</span><button id="chain-next" type="button" aria-label="Next expiration">Next ›</button></div><div id="detail-content"></div><button class="refresh-btn modal-done" onclick="hideDetail()">Close</button></div></div>
-<script src="/options/static/app.js?v=dark-mode-1"></script>
+<script src="/options/static/app.js?v=symbol-manager-1"></script>
 </body>
 </html>
