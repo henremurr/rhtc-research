@@ -1,5 +1,6 @@
 import asyncio
 import os
+import sqlite3
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -29,6 +30,8 @@ class OptionsRoutesTest(unittest.TestCase):
         page = self.request("GET", "/options/")
         self.assertEqual(page.status_code, 200)
         self.assertIn("/options/static/app.js", page.text)
+        self.assertIn('id="new-share-price"', page.text)
+        self.assertIn('id="new-quantity"', page.text)
         self.assertEqual(self.request("GET", "/options/static/app.js").status_code, 200)
         self.assertEqual(self.request("GET", "/options/api/health").json()["watchlist_count"], 129)
 
@@ -45,7 +48,10 @@ class OptionsRoutesTest(unittest.TestCase):
             self.assertIn("Illustrative", summary.json()["summary"])
 
     def test_watchlist_updates_persist_across_requests_and_drive_dashboard_scan(self):
-        symbols = [{"symbol": "MU", "peak": "AI/I"}, {"symbol": "NEWCO", "peak": "Other"}]
+        symbols = [
+            {"symbol": "MU", "peak": "AI/I", "share_price": 128.5, "quantity": 100},
+            {"symbol": "NEWCO", "peak": "Other", "share_price": None, "quantity": 4},
+        ]
         with patch.dict(os.environ, {"RHTC_WATCHLIST_ADMIN_TOKEN": "test-admin"}, clear=False):
             saved = self.request("PUT", "/options/api/watchlist", headers={"X-RHTC-Admin-Token": "test-admin"}, json={"rows": symbols})
             response = self.request("GET", "/options/api/opportunities?limit=200")
@@ -61,11 +67,28 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual(chain.status_code, 200)
         self.assertEqual(chain.json()["symbol"], "NEWCO")
 
+    def test_watchlist_migrates_old_database_and_allows_blank_holding_values(self):
+        db_path = os.path.join(self.data_dir.name, "rhtc_symbols.sqlite3")
+        with sqlite3.connect(db_path) as connection:
+            connection.execute("CREATE TABLE symbols (position INTEGER PRIMARY KEY, symbol TEXT NOT NULL UNIQUE, peak TEXT NOT NULL)")
+            connection.execute("CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            connection.execute("INSERT INTO symbols VALUES (0, 'MU', 'AI/I')")
+            connection.execute("INSERT INTO app_state VALUES ('watchlist_seeded', '1')")
+            connection.execute("INSERT INTO app_state VALUES ('legacy_import_open', '0')")
+        old_rows = self.request("GET", "/options/api/watchlist").json()["rows"]
+        self.assertEqual(old_rows, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None}])
+        with patch.dict(os.environ, {"RHTC_WATCHLIST_ADMIN_TOKEN": "test-admin"}, clear=False):
+            saved = self.request("PUT", "/options/api/watchlist", headers={"X-RHTC-Admin-Token": "test-admin"}, json={"rows": [{"symbol": "MU", "peak": "AI/I", "share_price": "", "quantity": ""}]})
+            reloaded = self.request("GET", "/options/api/watchlist").json()["rows"]
+        self.assertEqual(saved.status_code, 200)
+        self.assertEqual(reloaded, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None}])
+
     def test_custom_symbol_list_rejects_duplicate_or_invalid_peaks(self):
         duplicate = [{"symbol": "MU", "peak": "AI/I"}, {"symbol": "MU", "peak": "Other"}]
         invalid_peak = [{"symbol": "MU", "peak": "Unknown"}]
+        negative_quantity = [{"symbol": "MU", "peak": "AI/I", "quantity": -1}]
         with patch.dict(os.environ, {"RHTC_WATCHLIST_ADMIN_TOKEN": "test-admin"}, clear=False):
-            for symbols in (duplicate, invalid_peak):
+            for symbols in (duplicate, invalid_peak, negative_quantity):
                 response = self.request("PUT", "/options/api/watchlist", headers={"X-RHTC-Admin-Token": "test-admin"}, json={"rows": symbols})
                 self.assertEqual(response.status_code, 400)
             unauthorized = self.request("PUT", "/options/api/watchlist", json={"rows": []})

@@ -43,27 +43,51 @@ def connect_watchlist_db() -> sqlite3.Connection:
     connection = sqlite3.connect(watchlist_db_path(), timeout=15)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA journal_mode=WAL")
-    connection.execute("CREATE TABLE IF NOT EXISTS symbols (position INTEGER PRIMARY KEY, symbol TEXT NOT NULL UNIQUE, peak TEXT NOT NULL)")
+    connection.execute("CREATE TABLE IF NOT EXISTS symbols (position INTEGER PRIMARY KEY, symbol TEXT NOT NULL UNIQUE, peak TEXT NOT NULL, share_price REAL, quantity REAL)")
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(symbols)")}
+    if "share_price" not in columns:
+        connection.execute("ALTER TABLE symbols ADD COLUMN share_price REAL")
+    if "quantity" not in columns:
+        connection.execute("ALTER TABLE symbols ADD COLUMN quantity REAL")
     connection.execute("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
     connection.execute("INSERT OR IGNORE INTO app_state(key, value) VALUES ('watchlist_seeded', '0')")
     seeded = connection.execute("SELECT value FROM app_state WHERE key = 'watchlist_seeded'").fetchone()
     if seeded and seeded["value"] != "1":
-        connection.executemany("INSERT INTO symbols(position, symbol, peak) VALUES (?, ?, ?)", [(i, row["symbol"], row["peak"]) for i, row in enumerate(WATCHLIST)])
+        connection.executemany("INSERT INTO symbols(position, symbol, peak, share_price, quantity) VALUES (?, ?, ?, ?, ?)", [(i, row["symbol"], row["peak"], None, None) for i, row in enumerate(WATCHLIST)])
         connection.execute("INSERT OR REPLACE INTO app_state(key, value) VALUES ('watchlist_seeded', '1')")
     connection.execute("INSERT OR IGNORE INTO app_state(key, value) VALUES ('legacy_import_open', '1')")
     connection.commit()
     return connection
 
 
-def read_watchlist() -> list[dict[str, str]]:
+def read_watchlist() -> list[dict[str, Any]]:
     with closing(connect_watchlist_db()) as connection:
-        return [dict(row) for row in connection.execute("SELECT symbol, peak FROM symbols ORDER BY position")]
+        return [dict(row) for row in connection.execute("SELECT symbol, peak, share_price, quantity FROM symbols ORDER BY position")]
 
 
-def validate_watchlist(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
+def optional_nonnegative_number(item: dict[str, Any], field: str) -> int | float | None:
+    value = item.get(field)
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = value.strip()
+        if value == "":
+            return None
+    if isinstance(value, bool):
+        raise HTTPException(400, f"{field.replace('_', ' ').title()} must be a non-negative number or blank.")
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise HTTPException(400, f"{field.replace('_', ' ').title()} must be a non-negative number or blank.")
+    if not math.isfinite(number) or number < 0:
+        raise HTTPException(400, f"{field.replace('_', ' ').title()} must be a non-negative number or blank.")
+    return int(number) if number.is_integer() else number
+
+
+def validate_watchlist(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if len(rows) > 200:
         raise HTTPException(400, "The watchlist can contain at most 200 symbols.")
-    cleaned: list[dict[str, str]] = []
+    cleaned: list[dict[str, Any]] = []
     seen: set[str] = set()
     for item in rows:
         ticker = str(item.get("symbol", "")).strip().upper()
@@ -71,7 +95,12 @@ def validate_watchlist(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
         if not SYMBOL_PATTERN.fullmatch(ticker) or peak not in VALID_PEAKS or ticker in seen:
             raise HTTPException(400, "Use unique ticker symbols and a valid Three Peaks category.")
         seen.add(ticker)
-        cleaned.append({"symbol": ticker, "peak": peak})
+        cleaned.append({
+            "symbol": ticker,
+            "peak": peak,
+            "share_price": optional_nonnegative_number(item, "share_price"),
+            "quantity": optional_nonnegative_number(item, "quantity"),
+        })
     return cleaned
 
 
@@ -83,10 +112,13 @@ def watchlist_storage_ready() -> bool:
     return Path(data_dir).resolve() == Path(volume_mount).resolve()
 
 
-def replace_watchlist(rows: list[dict[str, str]]) -> None:
+def replace_watchlist(rows: list[dict[str, Any]]) -> None:
     with closing(connect_watchlist_db()) as connection:
         connection.execute("DELETE FROM symbols")
-        connection.executemany("INSERT INTO symbols(position, symbol, peak) VALUES (?, ?, ?)", [(i, row["symbol"], row["peak"]) for i, row in enumerate(rows)])
+        connection.executemany(
+            "INSERT INTO symbols(position, symbol, peak, share_price, quantity) VALUES (?, ?, ?, ?, ?)",
+            [(i, row["symbol"], row["peak"], row["share_price"], row["quantity"]) for i, row in enumerate(rows)],
+        )
         connection.execute("INSERT OR REPLACE INTO app_state(key, value) VALUES ('legacy_import_open', '0')")
         connection.commit()
 
