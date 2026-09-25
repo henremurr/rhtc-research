@@ -68,6 +68,7 @@
 .symbol-manager-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;color:#929ca6;font:9px var(--mono)}
 .symbol-manager-toolbar .searchbox{height:30px;min-width:160px}
 .symbol-manager-toolbar .searchbox input{width:100%;font-size:10px}
+.symbol-peak-filter{height:30px;max-width:210px;min-width:145px;padding:0 8px;border:1px solid #e1e6ea;border-radius:4px;background:#fff;color:#596778;font:10px var(--sans)}
 .symbol-list{max-height:42vh;overflow-y:auto;border-top:1px solid #edf0f2;border-bottom:1px solid #edf0f2}
 .symbol-entry{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:48px;padding:7px 4px;border-bottom:1px solid #f0f2f4}
 .symbol-entry:last-child{border-bottom:0}
@@ -86,12 +87,12 @@
 :root[data-theme="dark"] .manage-symbols-btn:hover,:root[data-theme="dark"] .symbol-actions button:hover,:root[data-theme="dark"] .symbol-entry.editing button:hover{background:#2b3743;border-color:#b89a57;color:#f0d78d}
 :root[data-theme="dark"] .symbol-add-form{background:#151e28;border-color:#303b48}
 :root[data-theme="dark"] .symbol-add-form label,:root[data-theme="dark"] .symbol-manager-toolbar,:root[data-theme="dark"] .symbol-description small,:root[data-theme="dark"] .symbol-empty{color:#9eabb9}
-:root[data-theme="dark"] .symbol-add-form input,:root[data-theme="dark"] .symbol-add-form select,:root[data-theme="dark"] .symbol-edit-ticker,:root[data-theme="dark"] .symbol-edit-peak{background:#111a24;color:#dce4ed;border-color:#394654}
+:root[data-theme="dark"] .symbol-add-form input,:root[data-theme="dark"] .symbol-add-form select,:root[data-theme="dark"] .symbol-edit-ticker,:root[data-theme="dark"] .symbol-edit-peak,:root[data-theme="dark"] .symbol-peak-filter{background:#111a24;color:#dce4ed;border-color:#394654}
 :root[data-theme="dark"] .symbol-add-form>button{background:#d0b775;color:#17202a;border-color:#d0b775}
 :root[data-theme="dark"] .symbol-list,:root[data-theme="dark"] .symbol-entry{border-color:#303b48}
 :root[data-theme="dark"] .symbol-description b{color:#e3e9f0}
 :root[data-theme="dark"] .symbol-actions button.danger{color:#e19a94}
 :root[data-theme="dark"] .symbol-actions button.danger:hover{background:#392b2b;border-color:#80524f}
-@media(max-width:600px){.symbols-modal{padding:20px 16px}.symbol-add-form{grid-template-columns:1fr 1fr}.symbol-add-form>button{grid-column:1/-1}.symbol-entry.editing{grid-template-columns:1fr 1fr}.symbol-entry.editing button{height:30px}.symbol-manager-toolbar .searchbox{min-width:130px}}
+@media(max-width:600px){.symbols-modal{padding:20px 16px}.symbol-add-form{grid-template-columns:1fr 1fr}.symbol-add-form>button{grid-column:1/-1}.symbol-entry.editing{grid-template-columns:1fr 1fr}.symbol-entry.editing button{height:30px}.symbol-manager-toolbar{flex-wrap:wrap}.symbol-manager-toolbar .searchbox{min-width:130px;flex:1}.symbol-peak-filter{max-width:none;flex:1}}
 .import-browser-list{margin:-7px 0 12px;padding:7px 10px;border:1px solid #d8cfb8;border-radius:4px;background:#faf7ef;color:#816b3f;font:10px var(--sans);cursor:pointer}
 :root[data-theme="dark"] .import-browser-list{background:#302a20;color:#dfc77f;border-color:#51452d}
