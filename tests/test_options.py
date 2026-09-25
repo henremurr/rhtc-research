@@ -32,6 +32,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn("/options/static/app.js", page.text)
         self.assertIn('id="new-share-price"', page.text)
         self.assertIn('id="new-quantity"', page.text)
+        self.assertIn('<option value="income">Highest income</option>', page.text)
         self.assertEqual(self.request("GET", "/options/static/app.js").status_code, 200)
         self.assertEqual(self.request("GET", "/options/api/health").json()["watchlist_count"], 129)
 
@@ -46,6 +47,14 @@ class OptionsRoutesTest(unittest.TestCase):
             summary = self.request("POST", "/options/api/summary", json={"source": "demo", "rows": data["rows"]})
             self.assertEqual(summary.json()["mode"], "rules")
             self.assertIn("Illustrative", summary.json()["summary"])
+
+    def test_income_sort_orders_rows_by_bid_ask_midpoint_times_last(self):
+        with patch.dict(os.environ, {}, clear=True):
+            response = self.request("GET", "/options/api/opportunities?limit=200&sort=income")
+        self.assertEqual(response.status_code, 200)
+        rows = response.json()["rows"]
+        incomes = [((row["bid"] + row["ask"]) / 2) * row["price"] for row in rows]
+        self.assertEqual(incomes, sorted(incomes, reverse=True))
 
     def test_watchlist_updates_persist_across_requests_and_drive_dashboard_scan(self):
         symbols = [

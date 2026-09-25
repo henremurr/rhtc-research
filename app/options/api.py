@@ -343,7 +343,13 @@ async def opportunities(
         source = data_source()
     for row in rows:
         row["coverage_status"] = "Needs review" if row.get("open_interest", 0) < 25 else "Liquid enough to review"
-    rows.sort(key=lambda row: parse_number(row.get(sort)), reverse=(sort != "dte"))
+    if sort == "income":
+        rows.sort(
+            key=lambda row: ((parse_number(row.get("bid")) + parse_number(row.get("ask"))) / 2) * parse_number(row.get("price")),
+            reverse=True,
+        )
+    else:
+        rows.sort(key=lambda row: parse_number(row.get(sort)), reverse=(sort != "dte"))
     return {"rows": rows, "count": len(rows), "total": len(universe), "source": source, "as_of": utc_now().isoformat()}
 
 
