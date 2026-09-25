@@ -315,9 +315,15 @@ async def opportunities(
     peak: str = "All Peaks", q: str = "", sort: str = "premium_yield",
     limit: int = Query(default=25, ge=1, le=200),
     expiration_set: int = Query(default=1, ge=1, le=4),
+    holdings_only: bool = False,
 ):
     universe = read_watchlist()
-    selected = [r for r in universe if (peak == "All Peaks" or r["peak"] == peak) and q.upper() in r["symbol"]][:limit]
+    selected = [
+        r for r in universe
+        if (peak == "All Peaks" or r["peak"] == peak)
+        and q.upper() in r["symbol"]
+        and (not holdings_only or (r.get("share_price") is not None and r.get("quantity") is not None))
+    ][:limit]
     token = os.getenv("TRADIER_API_TOKEN")
     if not token:
         days = (12, 19, 26, 33)

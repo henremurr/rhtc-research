@@ -34,6 +34,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('id="new-quantity"', page.text)
         self.assertIn('<option value="income">Highest income</option>', page.text)
         self.assertIn('id="review-limit"', page.text)
+        self.assertIn('data-peak="Holdings"', page.text)
         self.assertIn('id="sidebar-toggle"', page.text)
         self.assertIn('aria-label="Collapse navigation"', page.text)
         self.assertIn('<h1>Covered Call Screening Tool</h1>', page.text)
@@ -68,12 +69,13 @@ class OptionsRoutesTest(unittest.TestCase):
 
     def test_watchlist_updates_persist_across_requests_and_drive_dashboard_scan(self):
         symbols = [
-            {"symbol": "MU", "peak": "AI/I", "share_price": 128.5, "quantity": 100},
             {"symbol": "NEWCO", "peak": "Other", "share_price": None, "quantity": 4},
+            {"symbol": "MU", "peak": "AI/I", "share_price": 128.5, "quantity": 100},
         ]
         with patch.dict(os.environ, {"RHTC_WATCHLIST_ADMIN_TOKEN": "test-admin"}, clear=False):
             saved = self.request("PUT", "/options/api/watchlist", headers={"X-RHTC-Admin-Token": "test-admin"}, json={"rows": symbols})
             response = self.request("GET", "/options/api/opportunities?limit=200")
+            holdings = self.request("GET", "/options/api/opportunities?holdings_only=true&limit=1")
             chain = self.request("GET", "/options/api/chain/NEWCO")
             reloaded = self.request("GET", "/options/api/watchlist")
         self.assertEqual(saved.status_code, 200)
@@ -84,6 +86,8 @@ class OptionsRoutesTest(unittest.TestCase):
         by_symbol = {row["symbol"]: row for row in data["rows"]}
         self.assertEqual((by_symbol["MU"]["share_price"], by_symbol["MU"]["quantity"]), (128.5, 100))
         self.assertEqual((by_symbol["NEWCO"]["share_price"], by_symbol["NEWCO"]["quantity"]), (None, 4))
+        self.assertEqual(holdings.json()["count"], 1)
+        self.assertEqual(holdings.json()["rows"][0]["symbol"], "MU")
         self.assertEqual(reloaded.json()["rows"], symbols)
         self.assertFalse(reloaded.json()["migration_open"])
         self.assertEqual(chain.status_code, 200)
