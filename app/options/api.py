@@ -106,7 +106,7 @@ class Tradier:
         future = sorted(d for d in dates if d and date.fromisoformat(d) >= today)
         if not future:
             raise ValueError("No future expiration returned")
-        expiries = future[:max(1, min(count, 4))]
+        expiry_window = future[:max(1, min(max(count, 12), len(future)))]
 
         async def nearest_call(expiry: str) -> dict[str, Any] | None:
             cdata = await self.get("/markets/options/chains", {"symbol": symbol, "expiration": expiry, "greeks": "true"})
@@ -136,10 +136,15 @@ class Tradier:
                 "source": "tradier",
             }
 
-        rows = await asyncio.gather(*(nearest_call(expiry) for expiry in expiries))
-        rows = [row for row in rows if row is not None]
+        rows = []
+        for expiry in expiry_window:
+            row = await nearest_call(expiry)
+            if row is not None:
+                rows.append(row)
+            if len(rows) >= count:
+                break
         if not rows:
-            raise ValueError("No out-of-the-money calls returned for the next four expirations")
+            raise ValueError("No out-of-the-money calls returned for the next available expirations")
         return rows
 
     async def one(self, symbol: str, peak: str) -> dict[str, Any]:

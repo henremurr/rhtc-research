@@ -65,13 +65,15 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertNotIn("premium_yield", data["rows"][0])
 
     def test_chain_pages_through_four_expiration_sets(self):
-        expiries = ["2099-01-01", "2099-01-08", "2099-01-15", "2099-01-22"]
+        expiries = ["2099-01-01", "2099-01-08", "2099-01-15", "2099-01-22", "2099-01-29", "2099-02-05"]
 
         async def provider_get(provider, path, params):
             if path.endswith("/quotes"):
                 return {"quotes": {"quote": {"last": 100, "change_percentage": 1}}}
             if path.endswith("/expirations"):
                 return {"expirations": {"date": expiries}}
+            if params["expiration"] in expiries[:2]:
+                return {"options": {"option": []}}
             return {"options": {"option": [
                 {"option_type": "call", "strike": 105, "bid": 2, "ask": 2.2, "open_interest": 80},
                 {"option_type": "call", "strike": 110, "bid": 4, "ask": 4.2, "open_interest": 90},
@@ -83,7 +85,7 @@ class OptionsRoutesTest(unittest.TestCase):
         data = response.json()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(data["source"], "tradier_sandbox")
-        self.assertEqual([row["expiry"] for row in data["rows"]], expiries)
+        self.assertEqual([row["expiry"] for row in data["rows"]], expiries[2:])
         self.assertTrue(all(row["strike"] == 105 for row in data["rows"]))
 
     def test_demo_chain_has_four_pages(self):
