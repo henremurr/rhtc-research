@@ -147,8 +147,11 @@ class Tradier:
             raise ValueError("No out-of-the-money calls returned for the next available expirations")
         return rows
 
-    async def one(self, symbol: str, peak: str) -> dict[str, Any]:
-        return (await self.option_sets(symbol, peak, count=1))[0]
+    async def one(self, symbol: str, peak: str, expiration_set: int = 1) -> dict[str, Any]:
+        rows = await self.option_sets(symbol, peak, count=expiration_set)
+        if len(rows) < expiration_set:
+            raise ValueError(f"No out-of-the-money call found for expiration set {expiration_set}")
+        return rows[expiration_set - 1]
 
     async def close(self) -> None:
         await self.client.aclose()
@@ -184,6 +187,7 @@ async def get_watchlist(peak: str | None = None, q: str | None = None):
 async def opportunities(
     peak: str = "All Peaks", q: str = "", sort: str = "premium_yield",
     limit: int = Query(default=25, ge=1, le=len(WATCHLIST)),
+    expiration_set: int = Query(default=1, ge=1, le=4),
 ):
     selected = [r for r in WATCHLIST if (peak == "All Peaks" or r["peak"] == peak) and q.upper() in r["symbol"]][:limit]
     token = os.getenv("TRADIER_API_TOKEN")
@@ -191,7 +195,9 @@ async def opportunities(
         limit = min(limit, 10)
         selected = selected[:limit]
     if not token:
-        rows = [demo_row(r["symbol"], r["peak"]) for r in selected]
+        days = (12, 19, 26, 33)
+        expiry = date.today() + timedelta(days=days[expiration_set - 1])
+        rows = [demo_row(r["symbol"], r["peak"], expiry_override=expiry, seed_offset=expiration_set - 1) for r in selected]
         source = "demo"
     else:
         provider = Tradier(token)
@@ -199,7 +205,7 @@ async def opportunities(
         async def guarded(item: dict[str, str]):
             async with sem:
                 try:
-                    return await provider.one(item["symbol"], item["peak"])
+                    return await provider.one(item["symbol"], item["peak"], expiration_set)
                 except Exception as exc:
                     return {**item, "error": str(exc), "source": "error"}
         try:

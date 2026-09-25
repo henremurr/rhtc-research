@@ -96,6 +96,32 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual([row["dte"] for row in rows], [12, 19, 26, 33])
         self.assertTrue(all(row["strike"] > row["price"] for row in rows))
 
+    def test_main_table_can_select_each_demo_expiration_set(self):
+        with patch.dict(os.environ, {}, clear=True):
+            first = self.request("GET", "/options/api/opportunities?limit=1&expiration_set=1").json()["rows"][0]
+            third = self.request("GET", "/options/api/opportunities?limit=1&expiration_set=3").json()["rows"][0]
+        self.assertNotEqual(first["expiry"], third["expiry"])
+        self.assertEqual(third["dte"], 26)
+
+    def test_tradier_main_table_selects_requested_expiration(self):
+        expiries = ["2099-01-01", "2099-01-08", "2099-01-15", "2099-01-22"]
+
+        async def provider_get(provider, path, params):
+            if path.endswith("/quotes"):
+                return {"quotes": {"quote": {"last": 100}}}
+            if path.endswith("/expirations"):
+                return {"expirations": {"date": expiries}}
+            strike = 100 + 5 * (expiries.index(params["expiration"]) + 1)
+            return {"options": {"option": [{
+                "option_type": "call", "strike": strike, "bid": 2,
+                "ask": 2.2, "open_interest": 80,
+            }]}}
+
+        with patch.dict(os.environ, {"TRADIER_API_TOKEN": "test-token"}, clear=True), patch.object(Tradier, "get", provider_get):
+            data = self.request("GET", "/options/api/opportunities?limit=1&expiration_set=3").json()
+        self.assertEqual(data["rows"][0]["expiry"], expiries[2])
+        self.assertEqual(data["rows"][0]["strike"], 115)
+
 
 if __name__ == "__main__":
     unittest.main()
