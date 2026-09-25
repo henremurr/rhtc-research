@@ -33,6 +33,9 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('id="new-share-price"', page.text)
         self.assertIn('id="new-quantity"', page.text)
         self.assertIn('<option value="income">Highest income</option>', page.text)
+        self.assertIn('id="review-limit"', page.text)
+        self.assertIn('<option value="10" selected>10</option>', page.text)
+        self.assertIn('<option value="200">All</option>', page.text)
         self.assertEqual(self.request("GET", "/options/static/app.js").status_code, 200)
         self.assertEqual(self.request("GET", "/options/api/health").json()["watchlist_count"], 129)
 
@@ -129,8 +132,8 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual(data["rows"][0]["premium_yield"], 2)
 
         with patch.dict(os.environ, {"TRADIER_API_TOKEN": "test-token"}, clear=True), patch.object(Tradier, "get", provider_get):
-            capped = self.request("GET", "/options/api/opportunities?limit=127").json()
-        self.assertEqual(capped["count"], 10)
+            expanded = self.request("GET", "/options/api/opportunities?limit=127").json()
+        self.assertEqual(expanded["count"], 127)
 
         async def failing_get(provider, path, params):
             raise httpx.ConnectError("provider offline")

@@ -319,9 +319,6 @@ async def opportunities(
     universe = read_watchlist()
     selected = [r for r in universe if (peak == "All Peaks" or r["peak"] == peak) and q.upper() in r["symbol"]][:limit]
     token = os.getenv("TRADIER_API_TOKEN")
-    if token and data_source() == "tradier_sandbox":
-        limit = min(limit, 10)
-        selected = selected[:limit]
     if not token:
         days = (12, 19, 26, 33)
         expiry = date.today() + timedelta(days=days[expiration_set - 1])
