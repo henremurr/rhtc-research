@@ -64,6 +64,36 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual(data["rows"][0]["source"], "error")
         self.assertNotIn("premium_yield", data["rows"][0])
 
+    def test_chain_pages_through_four_expiration_sets(self):
+        expiries = ["2099-01-01", "2099-01-08", "2099-01-15", "2099-01-22"]
+
+        async def provider_get(provider, path, params):
+            if path.endswith("/quotes"):
+                return {"quotes": {"quote": {"last": 100, "change_percentage": 1}}}
+            if path.endswith("/expirations"):
+                return {"expirations": {"date": expiries}}
+            return {"options": {"option": [
+                {"option_type": "call", "strike": 105, "bid": 2, "ask": 2.2, "open_interest": 80},
+                {"option_type": "call", "strike": 110, "bid": 4, "ask": 4.2, "open_interest": 90},
+            ]}}
+
+        with patch.dict(os.environ, {"TRADIER_API_TOKEN": "test-token"}, clear=True), patch.object(Tradier, "get", provider_get):
+            response = self.request("GET", "/options/api/chain/MU")
+
+        data = response.json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(data["source"], "tradier_sandbox")
+        self.assertEqual([row["expiry"] for row in data["rows"]], expiries)
+        self.assertTrue(all(row["strike"] == 105 for row in data["rows"]))
+
+    def test_demo_chain_has_four_pages(self):
+        with patch.dict(os.environ, {}, clear=True):
+            response = self.request("GET", "/options/api/chain/MU")
+        rows = response.json()["rows"]
+        self.assertEqual(len(rows), 4)
+        self.assertEqual([row["dte"] for row in rows], [12, 19, 26, 33])
+        self.assertTrue(all(row["strike"] > row["price"] for row in rows))
+
 
 if __name__ == "__main__":
     unittest.main()

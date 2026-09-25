@@ -42,12 +42,19 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def demo_row(symbol: str, peak: str) -> dict[str, Any]:
+def demo_row(
+    symbol: str,
+    peak: str,
+    *,
+    expiry_override: date | None = None,
+    seed_offset: int = 0,
+) -> dict[str, Any]:
     seed = sum((i + 1) * ord(c) for i, c in enumerate(symbol))
+    seed += seed_offset * 997
     rng = random.Random(seed)
     price = SEED_PRICES.get(symbol, round(rng.uniform(8, 250), 2))
     strike = math.ceil((price * (1 + rng.uniform(.015, .09))) / 5) * 5
-    expiry = date.today() + timedelta(days=rng.choice([12, 19, 26, 33, 40]))
+    expiry = expiry_override or date.today() + timedelta(days=rng.choice([12, 19, 26, 33, 40]))
     bid = round(max(.05, price * rng.uniform(.006, .035)), 2)
     ask = round(bid + rng.uniform(.03, .30), 2)
     return {
@@ -81,7 +88,7 @@ class Tradier:
         response.raise_for_status()
         return response.json()
 
-    async def one(self, symbol: str, peak: str) -> dict[str, Any]:
+    async def option_sets(self, symbol: str, peak: str, count: int = 4) -> list[dict[str, Any]]:
         qdata = await self.get("/markets/quotes", {"symbols": symbol})
         quote = qdata.get("quotes", {}).get("quote", {})
         if isinstance(quote, list):
@@ -99,34 +106,44 @@ class Tradier:
         future = sorted(d for d in dates if d and date.fromisoformat(d) >= today)
         if not future:
             raise ValueError("No future expiration returned")
-        expiry = future[0]
+        expiries = future[:max(1, min(count, 4))]
 
-        cdata = await self.get("/markets/options/chains", {"symbol": symbol, "expiration": expiry, "greeks": "true"})
-        contracts = cdata.get("options", {}).get("option", [])
-        if isinstance(contracts, dict):
-            contracts = [contracts]
-        calls = [c for c in contracts if c.get("option_type") == "call" and parse_number(c.get("strike")) > price]
-        calls = [c for c in calls if parse_number(c.get("bid")) >= 0]
-        if not calls:
-            raise ValueError("No out-of-the-money calls returned for nearest expiry")
-        selected = min(calls, key=lambda c: parse_number(c.get("strike")) - price)
-        bid, ask = parse_number(selected.get("bid")), parse_number(selected.get("ask"))
-        g = selected.get("greeks") or {}
-        exp = date.fromisoformat(expiry)
-        return {
-            "symbol": symbol, "peak": peak, "price": price,
-            "change_pct": parse_number(quote.get("change_percentage")),
-            "strike": parse_number(selected.get("strike")), "expiry": expiry,
-            "dte": (exp - today).days, "bid": bid, "ask": ask,
-            "mid": round((bid + ask) / 2, 2), "premium_yield": round(bid / price * 100, 2),
-            "delta": parse_number(g.get("delta")), "iv": (parse_number(g.get("mid_iv")) * 100 if abs(parse_number(g.get("mid_iv"))) <= 5 else parse_number(g.get("mid_iv"))),
-            "open_interest": int(parse_number(selected.get("open_interest"))),
-            "volume": int(parse_number(selected.get("volume"))),
-            "bid_size": int(parse_number(selected.get("bidsize"))), "ask_size": int(parse_number(selected.get("asksize"))),
-            "quote_time": quote.get("trade_date") or quote.get("ask_date") or "provider timestamp unavailable",
-            "contract": selected.get("symbol", f"{symbol} {expiry} ${selected.get('strike')} C"),
-            "source": "tradier",
-        }
+        async def nearest_call(expiry: str) -> dict[str, Any] | None:
+            cdata = await self.get("/markets/options/chains", {"symbol": symbol, "expiration": expiry, "greeks": "true"})
+            contracts = cdata.get("options", {}).get("option", [])
+            if isinstance(contracts, dict):
+                contracts = [contracts]
+            calls = [c for c in contracts if c.get("option_type") == "call" and parse_number(c.get("strike")) > price]
+            calls = [c for c in calls if parse_number(c.get("bid")) >= 0]
+            if not calls:
+                return None
+            selected = min(calls, key=lambda c: parse_number(c.get("strike")) - price)
+            bid, ask = parse_number(selected.get("bid")), parse_number(selected.get("ask"))
+            g = selected.get("greeks") or {}
+            exp = date.fromisoformat(expiry)
+            return {
+                "symbol": symbol, "peak": peak, "price": price,
+                "change_pct": parse_number(quote.get("change_percentage")),
+                "strike": parse_number(selected.get("strike")), "expiry": expiry,
+                "dte": (exp - today).days, "bid": bid, "ask": ask,
+                "mid": round((bid + ask) / 2, 2), "premium_yield": round(bid / price * 100, 2),
+                "delta": parse_number(g.get("delta")), "iv": (parse_number(g.get("mid_iv")) * 100 if abs(parse_number(g.get("mid_iv"))) <= 5 else parse_number(g.get("mid_iv"))),
+                "open_interest": int(parse_number(selected.get("open_interest"))),
+                "volume": int(parse_number(selected.get("volume"))),
+                "bid_size": int(parse_number(selected.get("bidsize"))), "ask_size": int(parse_number(selected.get("asksize"))),
+                "quote_time": quote.get("trade_date") or quote.get("ask_date") or "provider timestamp unavailable",
+                "contract": selected.get("symbol", f"{symbol} {expiry} ${selected.get('strike')} C"),
+                "source": "tradier",
+            }
+
+        rows = await asyncio.gather(*(nearest_call(expiry) for expiry in expiries))
+        rows = [row for row in rows if row is not None]
+        if not rows:
+            raise ValueError("No out-of-the-money calls returned for the next four expirations")
+        return rows
+
+    async def one(self, symbol: str, peak: str) -> dict[str, Any]:
+        return (await self.option_sets(symbol, peak, count=1))[0]
 
     async def close(self) -> None:
         await self.client.aclose()
@@ -199,11 +216,16 @@ async def chain(symbol: str):
         raise HTTPException(404, "Symbol is not in the RHTC watchlist")
     token = os.getenv("TRADIER_API_TOKEN")
     if not token:
-        return {"symbol": symbol, "source": "demo", "message": "Set TRADIER_API_TOKEN to load a live chain.", "rows": [demo_row(symbol, item["peak"])]}
+        today = date.today()
+        rows = [
+            demo_row(symbol, item["peak"], expiry_override=today + timedelta(days=12 + 7 * i), seed_offset=i)
+            for i in range(4)
+        ]
+        return {"symbol": symbol, "source": "demo", "message": "Illustrative preview values; not live market data.", "rows": rows}
     provider = Tradier(token)
     try:
-        base = await provider.one(symbol, item["peak"])
-        return {"symbol": symbol, "source": data_source(), "rows": [base]}
+        rows = await provider.option_sets(symbol, item["peak"], count=4)
+        return {"symbol": symbol, "source": data_source(), "rows": rows}
     except Exception as exc:
         raise HTTPException(502, f"Market data request failed: {exc}") from exc
     finally:
