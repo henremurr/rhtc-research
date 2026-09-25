@@ -45,7 +45,9 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertNotIn('<span>Calls to review</span>', page.text)
         self.assertIn('<option value="10" selected>10</option>', page.text)
         self.assertIn('<option value="200">All</option>', page.text)
+        self.assertIn('<th>CHG $</th><th>CHG %</th>', page.text)
         self.assertIn('title="Cost basis: share price × quantity from Manage symbols">COST</th>', page.text)
+        self.assertIn('colspan="12"', page.text)
         self.assertEqual(self.request("GET", "/options/static/app.js").status_code, 200)
         self.assertEqual(self.request("GET", "/options/api/health").json()["watchlist_count"], 129)
 
@@ -57,6 +59,8 @@ class OptionsRoutesTest(unittest.TestCase):
             self.assertEqual(data["count"], 2)
             self.assertEqual(data["total"], len(WATCHLIST))
             self.assertTrue(all(row["quote_time"] == "DEMO DATA" for row in data["rows"]))
+            self.assertTrue(all(isinstance(row["change"], (int, float)) for row in data["rows"]))
+            self.assertTrue(all(isinstance(row["change_pct"], (int, float)) for row in data["rows"]))
             summary = self.request("POST", "/options/api/summary", json={"source": "demo", "rows": data["rows"]})
             self.assertEqual(summary.json()["mode"], "rules")
             self.assertIn("Illustrative", summary.json()["summary"])
@@ -150,7 +154,7 @@ class OptionsRoutesTest(unittest.TestCase):
         expiries = [(date.today() + timedelta(days=days)).isoformat() for days in (3, 10, 17, 22)]
         async def provider_get(provider, path, params):
             if path.endswith("/quotes"):
-                return {"quotes": {"quote": {"last": 100, "change_percentage": 1}}}
+                return {"quotes": {"quote": {"last": 100, "change": 1.25, "change_percentage": 1.27}}}
             if path.endswith("/expirations"):
                 return {"expirations": {"date": expiries}}
             return {"options": {"option": [
@@ -163,6 +167,8 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual(data["source"], "tradier_sandbox")
         self.assertEqual(data["rows"][0]["strike"], 105)
         self.assertEqual(data["rows"][0]["premium_yield"], 2)
+        self.assertEqual(data["rows"][0]["change"], 1.25)
+        self.assertEqual(data["rows"][0]["change_pct"], 1.27)
 
         with patch.dict(os.environ, {"TRADIER_API_TOKEN": "test-token"}, clear=True), patch.object(Tradier, "get", provider_get):
             expanded = self.request("GET", "/options/api/opportunities?limit=127").json()

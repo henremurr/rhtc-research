@@ -161,12 +161,14 @@ def demo_row(
     seed += seed_offset * 997
     rng = random.Random(seed)
     price = SEED_PRICES.get(symbol, round(rng.uniform(8, 250), 2))
+    change_pct = round(rng.uniform(-3.4, 4.1), 2)
+    change = round(price * change_pct / (100 + change_pct), 2)
     strike = math.ceil((price * (1 + rng.uniform(.015, .09))) / 5) * 5
     expiry = expiry_override or date.today() + timedelta(days=rng.choice([12, 19, 26, 33, 40]))
     bid = round(max(.05, price * rng.uniform(.006, .035)), 2)
     ask = round(bid + rng.uniform(.03, .30), 2)
     return {
-        "symbol": symbol, "peak": peak, "price": price, "change_pct": round(rng.uniform(-3.4, 4.1), 2),
+        "symbol": symbol, "peak": peak, "price": price, "change": change, "change_pct": change_pct,
         "strike": strike, "expiry": expiry.isoformat(), "dte": (expiry - date.today()).days,
         "bid": bid, "ask": ask, "mid": round((bid + ask) / 2, 2),
         "premium_yield": round(bid / price * 100, 2), "delta": round(rng.uniform(.18, .42), 2),
@@ -238,6 +240,7 @@ class Tradier:
             exp = date.fromisoformat(expiry)
             return {
                 "symbol": symbol, "peak": peak, "price": price,
+                "change": parse_number(quote.get("change"), price - parse_number(quote.get("prevclose"), price)),
                 "change_pct": parse_number(quote.get("change_percentage")),
                 "strike": parse_number(selected.get("strike")), "expiry": expiry,
                 "dte": (exp - today).days, "bid": bid, "ask": ask,
