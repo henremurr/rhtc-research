@@ -105,3 +105,6 @@
 .peak-dot.holdings{background:#b9944a}
 
 .change-value{font:10px var(--mono)}.change-value.positive{color:var(--green)}.change-value.negative{color:var(--red)}
+
+.sort-control{height:31px;display:flex;align-items:center;gap:5px;color:#87919c;font:9px var(--mono);white-space:nowrap}.sort-control select{min-width:150px}
+@media(max-width:760px){.sort-control{flex:1;min-width:0}.sort-control select{width:auto;flex:1;min-width:0;max-width:none}}
