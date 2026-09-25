@@ -51,12 +51,12 @@ class OptionsRoutesTest(unittest.TestCase):
             self.assertEqual(summary.json()["mode"], "rules")
             self.assertIn("Illustrative", summary.json()["summary"])
 
-    def test_income_sort_orders_rows_by_bid_ask_midpoint_times_last(self):
+    def test_income_sort_orders_rows_by_bid_ask_midpoint_times_contract_multiplier(self):
         with patch.dict(os.environ, {}, clear=True):
             response = self.request("GET", "/options/api/opportunities?limit=200&sort=income")
         self.assertEqual(response.status_code, 200)
         rows = response.json()["rows"]
-        incomes = [((row["bid"] + row["ask"]) / 2) * row["price"] for row in rows]
+        incomes = [((row["bid"] + row["ask"]) / 2) * 100 for row in rows]
         self.assertEqual(incomes, sorted(incomes, reverse=True))
 
     def test_watchlist_updates_persist_across_requests_and_drive_dashboard_scan(self):

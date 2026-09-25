@@ -342,7 +342,7 @@ async def opportunities(
         row["coverage_status"] = "Needs review" if row.get("open_interest", 0) < 25 else "Liquid enough to review"
     if sort == "income":
         rows.sort(
-            key=lambda row: ((parse_number(row.get("bid")) + parse_number(row.get("ask"))) / 2) * parse_number(row.get("price")),
+            key=lambda row: ((parse_number(row.get("bid")) + parse_number(row.get("ask"))) / 2) * 100,
             reverse=True,
         )
     else:
