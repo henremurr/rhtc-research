@@ -45,10 +45,15 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertNotIn('<span>Calls to review</span>', page.text)
         self.assertIn('<option value="10" selected>10</option>', page.text)
         self.assertIn('<option value="200">All</option>', page.text)
+        self.assertIn('<span>Rows</span><select id="review-limit" aria-label="Rows to display">', page.text)
+        self.assertLess(page.text.index('id="search"'), page.text.index('<span>Rows</span>'))
+        self.assertLess(page.text.index('<span>Rows</span>'), page.text.index('id="review-limit"'))
         self.assertIn('<th>CHG $</th><th>CHG %</th>', page.text)
         self.assertIn('title="Cost basis: share price × quantity from Manage symbols">COST</th>', page.text)
         self.assertIn('colspan="12"', page.text)
         self.assertEqual(self.request("GET", "/options/static/app.js").status_code, 200)
+        css = self.request("GET", "/options/static/app.css").text
+        self.assertIn('.review-limit-control{height:31px;display:flex;align-items:center;', css)
         self.assertEqual(self.request("GET", "/options/api/health").json()["watchlist_count"], 129)
 
     def test_demo_scan_and_summary(self):
