@@ -1,5 +1,5 @@
 const $ = (s) => document.querySelector(s);
-const state = {peak:'All Peaks', query:'', sort:'premium_yield', rows:[], source:'demo', mode:'overview', selectedOnly:false, costOnly:false, expirationSet:1, scanLimit:10, watchlist:[], editingSymbol:null, migrationOpen:false, editingEnabled:false, legacyWatchlist:null};
+const state = {peak:'All Peaks', query:'', sort:'income', rows:[], source:'demo', mode:'overview', selectedOnly:false, costOnly:false, expirationSet:1, scanLimit:10, watchlist:[], editingSymbol:null, migrationOpen:false, editingEnabled:false, legacyWatchlist:null};
 const DTE_WINDOWS=['0–7 DTE','8–14 DTE','15–21 DTE','22+ DTE'];
 const WATCHLIST_KEY='rhtc-options-watchlist';
 const peakMeta = {'AI/I':{label:'AI / Infrastructure',cls:'ai'},'EFM/I':{label:'Energy / Infrastructure',cls:'efm'},'DS/I':{label:'Defense / Space',cls:'defense'},'Other':{label:'Outside the Peaks',cls:'other'}};

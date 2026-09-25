@@ -345,7 +345,7 @@ async def update_watchlist(data: WatchlistUpdate, x_rhtc_admin_token: str | None
 
 @app.get("/api/opportunities")
 async def opportunities(
-    peak: str = "All Peaks", q: str = "", sort: str = "premium_yield",
+    peak: str = "All Peaks", q: str = "", sort: str = "income",
     limit: int = Query(default=25, ge=1, le=200),
     expiration_set: int = Query(default=1, ge=1, le=4),
     holdings_only: bool = False,

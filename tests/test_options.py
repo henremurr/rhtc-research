@@ -33,7 +33,8 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn("/options/static/app.js", page.text)
         self.assertIn('id="new-share-price"', page.text)
         self.assertIn('id="new-quantity"', page.text)
-        self.assertIn('<option value="income">Highest income</option>', page.text)
+        self.assertIn('<option value="income" selected>Highest income</option>', page.text)
+        self.assertLess(page.text.index('<option value="income" selected>'), page.text.index('<option value="premium_yield">'))
         self.assertIn('id="review-limit"', page.text)
         self.assertIn('id="max-last"', page.text)
         self.assertIn('data-peak="Holdings"', page.text)
@@ -55,6 +56,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('colspan="11"', page.text)
         self.assertNotIn('<th></th>', page.text)
         script = self.request("GET", "/options/static/app.js").text
+        self.assertIn("sort:'income'", script)
         self.assertIn('ticker-details-btn', script)
         self.assertIn('<button class="ticker-details-btn" title="View ${safe(r.symbol)} option details"', script)
         self.assertIn('>${safe(r.symbol)}</button>', script)
@@ -99,7 +101,7 @@ class OptionsRoutesTest(unittest.TestCase):
 
     def test_income_sort_orders_rows_by_bid_ask_midpoint_times_contract_multiplier(self):
         with patch.dict(os.environ, {}, clear=True):
-            response = self.request("GET", "/options/api/opportunities?limit=200&sort=income")
+            response = self.request("GET", "/options/api/opportunities?limit=200")
         self.assertEqual(response.status_code, 200)
         rows = response.json()["rows"]
         incomes = [((row["bid"] + row["ask"]) / 2) * 100 for row in rows]
