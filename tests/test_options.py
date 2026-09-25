@@ -34,6 +34,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('id="new-quantity"', page.text)
         self.assertIn('<option value="income">Highest income</option>', page.text)
         self.assertIn('id="review-limit"', page.text)
+        self.assertNotIn('<span>Calls to review</span>', page.text)
         self.assertIn('<option value="10" selected>10</option>', page.text)
         self.assertIn('<option value="200">All</option>', page.text)
         self.assertIn('title="Cost basis: share price × quantity from Manage symbols">COST</th>', page.text)
