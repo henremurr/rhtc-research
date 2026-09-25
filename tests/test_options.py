@@ -9,7 +9,7 @@ from unittest.mock import patch
 import httpx
 
 from main import app
-from app.options.api import Tradier, WATCHLIST
+from app.options.api import Tradier, WATCHLIST, format_option_contract
 
 
 class OptionsRoutesTest(unittest.TestCase):
@@ -61,6 +61,7 @@ class OptionsRoutesTest(unittest.TestCase):
             self.assertTrue(all(row["quote_time"] == "DEMO DATA" for row in data["rows"]))
             self.assertTrue(all(isinstance(row["change"], (int, float)) for row in data["rows"]))
             self.assertTrue(all(isinstance(row["change_pct"], (int, float)) for row in data["rows"]))
+            self.assertTrue(all(row["contract"] == f"{row['expiry'].replace('-', '')}-{row['strike']:.1f}" for row in data["rows"]))
             summary = self.request("POST", "/options/api/summary", json={"source": "demo", "rows": data["rows"]})
             self.assertEqual(summary.json()["mode"], "rules")
             self.assertIn("Illustrative", summary.json()["summary"])
@@ -169,6 +170,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual(data["rows"][0]["premium_yield"], 2)
         self.assertEqual(data["rows"][0]["change"], 1.25)
         self.assertEqual(data["rows"][0]["change_pct"], 1.27)
+        self.assertEqual(data["rows"][0]["contract"], f"{expiries[0].replace('-', '')}-105.0")
 
         with patch.dict(os.environ, {"TRADIER_API_TOKEN": "test-token"}, clear=True), patch.object(Tradier, "get", provider_get):
             expanded = self.request("GET", "/options/api/opportunities?limit=127").json()
@@ -180,6 +182,11 @@ class OptionsRoutesTest(unittest.TestCase):
             data = self.request("GET", "/options/api/opportunities?limit=1").json()
         self.assertEqual(data["rows"][0]["source"], "error")
         self.assertNotIn("premium_yield", data["rows"][0])
+
+    def test_contract_label_strips_unneeded_strike_zeros_and_keeps_decimal(self):
+        self.assertEqual(format_option_contract("2026-09-05", 105), "20260905-105.0")
+        self.assertEqual(format_option_contract("2026-09-05", "105.500"), "20260905-105.5")
+        self.assertEqual(format_option_contract("2026-09-05", "105.250"), "20260905-105.25")
 
     def test_chain_pages_through_four_expiration_sets(self):
         expiries = [(date.today() + timedelta(days=days)).isoformat() for days in (2, 5, 10, 17, 22)]

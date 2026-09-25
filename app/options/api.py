@@ -9,6 +9,7 @@ import math
 import re
 import sqlite3
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -150,6 +151,16 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def format_option_contract(expiry: str | date, strike: Any) -> str:
+    expiry_date = expiry if isinstance(expiry, date) else date.fromisoformat(expiry)
+    strike_text = format(Decimal(str(strike)).normalize(), "f")
+    if "." in strike_text:
+        strike_text = strike_text.rstrip("0").rstrip(".")
+    if "." not in strike_text:
+        strike_text += ".0"
+    return f"{expiry_date:%Y%m%d}-{strike_text}"
+
+
 def demo_row(
     symbol: str,
     peak: str,
@@ -174,7 +185,7 @@ def demo_row(
         "premium_yield": round(bid / price * 100, 2), "delta": round(rng.uniform(.18, .42), 2),
         "iv": round(rng.uniform(28, 92), 1), "open_interest": rng.choice([0, 18, 74, 135, 420, 1270]),
         "volume": rng.choice([0, 2, 17, 53, 186]), "bid_size": rng.choice([1, 3, 10, 22]), "ask_size": rng.choice([1, 4, 12, 25]), "quote_time": "DEMO DATA",
-        "contract": f"{symbol} {expiry:%b %d} ${strike:g} C", "source": "demo",
+        "contract": format_option_contract(expiry, strike), "source": "demo",
     }
 
 
@@ -250,7 +261,7 @@ class Tradier:
                 "volume": int(parse_number(selected.get("volume"))),
                 "bid_size": int(parse_number(selected.get("bidsize"))), "ask_size": int(parse_number(selected.get("asksize"))),
                 "quote_time": quote.get("trade_date") or quote.get("ask_date") or "provider timestamp unavailable",
-                "contract": selected.get("symbol", f"{symbol} {expiry} ${selected.get('strike')} C"),
+                "contract": format_option_contract(expiry, selected.get("strike")),
                 "source": "tradier",
             }
 
