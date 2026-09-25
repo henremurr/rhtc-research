@@ -3,6 +3,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from datetime import date, timedelta
 from unittest.mock import patch
 
 import httpx
@@ -146,11 +147,12 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual(reloaded.json()["count"], 0)
 
     def test_tradier_selection_and_error_rows(self):
+        expiries = [(date.today() + timedelta(days=days)).isoformat() for days in (3, 10, 17, 22)]
         async def provider_get(provider, path, params):
             if path.endswith("/quotes"):
                 return {"quotes": {"quote": {"last": 100, "change_percentage": 1}}}
             if path.endswith("/expirations"):
-                return {"expirations": {"date": ["2099-01-01"]}}
+                return {"expirations": {"date": expiries}}
             return {"options": {"option": [
                 {"option_type": "call", "strike": 105, "bid": 2, "ask": 2.2, "open_interest": 80},
                 {"option_type": "call", "strike": 110, "bid": 4, "ask": 4.2, "open_interest": 90},
@@ -174,14 +176,14 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertNotIn("premium_yield", data["rows"][0])
 
     def test_chain_pages_through_four_expiration_sets(self):
-        expiries = ["2099-01-01", "2099-01-08", "2099-01-15", "2099-01-22", "2099-01-29", "2099-02-05"]
+        expiries = [(date.today() + timedelta(days=days)).isoformat() for days in (2, 5, 10, 17, 22)]
 
         async def provider_get(provider, path, params):
             if path.endswith("/quotes"):
                 return {"quotes": {"quote": {"last": 100, "change_percentage": 1}}}
             if path.endswith("/expirations"):
                 return {"expirations": {"date": expiries}}
-            if params["expiration"] in expiries[:2]:
+            if params["expiration"] == expiries[0]:
                 return {"options": {"option": []}}
             return {"options": {"option": [
                 {"option_type": "call", "strike": 105, "bid": 2, "ask": 2.2, "open_interest": 80},
@@ -194,7 +196,9 @@ class OptionsRoutesTest(unittest.TestCase):
         data = response.json()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(data["source"], "tradier_sandbox")
-        self.assertEqual([row["expiry"] for row in data["rows"]], expiries[2:])
+        self.assertEqual([row["expiry"] for row in data["rows"]], expiries[1:])
+        self.assertEqual([row["dte"] for row in data["rows"]], [5, 10, 17, 22])
+        self.assertEqual([row["dte_window"] for row in data["rows"]], ["0-7 DTE", "8-14 DTE", "15-21 DTE", "22+ DTE"])
         self.assertTrue(all(row["strike"] == 105 for row in data["rows"]))
 
     def test_demo_chain_has_four_pages(self):
@@ -202,7 +206,7 @@ class OptionsRoutesTest(unittest.TestCase):
             response = self.request("GET", "/options/api/chain/MU")
         rows = response.json()["rows"]
         self.assertEqual(len(rows), 4)
-        self.assertEqual([row["dte"] for row in rows], [12, 19, 26, 33])
+        self.assertEqual([row["dte"] for row in rows], [7, 14, 21, 28])
         self.assertTrue(all(row["strike"] > row["price"] for row in rows))
 
     def test_main_table_can_select_each_demo_expiration_set(self):
@@ -210,10 +214,10 @@ class OptionsRoutesTest(unittest.TestCase):
             first = self.request("GET", "/options/api/opportunities?limit=1&expiration_set=1").json()["rows"][0]
             third = self.request("GET", "/options/api/opportunities?limit=1&expiration_set=3").json()["rows"][0]
         self.assertNotEqual(first["expiry"], third["expiry"])
-        self.assertEqual(third["dte"], 26)
+        self.assertEqual(third["dte"], 21)
 
     def test_tradier_main_table_selects_requested_expiration(self):
-        expiries = ["2099-01-01", "2099-01-08", "2099-01-15", "2099-01-22"]
+        expiries = [(date.today() + timedelta(days=days)).isoformat() for days in (3, 10, 17, 22)]
 
         async def provider_get(provider, path, params):
             if path.endswith("/quotes"):
@@ -230,6 +234,28 @@ class OptionsRoutesTest(unittest.TestCase):
             data = self.request("GET", "/options/api/opportunities?limit=1&expiration_set=3").json()
         self.assertEqual(data["rows"][0]["expiry"], expiries[2])
         self.assertEqual(data["rows"][0]["strike"], 115)
+        self.assertEqual(data["rows"][0]["dte"], 17)
+
+    def test_tradier_expiration_sets_keep_empty_dte_windows_visible(self):
+        expiries = [(date.today() + timedelta(days=days)).isoformat() for days in (10, 17, 22)]
+
+        async def provider_get(provider, path, params):
+            if path.endswith("/quotes"):
+                return {"quotes": {"quote": {"last": 100}}}
+            if path.endswith("/expirations"):
+                return {"expirations": {"date": expiries}}
+            return {"options": {"option": [{
+                "option_type": "call", "strike": 105, "bid": 2, "ask": 2.2,
+                "open_interest": 80,
+            }]}}
+
+        with patch.dict(os.environ, {"TRADIER_API_TOKEN": "test-token"}, clear=True), patch.object(Tradier, "get", provider_get):
+            chain = self.request("GET", "/options/api/chain/MU").json()["rows"]
+            first = self.request("GET", "/options/api/opportunities?limit=1&expiration_set=1").json()["rows"][0]
+        self.assertEqual(chain[0]["dte_window"], "0-7 DTE")
+        self.assertIn("No listed expiration", chain[0]["error"])
+        self.assertEqual(chain[1]["dte"], 10)
+        self.assertIn("No listed expiration", first["error"])
 
 
 if __name__ == "__main__":

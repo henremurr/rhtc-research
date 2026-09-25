@@ -184,6 +184,8 @@ def parse_number(value: Any, default: float = 0.0) -> float:
 
 
 class Tradier:
+    DTE_WINDOWS = ((0, 7), (8, 14), (15, 21), (22, None))
+
     def __init__(self, token: str):
         self.client = httpx.AsyncClient(
             base_url=os.getenv("TRADIER_BASE_URL", "https://sandbox.tradier.com/v1"),
@@ -196,7 +198,7 @@ class Tradier:
         response.raise_for_status()
         return response.json()
 
-    async def option_sets(self, symbol: str, peak: str, count: int = 4) -> list[dict[str, Any]]:
+    async def option_sets(self, symbol: str, peak: str, count: int = 4, only_set: int | None = None) -> list[dict[str, Any]]:
         qdata = await self.get("/markets/quotes", {"symbols": symbol})
         quote = qdata.get("quotes", {}).get("quote", {})
         if isinstance(quote, list):
@@ -211,10 +213,15 @@ class Tradier:
         if isinstance(dates, str):
             dates = [dates]
         today = date.today()
-        future = sorted(d for d in dates if d and date.fromisoformat(d) >= today)
-        if not future:
-            raise ValueError("No future expiration returned")
-        expiry_window = future[:max(1, min(max(count, 12), len(future)))]
+        future = []
+        for expiry in dates:
+            try:
+                dte = (date.fromisoformat(expiry) - today).days
+            except (TypeError, ValueError):
+                continue
+            if dte >= 0:
+                future.append((expiry, dte))
+        future.sort(key=lambda item: item[1])
 
         async def nearest_call(expiry: str) -> dict[str, Any] | None:
             cdata = await self.get("/markets/options/chains", {"symbol": symbol, "expiration": expiry, "greeks": "true"})
@@ -245,21 +252,33 @@ class Tradier:
             }
 
         rows = []
-        for expiry in expiry_window:
-            row = await nearest_call(expiry)
-            if row is not None:
+        selected_windows = (
+            [self.DTE_WINDOWS[only_set - 1]]
+            if only_set is not None
+            else self.DTE_WINDOWS[:max(1, min(count, 4))]
+        )
+        for minimum, maximum in selected_windows:
+            label = f"{minimum}+ DTE" if maximum is None else f"{minimum}-{maximum} DTE"
+            eligible = [expiry for expiry, dte in future if dte >= minimum and (maximum is None or dte <= maximum)]
+            row = None
+            for expiry in eligible:
+                row = await nearest_call(expiry)
+                if row is not None:
+                    break
+            if row is None:
+                reason = f"No listed expiration in {label} window" if not eligible else f"No out-of-the-money call found in {label} window"
+                rows.append({"symbol": symbol, "peak": peak, "dte_window": label, "error": reason, "source": "error"})
+            else:
+                row["dte_window"] = label
                 rows.append(row)
-            if len(rows) >= count:
-                break
-        if not rows:
-            raise ValueError("No out-of-the-money calls returned for the next available expirations")
         return rows
 
     async def one(self, symbol: str, peak: str, expiration_set: int = 1) -> dict[str, Any]:
-        rows = await self.option_sets(symbol, peak, count=expiration_set)
-        if len(rows) < expiration_set:
-            raise ValueError(f"No out-of-the-money call found for expiration set {expiration_set}")
-        return rows[expiration_set - 1]
+        rows = await self.option_sets(symbol, peak, only_set=expiration_set)
+        row = rows[0]
+        if row.get("error"):
+            raise ValueError(row["error"])
+        return row
 
     async def close(self) -> None:
         await self.client.aclose()
@@ -327,7 +346,7 @@ async def opportunities(
     ][:limit]
     token = os.getenv("TRADIER_API_TOKEN")
     if not token:
-        days = (12, 19, 26, 33)
+        days = (7, 14, 21, 28)
         expiry = date.today() + timedelta(days=days[expiration_set - 1])
         rows = [demo_row(r["symbol"], r["peak"], expiry_override=expiry, seed_offset=expiration_set - 1) for r in selected]
         source = "demo"
@@ -380,8 +399,8 @@ async def chain(symbol: str):
     if not token:
         today = date.today()
         rows = [
-            demo_row(symbol, item["peak"], expiry_override=today + timedelta(days=12 + 7 * i), seed_offset=i)
-            for i in range(4)
+            demo_row(symbol, item["peak"], expiry_override=today + timedelta(days=days), seed_offset=i)
+            for i, days in enumerate((7, 14, 21, 28))
         ]
         return {"symbol": symbol, "source": "demo", "message": "Illustrative preview values; not live market data.", "rows": rows}
     provider = Tradier(token)
