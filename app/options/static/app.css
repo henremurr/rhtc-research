@@ -93,3 +93,5 @@
 :root[data-theme="dark"] .symbol-actions button.danger{color:#e19a94}
 :root[data-theme="dark"] .symbol-actions button.danger:hover{background:#392b2b;border-color:#80524f}
 @media(max-width:600px){.symbols-modal{padding:20px 16px}.symbol-add-form{grid-template-columns:1fr 1fr}.symbol-add-form>button{grid-column:1/-1}.symbol-entry.editing{grid-template-columns:1fr 1fr}.symbol-entry.editing button{height:30px}.symbol-manager-toolbar .searchbox{min-width:130px}}
+.import-browser-list{margin:-7px 0 12px;padding:7px 10px;border:1px solid #d8cfb8;border-radius:4px;background:#faf7ef;color:#816b3f;font:10px var(--sans);cursor:pointer}
+:root[data-theme="dark"] .import-browser-list{background:#302a20;color:#dfc77f;border-color:#51452d}

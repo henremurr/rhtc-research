@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 import asyncio
-import json
+from contextlib import closing
+import hmac
 import os
 import random
 import math
 import re
+import sqlite3
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -23,12 +25,72 @@ app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 GROUPS = {
     "AI/I": "AMD ARM INTC NVDA QCOM ADI ALAB AVGO MRVL ON STM AMAT AMKR ASML GFS TER TSM MU SNDK STX WDC AAOI COHR CSCO GLW LITE SMTC AMZN CRWV DELL GOOG IBM MSFT NBIS ORCL RXT SMCI CRM PATH SNOW CRWD NET OKTA PANW INFQ IONQ QBTS QUBT RGTI AAPL META TSLA CBRS NVTS",
     "EFM/I": "CEG NNE OKLO SMR XE CCJ FISN LEU STDN UEC UUUU EQNR LNG VG ENB EPD ET KMI WMB BP COP CVX MTDR OXY SHEL TTE XOM BKR HAL BW GEV TLN BE FLNC ELMT MP SIVR USAR APD DOW LYB EROK LB TPL HNRG GFUZ TE",
-    "DS/I": "LMT NOC RTX LDOS LHX AVAV AVEX KTOS ONDS RCAT UMAC AMTM PLTR BA CW GE HII FLY RDW RKLB SPCX ASTS PL YSS",
+    "DS/I": "LMT NOC RTX LDOS LHX AVAV AVEX KTOS ONDS RCAT UMAC AMTM PLTR BA CW GE HII FLY RDW RKLB SPCX ASTS PL YSS XTND OPTX",
     "Other": "HOOD PG",
 }
 WATCHLIST = [{"symbol": s, "peak": peak} for peak, symbols in GROUPS.items() for s in symbols.split()]
 VALID_PEAKS = {"AI/I", "EFM/I", "DS/I", "Other"}
 SYMBOL_PATTERN = re.compile(r"^[A-Z][A-Z0-9.-]{0,9}$")
+
+
+def watchlist_db_path() -> Path:
+    data_dir = Path(os.getenv("RHTC_DATA_DIR", str(BASE.parent.parent / "data")))
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir / "rhtc_symbols.sqlite3"
+
+
+def connect_watchlist_db() -> sqlite3.Connection:
+    connection = sqlite3.connect(watchlist_db_path(), timeout=15)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA journal_mode=WAL")
+    connection.execute("CREATE TABLE IF NOT EXISTS symbols (position INTEGER PRIMARY KEY, symbol TEXT NOT NULL UNIQUE, peak TEXT NOT NULL)")
+    connection.execute("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    connection.execute("INSERT OR IGNORE INTO app_state(key, value) VALUES ('watchlist_seeded', '0')")
+    seeded = connection.execute("SELECT value FROM app_state WHERE key = 'watchlist_seeded'").fetchone()
+    if seeded and seeded["value"] != "1":
+        connection.executemany("INSERT INTO symbols(position, symbol, peak) VALUES (?, ?, ?)", [(i, row["symbol"], row["peak"]) for i, row in enumerate(WATCHLIST)])
+        connection.execute("INSERT OR REPLACE INTO app_state(key, value) VALUES ('watchlist_seeded', '1')")
+    connection.execute("INSERT OR IGNORE INTO app_state(key, value) VALUES ('legacy_import_open', '1')")
+    connection.commit()
+    return connection
+
+
+def read_watchlist() -> list[dict[str, str]]:
+    with closing(connect_watchlist_db()) as connection:
+        return [dict(row) for row in connection.execute("SELECT symbol, peak FROM symbols ORDER BY position")]
+
+
+def validate_watchlist(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
+    if len(rows) > 200:
+        raise HTTPException(400, "The watchlist can contain at most 200 symbols.")
+    cleaned: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in rows:
+        ticker = str(item.get("symbol", "")).strip().upper()
+        peak = str(item.get("peak", "Other"))
+        if not SYMBOL_PATTERN.fullmatch(ticker) or peak not in VALID_PEAKS or ticker in seen:
+            raise HTTPException(400, "Use unique ticker symbols and a valid Three Peaks category.")
+        seen.add(ticker)
+        cleaned.append({"symbol": ticker, "peak": peak})
+    return cleaned
+
+
+def replace_watchlist(rows: list[dict[str, str]]) -> None:
+    with closing(connect_watchlist_db()) as connection:
+        connection.execute("DELETE FROM symbols")
+        connection.executemany("INSERT INTO symbols(position, symbol, peak) VALUES (?, ?, ?)", [(i, row["symbol"], row["peak"]) for i, row in enumerate(rows)])
+        connection.execute("INSERT OR REPLACE INTO app_state(key, value) VALUES ('legacy_import_open', '0')")
+        connection.commit()
+
+
+def require_watchlist_admin(token: str | None) -> None:
+    expected = os.getenv("RHTC_WATCHLIST_ADMIN_TOKEN")
+    if not expected:
+        raise HTTPException(503, "Set RHTC_WATCHLIST_ADMIN_TOKEN in Railway Variables before editing the shared list.")
+    if not os.getenv("RHTC_DATA_DIR"):
+        raise HTTPException(503, "Attach a Railway Volume at /data and set RHTC_DATA_DIR=/data before editing the shared list.")
+    if not token or not hmac.compare_digest(token, expected):
+        raise HTTPException(401, "The RHTC watchlist admin token is missing or incorrect.")
 
 # Illustrative prices and option values are generated for UI testing only.
 # They are never labeled as live; set TRADIER_API_TOKEN to fetch provider data.
@@ -166,9 +228,13 @@ async def home():
     return FileResponse(BASE / "templates" / "index.html")
 
 
+class WatchlistUpdate(BaseModel):
+    rows: list[dict[str, Any]] = Field(default_factory=list, max_length=200)
+
+
 @app.get("/api/health")
 async def health():
-    return {"ok": True, "provider": data_source(), "watchlist_count": len(WATCHLIST)}
+    return {"ok": True, "provider": data_source(), "watchlist_count": len(read_watchlist())}
 
 
 def data_source() -> str:
@@ -179,11 +245,26 @@ def data_source() -> str:
 
 @app.get("/api/watchlist")
 async def get_watchlist(peak: str | None = None, q: str | None = None):
-    rows = WATCHLIST
+    rows = read_watchlist()
     if peak and peak != "All Peaks":
         rows = [r for r in rows if r["peak"] == peak]
     if q:
         rows = [r for r in rows if q.upper() in r["symbol"]]
+    with closing(connect_watchlist_db()) as connection:
+        state = connection.execute("SELECT value FROM app_state WHERE key = 'legacy_import_open'").fetchone()
+    return {
+        "rows": rows,
+        "count": len(rows),
+        "migration_open": bool(state and state["value"] == "1"),
+        "editing_enabled": bool(os.getenv("RHTC_WATCHLIST_ADMIN_TOKEN") and os.getenv("RHTC_DATA_DIR")),
+    }
+
+
+@app.put("/api/watchlist")
+async def update_watchlist(data: WatchlistUpdate, x_rhtc_admin_token: str | None = Header(default=None)):
+    require_watchlist_admin(x_rhtc_admin_token)
+    rows = validate_watchlist(data.rows)
+    replace_watchlist(rows)
     return {"rows": rows, "count": len(rows)}
 
 
@@ -192,27 +273,8 @@ async def opportunities(
     peak: str = "All Peaks", q: str = "", sort: str = "premium_yield",
     limit: int = Query(default=25, ge=1, le=200),
     expiration_set: int = Query(default=1, ge=1, le=4),
-    symbols: str | None = Query(default=None, max_length=16000),
 ):
-    universe = WATCHLIST
-    if symbols is not None:
-        try:
-            parsed = json.loads(symbols)
-            if not isinstance(parsed, list) or len(parsed) > 200:
-                raise ValueError
-            universe = []
-            seen = set()
-            for item in parsed:
-                if not isinstance(item, dict):
-                    raise ValueError
-                ticker = str(item.get("symbol", "")).strip().upper()
-                item_peak = str(item.get("peak", "Other"))
-                if not SYMBOL_PATTERN.fullmatch(ticker) or item_peak not in VALID_PEAKS or ticker in seen:
-                    raise ValueError
-                seen.add(ticker)
-                universe.append({"symbol": ticker, "peak": item_peak})
-        except (ValueError, TypeError, json.JSONDecodeError) as exc:
-            raise HTTPException(400, "Invalid symbol list. Use up to 200 unique ticker and peak entries.") from exc
+    universe = read_watchlist()
     selected = [r for r in universe if (peak == "All Peaks" or r["peak"] == peak) and q.upper() in r["symbol"]][:limit]
     token = os.getenv("TRADIER_API_TOKEN")
     if token and data_source() == "tradier_sandbox":
@@ -246,7 +308,7 @@ async def opportunities(
 @app.get("/api/chain/{symbol}")
 async def chain(symbol: str):
     symbol = symbol.upper()
-    item = next((r for r in WATCHLIST if r["symbol"] == symbol), None)
+    item = next((r for r in read_watchlist() if r["symbol"] == symbol), None)
     if not item:
         if not SYMBOL_PATTERN.fullmatch(symbol):
             raise HTTPException(404, "Invalid ticker symbol")

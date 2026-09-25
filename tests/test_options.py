@@ -1,6 +1,6 @@
 import asyncio
-import json
 import os
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -11,10 +11,17 @@ from app.options.api import Tradier, WATCHLIST
 
 
 class OptionsRoutesTest(unittest.TestCase):
+    def setUp(self):
+        self.data_dir = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.data_dir.cleanup()
+
     def request(self, method, path, **kwargs):
         async def run():
-            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-                return await client.request(method, path, **kwargs)
+            with patch.dict(os.environ, {"RHTC_DATA_DIR": self.data_dir.name}, clear=False):
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+                    return await client.request(method, path, **kwargs)
         return asyncio.run(run())
 
     def test_existing_routes_and_dashboard_assets(self):
@@ -23,7 +30,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual(page.status_code, 200)
         self.assertIn("/options/static/app.js", page.text)
         self.assertEqual(self.request("GET", "/options/static/app.js").status_code, 200)
-        self.assertEqual(self.request("GET", "/options/api/health").json()["watchlist_count"], 127)
+        self.assertEqual(self.request("GET", "/options/api/health").json()["watchlist_count"], 129)
 
     def test_demo_scan_and_summary(self):
         with patch.dict(os.environ, {}, clear=True):
@@ -37,24 +44,40 @@ class OptionsRoutesTest(unittest.TestCase):
             self.assertEqual(summary.json()["mode"], "rules")
             self.assertIn("Illustrative", summary.json()["summary"])
 
-    def test_custom_symbol_list_is_used_by_dashboard_scan(self):
+    def test_watchlist_updates_persist_across_requests_and_drive_dashboard_scan(self):
         symbols = [{"symbol": "MU", "peak": "AI/I"}, {"symbol": "NEWCO", "peak": "Other"}]
-        with patch.dict(os.environ, {}, clear=True):
-            response = self.request("GET", "/options/api/opportunities", params={"limit": 200, "symbols": json.dumps(symbols)})
+        with patch.dict(os.environ, {"RHTC_WATCHLIST_ADMIN_TOKEN": "test-admin"}, clear=False):
+            saved = self.request("PUT", "/options/api/watchlist", headers={"X-RHTC-Admin-Token": "test-admin"}, json={"rows": symbols})
+            response = self.request("GET", "/options/api/opportunities?limit=200")
             chain = self.request("GET", "/options/api/chain/NEWCO")
+            reloaded = self.request("GET", "/options/api/watchlist")
+        self.assertEqual(saved.status_code, 200)
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["total"], 2)
         self.assertEqual({row["symbol"] for row in data["rows"]}, {"MU", "NEWCO"})
+        self.assertEqual(reloaded.json()["rows"], symbols)
+        self.assertFalse(reloaded.json()["migration_open"])
         self.assertEqual(chain.status_code, 200)
         self.assertEqual(chain.json()["symbol"], "NEWCO")
 
     def test_custom_symbol_list_rejects_duplicate_or_invalid_peaks(self):
         duplicate = [{"symbol": "MU", "peak": "AI/I"}, {"symbol": "MU", "peak": "Other"}]
         invalid_peak = [{"symbol": "MU", "peak": "Unknown"}]
-        for symbols in (duplicate, invalid_peak):
-            response = self.request("GET", "/options/api/opportunities", params={"symbols": json.dumps(symbols)})
-            self.assertEqual(response.status_code, 400)
+        with patch.dict(os.environ, {"RHTC_WATCHLIST_ADMIN_TOKEN": "test-admin"}, clear=False):
+            for symbols in (duplicate, invalid_peak):
+                response = self.request("PUT", "/options/api/watchlist", headers={"X-RHTC-Admin-Token": "test-admin"}, json={"rows": symbols})
+                self.assertEqual(response.status_code, 400)
+            unauthorized = self.request("PUT", "/options/api/watchlist", json={"rows": []})
+            self.assertEqual(unauthorized.status_code, 401)
+
+    def test_empty_shared_watchlist_stays_empty(self):
+        with patch.dict(os.environ, {"RHTC_WATCHLIST_ADMIN_TOKEN": "test-admin"}, clear=False):
+            response = self.request("PUT", "/options/api/watchlist", headers={"X-RHTC-Admin-Token": "test-admin"}, json={"rows": []})
+            reloaded = self.request("GET", "/options/api/watchlist")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(reloaded.json()["rows"], [])
+        self.assertEqual(reloaded.json()["count"], 0)
 
     def test_tradier_selection_and_error_rows(self):
         async def provider_get(provider, path, params):
