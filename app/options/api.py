@@ -339,6 +339,9 @@ async def opportunities(
             await provider.close()
         source = data_source()
     for row in rows:
+        holding = next((item for item in selected if item["symbol"] == row.get("symbol")), {})
+        row["share_price"] = holding.get("share_price")
+        row["quantity"] = holding.get("quantity")
         row["coverage_status"] = "Needs review" if row.get("open_interest", 0) < 25 else "Liquid enough to review"
     if sort == "income":
         rows.sort(

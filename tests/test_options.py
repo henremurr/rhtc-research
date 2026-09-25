@@ -36,6 +36,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('id="review-limit"', page.text)
         self.assertIn('<option value="10" selected>10</option>', page.text)
         self.assertIn('<option value="200">All</option>', page.text)
+        self.assertIn('title="Cost basis: share price × quantity from Manage symbols">COST</th>', page.text)
         self.assertEqual(self.request("GET", "/options/static/app.js").status_code, 200)
         self.assertEqual(self.request("GET", "/options/api/health").json()["watchlist_count"], 129)
 
@@ -74,6 +75,9 @@ class OptionsRoutesTest(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["total"], 2)
         self.assertEqual({row["symbol"] for row in data["rows"]}, {"MU", "NEWCO"})
+        by_symbol = {row["symbol"]: row for row in data["rows"]}
+        self.assertEqual((by_symbol["MU"]["share_price"], by_symbol["MU"]["quantity"]), (128.5, 100))
+        self.assertEqual((by_symbol["NEWCO"]["share_price"], by_symbol["NEWCO"]["quantity"]), (None, 4))
         self.assertEqual(reloaded.json()["rows"], symbols)
         self.assertFalse(reloaded.json()["migration_open"])
         self.assertEqual(chain.status_code, 200)
