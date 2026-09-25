@@ -52,10 +52,11 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('<span>Order by</span><select id="sort">', page.text)
         self.assertLess(page.text.index('Max Last'), page.text.index('<span>Order by</span>'))
         self.assertIn('app.css?v=fit-columns-1', page.text)
-        self.assertIn('app.js?v=fit-columns-1', page.text)
+        self.assertIn('app.js?v=pe-column-1', page.text)
         self.assertIn('<th>CHG $</th><th>CHG %</th>', page.text)
+        self.assertLess(page.text.index('<th>P/E</th>'), page.text.index('>COST</th>'))
         self.assertIn('title="Cost basis: share price × quantity from Manage symbols">COST</th>', page.text)
-        self.assertIn('colspan="11"', page.text)
+        self.assertIn('colspan="12"', page.text)
         self.assertNotIn('<th></th>', page.text)
         script = self.request("GET", "/options/static/app.js").text
         self.assertIn("sort:'income'", script)
@@ -64,8 +65,9 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('>${safe(r.symbol)}</button>', script)
         self.assertIn('title="View ${safe(r.symbol)} option details" aria-label="View ${safe(r.symbol)} option details"', script)
         self.assertNotIn('title="View chain"', script)
-        for label in ('Ticker', 'Peak', 'Last', 'Change $', 'Change %', 'Cost', 'Call contract', 'Bid / ask', 'Bid / ask yield', 'Income', 'OI / Vol'):
+        for label in ('Ticker', 'Peak', 'Last', 'Change $', 'Change %', 'P/E', 'Cost', 'Call contract', 'Bid / ask', 'Bid / ask yield', 'Income', 'OI / Vol'):
             self.assertIn(f'data-label="{label}"', script)
+        self.assertIn("function formatPE(value)", script)
         css = self.request("GET", "/options/static/app.css").text
         self.assertIn('.review-limit-control{height:31px;display:flex;align-items:center;', css)
         self.assertIn('.sort-control{height:31px;display:flex;align-items:center;', css)
@@ -85,6 +87,7 @@ class OptionsRoutesTest(unittest.TestCase):
             self.assertTrue(all(row["quote_time"] == "DEMO DATA" for row in data["rows"]))
             self.assertTrue(all(isinstance(row["change"], (int, float)) for row in data["rows"]))
             self.assertTrue(all(isinstance(row["change_pct"], (int, float)) for row in data["rows"]))
+            self.assertTrue(all(row["pe_ratio"] is None for row in data["rows"]))
             self.assertTrue(all(row["contract"] == f"{row['expiry'].replace('-', '')}-{row['strike']:.1f}" for row in data["rows"]))
             summary = self.request("POST", "/options/api/summary", json={"source": "demo", "rows": data["rows"]})
             self.assertEqual(summary.json()["mode"], "rules")
@@ -179,7 +182,7 @@ class OptionsRoutesTest(unittest.TestCase):
         expiries = [(date.today() + timedelta(days=days)).isoformat() for days in (3, 10, 17, 22)]
         async def provider_get(provider, path, params):
             if path.endswith("/quotes"):
-                return {"quotes": {"quote": {"last": 100, "change": 1.25, "change_percentage": 1.27}}}
+                return {"quotes": {"quote": {"last": 100, "change": 1.25, "change_percentage": 1.27, "pe_ratio": 26.4}}}
             if path.endswith("/expirations"):
                 return {"expirations": {"date": expiries}}
             return {"options": {"option": [
@@ -194,6 +197,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual(data["rows"][0]["premium_yield"], 2)
         self.assertEqual(data["rows"][0]["change"], 1.25)
         self.assertEqual(data["rows"][0]["change_pct"], 1.27)
+        self.assertEqual(data["rows"][0]["pe_ratio"], 26.4)
         self.assertEqual(data["rows"][0]["contract"], f"{expiries[0].replace('-', '')}-105.0")
 
         with patch.dict(os.environ, {"TRADIER_API_TOKEN": "test-token"}, clear=True), patch.object(Tradier, "get", provider_get):

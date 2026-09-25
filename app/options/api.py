@@ -179,7 +179,7 @@ def demo_row(
     bid = round(max(.05, price * rng.uniform(.006, .035)), 2)
     ask = round(bid + rng.uniform(.03, .30), 2)
     return {
-        "symbol": symbol, "peak": peak, "price": price, "change": change, "change_pct": change_pct,
+        "symbol": symbol, "peak": peak, "price": price, "change": change, "change_pct": change_pct, "pe_ratio": None,
         "strike": strike, "expiry": expiry.isoformat(), "dte": (expiry - date.today()).days,
         "bid": bid, "ask": ask, "mid": round((bid + ask) / 2, 2),
         "premium_yield": round(bid / price * 100, 2), "delta": round(rng.uniform(.18, .42), 2),
@@ -253,6 +253,7 @@ class Tradier:
                 "symbol": symbol, "peak": peak, "price": price,
                 "change": parse_number(quote.get("change"), price - parse_number(quote.get("prevclose"), price)),
                 "change_pct": parse_number(quote.get("change_percentage")),
+                "pe_ratio": parse_number(quote.get("pe_ratio"), None),
                 "strike": parse_number(selected.get("strike")), "expiry": expiry,
                 "dte": (exp - today).days, "bid": bid, "ask": ask,
                 "mid": round((bid + ask) / 2, 2), "premium_yield": round(bid / price * 100, 2),
