@@ -56,11 +56,14 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertNotIn('<th></th>', page.text)
         script = self.request("GET", "/options/static/app.js").text
         self.assertIn('ticker-details-btn', script)
-        self.assertIn('class="ticker"><b>${safe(r.symbol)}</b>', script)
+        self.assertIn('<button class="ticker-details-btn" title="View ${safe(r.symbol)} option details"', script)
+        self.assertIn('>${safe(r.symbol)}</button>', script)
+        self.assertIn('title="View ${safe(r.symbol)} option details" aria-label="View ${safe(r.symbol)} option details"', script)
         self.assertNotIn('title="View chain"', script)
         css = self.request("GET", "/options/static/app.css").text
         self.assertIn('.review-limit-control{height:31px;display:flex;align-items:center;', css)
         self.assertIn('.sort-control{height:31px;display:flex;align-items:center;', css)
+        self.assertIn('.ticker-details-btn{padding:0;border:0;background:transparent;', css)
         self.assertEqual(self.request("GET", "/options/api/health").json()["watchlist_count"], 129)
 
     def test_demo_scan_and_summary(self):

@@ -108,3 +108,6 @@
 
 .sort-control{height:31px;display:flex;align-items:center;gap:5px;color:#87919c;font:9px var(--mono);white-space:nowrap}.sort-control select{min-width:150px}
 @media(max-width:760px){.sort-control{flex:1;min-width:0}.sort-control select{width:auto;flex:1;min-width:0;max-width:none}}
+
+.ticker-details-btn{padding:0;border:0;background:transparent;color:#283548;font:700 11px var(--mono);cursor:pointer}.ticker-details-btn:hover{text-decoration:underline;color:#80652e}
+:root[data-theme="dark"] .ticker-details-btn{color:#d1dae4}:root[data-theme="dark"] .ticker-details-btn:hover{color:#f0d78d}
