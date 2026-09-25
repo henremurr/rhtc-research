@@ -19,6 +19,8 @@
 :root[data-theme="dark"] .sidebar-bottom small,:root[data-theme="dark"] .crumb span,:root[data-theme="dark"] .sep{color:#8996a5}
 :root[data-theme="dark"] .metric-card,:root[data-theme="dark"] .content-card,:root[data-theme="dark"] .modal{background:#19222d;border-color:#303b48}
 :root[data-theme="dark"] .metric-label,:root[data-theme="dark"] .metric-icon,:root[data-theme="dark"] .table-header h2{color:#c5d0dc}
+:root[data-theme="dark"] .metric-value{color:#e3e9f0}
+:root[data-theme="dark"] .gold-text{color:#dfc77f}
 :root[data-theme="dark"] .source-pill,:root[data-theme="dark"] .tiny-badge,:root[data-theme="dark"] .summary-label{background:#302a20;color:#dfc77f;border-color:#51452d}
 :root[data-theme="dark"] .demo-alert{background:#2c281f;border-color:#51452d;color:#e0ce9d}
 :root[data-theme="dark"] .demo-alert span{color:#c1ae7e}
