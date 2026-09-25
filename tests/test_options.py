@@ -34,6 +34,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('id="new-quantity"', page.text)
         self.assertIn('<option value="income">Highest income</option>', page.text)
         self.assertIn('id="review-limit"', page.text)
+        self.assertIn('id="max-last"', page.text)
         self.assertIn('data-peak="Holdings"', page.text)
         self.assertIn('id="sidebar-toggle"', page.text)
         self.assertIn('aria-label="Collapse navigation"', page.text)
@@ -58,6 +59,22 @@ class OptionsRoutesTest(unittest.TestCase):
             summary = self.request("POST", "/options/api/summary", json={"source": "demo", "rows": data["rows"]})
             self.assertEqual(summary.json()["mode"], "rules")
             self.assertIn("Illustrative", summary.json()["summary"])
+
+    def test_max_last_ceiling_filters_screen_and_blank_leaves_it_unfiltered(self):
+        with patch.dict(os.environ, {}, clear=True):
+            all_rows = self.request("GET", "/options/api/opportunities?limit=200").json()
+            capped = self.request("GET", "/options/api/opportunities?limit=200&max_last=20").json()
+            zero = self.request("GET", "/options/api/opportunities?limit=200&max_last=0").json()
+
+        self.assertEqual(all_rows["count"], len(all_rows["rows"]))
+        self.assertGreater(all_rows["count"], capped["count"])
+        self.assertTrue(capped["rows"])
+        self.assertTrue(all(row["price"] <= 20 for row in capped["rows"]))
+        self.assertIn("ET", {row["symbol"] for row in capped["rows"]})
+        self.assertEqual(zero["count"], 0)
+        self.assertEqual(zero["rows"], [])
+        invalid = self.request("GET", "/options/api/opportunities?max_last=-1")
+        self.assertEqual(invalid.status_code, 422)
 
     def test_income_sort_orders_rows_by_bid_ask_midpoint_times_contract_multiplier(self):
         with patch.dict(os.environ, {}, clear=True):

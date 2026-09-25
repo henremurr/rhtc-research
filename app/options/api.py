@@ -316,6 +316,7 @@ async def opportunities(
     limit: int = Query(default=25, ge=1, le=200),
     expiration_set: int = Query(default=1, ge=1, le=4),
     holdings_only: bool = False,
+    max_last: float | None = Query(default=None, ge=0),
 ):
     universe = read_watchlist()
     selected = [
@@ -349,6 +350,14 @@ async def opportunities(
         row["share_price"] = holding.get("share_price")
         row["quantity"] = holding.get("quantity")
         row["coverage_status"] = "Needs review" if row.get("open_interest", 0) < 25 else "Liquid enough to review"
+    if max_last is not None:
+        rows = [
+            row for row in rows
+            if not row.get("error")
+            and row.get("price") is not None
+            and math.isfinite(parse_number(row.get("price"), math.nan))
+            and parse_number(row.get("price"), math.nan) <= max_last
+        ]
     if sort == "income":
         rows.sort(
             key=lambda row: ((parse_number(row.get("bid")) + parse_number(row.get("ask"))) / 2) * 100,
