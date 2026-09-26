@@ -1,7 +1,9 @@
 import asyncio
 import os
 import sqlite3
+import sys
 import tempfile
+import types
 import unittest
 from datetime import date, timedelta
 from unittest.mock import patch
@@ -52,8 +54,9 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertLess(page.text.index('<span>Rows</span>'), page.text.index('id="review-limit"'))
         self.assertIn('<span>Order by</span><select id="sort">', page.text)
         self.assertLess(page.text.index('Max Last'), page.text.index('<span>Order by</span>'))
-        self.assertIn('app.css?v=symbol-add-4', page.text)
-        self.assertIn('app.js?v=hide-missing-calls-1', page.text)
+        self.assertIn('app.css?v=symbol-analysis-1', page.text)
+        self.assertIn('app.js?v=symbol-analysis-1', page.text)
+        self.assertIn('id="symbol-analysis-modal"', page.text)
         self.assertIn('<th>CHG $</th><th>CHG %</th>', page.text)
         self.assertIn('title="Share price saved in Manage symbols">COST</th>', page.text)
         self.assertIn('colspan="12"', page.text)
@@ -66,6 +69,9 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('<button class="ticker-details-btn" title="View ${safe(r.symbol)} option details"', script)
         self.assertIn('>${safe(r.symbol)}</button>', script)
         self.assertIn('title="View ${safe(r.symbol)} option details" aria-label="View ${safe(r.symbol)} option details"', script)
+        self.assertIn('class="ticker-ai-btn"', script)
+        self.assertIn('aria-label="Open ChatGPT deep analysis for ${safe(r.symbol)}"', script)
+        self.assertIn('async function analyzeSymbol(symbol)', script)
         self.assertNotIn('title="View chain"', script)
         for label in ('Ticker', 'Peak', 'Last', 'Change $', 'Change %', 'Cost', 'Call contract', 'Qty', 'Bid / ask', 'Bid / ask yield', 'Income', 'OI / Vol'):
             self.assertIn(f'data-label="{label}"', script)
@@ -74,7 +80,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('function incomeForRow(row)', script)
         self.assertIn('rows=rows.filter(r=>!r.error)', script)
         self.assertIn('No symbols with call data match the selected filters.', script)
-        self.assertIn("<b>${error?'—':safe(contractLabel(r))}</b>", script)
+        self.assertIn("<b>${safe(contractLabel(r))}</b>", script)
         self.assertIn('return ((bid+ask)/2)*100*quantityForPrice(row.price)', script)
         self.assertIn('const cost=r.share_price!==null', script)
         self.assertNotIn('Number(r.share_price)*Number(r.quantity)', script)
@@ -84,6 +90,8 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('.review-limit-control{height:31px;display:flex;align-items:center;', css)
         self.assertIn('.sort-control{height:31px;display:flex;align-items:center;', css)
         self.assertIn('.ticker-details-btn{padding:0;border:0;background:transparent;', css)
+        self.assertIn('.ticker-ai-btn{width:17px;height:17px;', css)
+        self.assertIn('.analysis-modal{width:min(900px,calc(100vw - 32px));', css)
         self.assertIn(':root[data-theme="dark"] .symbol-add-form>button{width:120px;justify-self:start;background:#3b434c;color:#c4ced9;border-color:#525d69}', css)
         self.assertIn('@media(max-width:800px){.symbols-modal{padding:20px 16px}.symbol-add-form{grid-template-columns:repeat(2,minmax(0,1fr))}', css)
         self.assertIn('table-layout:fixed', css)
@@ -105,6 +113,33 @@ class OptionsRoutesTest(unittest.TestCase):
             summary = self.request("POST", "/options/api/summary", json={"source": "demo", "rows": data["rows"]})
             self.assertEqual(summary.json()["mode"], "rules")
             self.assertIn("Illustrative", summary.json()["summary"])
+
+    def test_symbol_analysis_requires_server_openai_key(self):
+        with patch.dict(os.environ, {}, clear=True):
+            response = self.request("POST", "/options/api/symbol-analysis", json={"symbol": "MU"})
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("OPENAI_API_KEY", response.json()["detail"])
+
+    def test_symbol_analysis_uses_web_search_and_returns_clickable_citations(self):
+        class FakeResponses:
+            async def create(self, **kwargs):
+                self.kwargs = kwargs
+                citation = types.SimpleNamespace(url="https://investor.example.com/", title="Investor Relations")
+                annotation = types.SimpleNamespace(type="url_citation", url_citation=citation)
+                content = types.SimpleNamespace(annotations=[annotation])
+                return types.SimpleNamespace(output=[types.SimpleNamespace(content=[content])], output_text="Business analysis")
+
+        responses = FakeResponses()
+        fake_openai = types.SimpleNamespace(AsyncOpenAI=lambda **kwargs: types.SimpleNamespace(responses=responses))
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key", "OPENAI_ANALYSIS_MODEL": "test-model"}, clear=False):
+            with patch.dict(sys.modules, {"openai": fake_openai}):
+                result = self.request("POST", "/options/api/symbol-analysis", json={"symbol": "MU", "screen": {"price": 100, "ignored": "secret"}})
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json()["analysis"], "Business analysis")
+        self.assertEqual(result.json()["citations"], [{"title": "Investor Relations", "url": "https://investor.example.com/"}])
+        self.assertEqual(responses.kwargs["tools"], [{"type": "web_search"}])
+        self.assertIn('"price":100', responses.kwargs["input"])
+        self.assertNotIn("secret", responses.kwargs["input"])
 
     def test_max_last_ceiling_filters_screen_and_blank_leaves_it_unfiltered(self):
         with patch.dict(os.environ, {}, clear=True):

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import closing
 import hmac
+import json
 import os
 import random
 import math
@@ -432,6 +433,11 @@ class SummaryInput(BaseModel):
     rows: list[dict[str, Any]] = Field(default_factory=list, max_length=200)
 
 
+class SymbolAnalysisInput(BaseModel):
+    symbol: str = Field(min_length=1, max_length=10)
+    screen: dict[str, Any] = Field(default_factory=dict)
+
+
 def basic_summary(rows: list[dict[str, Any]], source: str) -> str:
     valid = [r for r in rows if not r.get("error") and r.get("premium_yield") is not None]
     if not valid:
@@ -467,6 +473,76 @@ async def summarize(data: SummaryInput):
         return {"mode": "openai", "summary": text}
     except Exception:
         return {"mode": "rules", "summary": basic_summary(rows, data.source)}
+
+
+@app.post("/api/symbol-analysis")
+async def analyze_symbol(data: SymbolAnalysisInput):
+    symbol = data.symbol.strip().upper()
+    if not SYMBOL_PATTERN.fullmatch(symbol):
+        raise HTTPException(400, "Enter a valid ticker symbol.")
+    key = os.getenv("OPENAI_API_KEY")
+    if not key:
+        raise HTTPException(503, "ChatGPT analysis is unavailable. Configure OPENAI_API_KEY in the server settings.")
+
+    watchlist_item = next((item for item in read_watchlist() if item["symbol"] == symbol), None)
+    peak = watchlist_item["peak"] if watchlist_item else "Other"
+    screen_fields = (
+        "price", "change", "change_pct", "strike", "expiry", "dte", "bid", "ask",
+        "premium_yield", "delta", "iv", "open_interest", "volume", "bid_size", "ask_size",
+        "quote_time", "source",
+    )
+    screen = {field: data.screen.get(field) for field in screen_fields if field in data.screen}
+    screen_json = json.dumps(screen, allow_nan=False, separators=(",", ":"))
+    instructions = (
+        "Prepare a detailed, current company analysis for a public-market research dashboard. "
+        "Use web search and cite material claims with sources. Verify the company matches the ticker; "
+        "prefer company filings, investor relations, government sources, and reputable financial reporting. "
+        "Use these sections: Business and revenue model; Market position and competitors; Recent developments "
+        "and catalysts; Financial condition (latest reported revenue, growth, margins, cash flow, debt, and "
+        "dilution when verifiable); Key risks and invalidation points; Three Peaks fit and cross-peak links; "
+        "Bottom-line assessment with bull, base, and bear considerations. Distinguish reported facts from "
+        "analysis, date time-sensitive facts, and say when data is unavailable instead of guessing. "
+        "If an options screen is supplied, briefly interpret it as a quote snapshot only; do not treat premium "
+        "yield as expected return. Do not give personalized financial advice or buy, sell, or trade instructions. "
+        "Do not assume user holdings or suitability. Return readable plain text with clear section headings."
+    )
+    prompt = (
+        f"Analyze ticker {symbol} (RHTC theme: {peak}).\n"
+        f"Current dashboard quote/options snapshot, if available: {screen_json}\n"
+        "Search current public information, including recent filings and company news."
+    )
+    try:
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=key, timeout=90)
+        response = await client.responses.create(
+            model=os.getenv("OPENAI_ANALYSIS_MODEL", os.getenv("OPENAI_MODEL", "gpt-5-mini")),
+            tools=[{"type": "web_search"}],
+            instructions=instructions,
+            input=prompt,
+            max_output_tokens=2400,
+            max_tool_calls=5,
+            store=False,
+        )
+    except Exception as exc:
+        raise HTTPException(502, "ChatGPT could not complete the analysis. Try again in a moment.") from exc
+
+    citations: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
+    for item in getattr(response, "output", []) or []:
+        for content in getattr(item, "content", []) or []:
+            for annotation in getattr(content, "annotations", []) or []:
+                if getattr(annotation, "type", "") != "url_citation":
+                    continue
+                citation = getattr(annotation, "url_citation", None)
+                url = getattr(citation, "url", "") if citation else ""
+                title = getattr(citation, "title", "") if citation else ""
+                if url.startswith("https://") and url not in seen_urls:
+                    citations.append({"title": title or url, "url": url})
+                    seen_urls.add(url)
+    analysis = (getattr(response, "output_text", "") or "").strip()
+    if not analysis:
+        raise HTTPException(502, "ChatGPT returned an empty analysis. Try again.")
+    return {"symbol": symbol, "peak": peak, "analysis": analysis, "citations": citations, "mode": "openai"}
 
 
 if __name__ == "__main__":
