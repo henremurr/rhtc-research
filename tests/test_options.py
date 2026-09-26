@@ -54,8 +54,8 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertLess(page.text.index('<span>Rows</span>'), page.text.index('id="review-limit"'))
         self.assertIn('<span>Order by</span><select id="sort">', page.text)
         self.assertLess(page.text.index('Max Last'), page.text.index('<span>Order by</span>'))
-        self.assertIn('app.css?v=symbol-analysis-3', page.text)
-        self.assertIn('app.js?v=symbol-analysis-3', page.text)
+        self.assertIn('app.css?v=symbol-analysis-4', page.text)
+        self.assertIn('app.js?v=symbol-analysis-4', page.text)
         self.assertIn('id="symbol-analysis-modal"', page.text)
         self.assertIn('<th>CHG $</th><th>CHG %</th>', page.text)
         self.assertIn('title="Share price saved in Manage symbols">COST</th>', page.text)
@@ -150,7 +150,23 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertNotIn("secret", responses.kwargs["input"])
         self.assertIn("covered-call verdict", responses.kwargs["instructions"].lower())
         self.assertIn("in plain english", responses.kwargs["instructions"].lower())
-        self.assertGreaterEqual(responses.kwargs["max_output_tokens"], 4000)
+        self.assertGreaterEqual(responses.kwargs["max_output_tokens"], 12000)
+        self.assertEqual(responses.kwargs["reasoning"], {"effort": "low"})
+
+    def test_symbol_analysis_empty_model_output_returns_screen_verdict(self):
+        class EmptyResponses:
+            async def create(self, **kwargs):
+                return types.SimpleNamespace(output=[], output_text="", status="incomplete")
+
+        fake_openai = types.SimpleNamespace(AsyncOpenAI=lambda **kwargs: types.SimpleNamespace(responses=EmptyResponses()))
+        screen = {"price": 9.41, "strike": 9.5, "dte": 6, "bid": .30, "ask": .38, "premium_yield": 3.19, "estimated_income": 170, "quantity": 5, "open_interest": 805, "volume": 99, "contract": "20261002-9.5"}
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=False):
+            with patch.dict(sys.modules, {"openai": fake_openai}):
+                result = self.request("POST", "/options/api/symbol-analysis", json={"symbol": "BW", "screen": screen})
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json()["mode"], "screen_fallback")
+        self.assertIn("In plain English", result.json()["analysis"])
+        self.assertIn("$170.00", result.json()["analysis"])
 
     def test_max_last_ceiling_filters_screen_and_blank_leaves_it_unfiltered(self):
         with patch.dict(os.environ, {}, clear=True):

@@ -473,6 +473,52 @@ def openai_error_message(exc: Exception) -> str:
     return "ChatGPT could not complete the analysis. Try again in a moment."
 
 
+def screen_only_analysis(symbol: str, screen: dict[str, Any]) -> str:
+    """Return a useful contract verdict when a research response has no visible text."""
+    def number(field: str) -> float | None:
+        try:
+            value = float(screen.get(field))
+            return value if math.isfinite(value) else None
+        except (TypeError, ValueError):
+            return None
+
+    price, strike = number("price"), number("strike")
+    bid, ask = number("bid"), number("ask")
+    bid_yield, income = number("premium_yield"), number("estimated_income")
+    dte, oi, volume = number("dte"), number("open_interest"), number("volume")
+    quantity = number("quantity") or 1
+    cushion = ((strike - price) / price * 100) if price and strike is not None else None
+    midpoint = ((bid + ask) / 2) if bid is not None and ask is not None else None
+    spread = ((ask - bid) / midpoint * 100) if midpoint and bid is not None and ask is not None else None
+    income_score = 4 if (bid_yield or 0) >= 2 else 3 if (bid_yield or 0) >= 1 else 2
+    upside_score = 5 if (cushion or 0) >= 5 else 4 if (cushion or 0) >= 3 else 3 if (cushion or 0) >= 1 else 1
+    liquidity_score = 5 if (oi or 0) >= 500 and (spread or 100) <= 10 else 4 if (oi or 0) >= 100 and (spread or 100) <= 20 else 3 if (oi or 0) >= 50 and (spread or 100) <= 30 else 2
+    verdict = "Strong" if income_score >= 4 and upside_score >= 3 and liquidity_score >= 3 else "Weak" if income_score <= 2 or liquidity_score <= 1 else "Mixed"
+    contract = str(screen.get("contract") or "the displayed call")
+    snapshot = [
+        f"- **Contract:** {contract}; {int(dte)} DTE." if dte is not None else f"- **Contract:** {contract}.",
+        f"- **Share price / strike:** ${price:,.2f} / ${strike:,.2f}; {cushion:.2f}% upside cushion." if price is not None and strike is not None and cushion is not None else "- **Share price / strike:** unavailable.",
+        f"- **Bid / ask:** ${bid:,.2f} / ${ask:,.2f}; {spread:.1f}% quoted spread." if bid is not None and ask is not None and spread is not None else "- **Bid / ask:** unavailable.",
+        f"- **Bid yield / estimated gross income:** {bid_yield:.2f}% / ${income:,.2f} for {int(quantity)} contract(s)." if bid_yield is not None and income is not None else "- **Yield / income:** unavailable.",
+        f"- **Open interest / volume:** {int(oi or 0):,} / {int(volume or 0):,}.",
+    ]
+    assignment = "very easily" if (cushion or 0) < 1 else "fairly easily" if (cushion or 0) < 3 else "only after a more meaningful rise"
+    buffer_text = f"about {bid_yield:.2f}%" if bid_yield is not None else "only the premium received"
+    return (
+        f"## Covered-call verdict\n**{verdict} fit (screen-only fallback).** The live quote can still be judged, "
+        "but current-source company research did not finish in time.\n\n"
+        f"**Scorecard — Income: {income_score}/5 · Upside cushion: {upside_score}/5 · Event risk: 3/5 · Liquidity: {liquidity_score}/5**\n\n"
+        + "\n".join(snapshot)
+        + "\n\n## What to verify\n- Confirm the quote is current and that the spread is acceptable.\n"
+        "- Check the company’s investor-relations calendar for earnings or another major event before expiration.\n"
+        "- Decide whether having the shares called away at the strike would be acceptable.\n\n"
+        "## In plain English\n"
+        f"This contract collects income now, but the shares could be called away {assignment} if {symbol} rises. "
+        f"If the stock falls, the premium cushions only {buffer_text} of the decline; losses continue below that. "
+        "The setup generally suits someone who prioritizes near-term income and is genuinely comfortable selling at the strike."
+    )
+
+
 @app.post("/api/summary")
 async def summarize(data: SummaryInput):
     rows = data.rows
@@ -556,15 +602,16 @@ async def analyze_symbol(data: SymbolAnalysisInput):
     )
     try:
         from openai import AsyncOpenAI
-        client = AsyncOpenAI(api_key=key, timeout=45, max_retries=0)
+        client = AsyncOpenAI(api_key=key, timeout=75, max_retries=0)
         response = await client.responses.create(
             model=os.getenv("OPENAI_ANALYSIS_MODEL", os.getenv("OPENAI_MODEL", "gpt-5-mini")),
             tools=[{"type": "web_search"}],
+            reasoning={"effort": "low"},
             instructions=instructions,
             input=prompt,
-            # Reasoning tokens count against this budget. A web-search response can
-            # otherwise exhaust a small budget before producing visible text.
-            max_output_tokens=4000,
+            # Reasoning tokens count against this budget. Reserve enough room for
+            # search/reasoning plus the visible brief.
+            max_output_tokens=12000,
             max_tool_calls=6,
             store=False,
         )
@@ -586,7 +633,7 @@ async def analyze_symbol(data: SymbolAnalysisInput):
                     seen_urls.add(url)
     analysis = (getattr(response, "output_text", "") or "").strip()
     if not analysis:
-        raise HTTPException(502, "ChatGPT returned an empty analysis. Try again.")
+        return {"symbol": symbol, "peak": peak, "analysis": screen_only_analysis(symbol, screen), "citations": [], "mode": "screen_fallback"}
     return {"symbol": symbol, "peak": peak, "analysis": analysis, "citations": citations, "mode": "openai"}
 
 
