@@ -12,6 +12,8 @@ A Railway-ready FastAPI service that:
 ## Options dashboard
 
 Run `uvicorn main:app --reload` and open `http://127.0.0.1:8000/options/`.
+The dashboard is protected by a shared password. Set `RHTC_DASHBOARD_PASSWORD` in the server environment to a unique passphrase of at least 20 characters before signing in. Railway: add it under the service's Variables; do not commit or reuse an account password. If the variable is missing or too short, dashboard pages and APIs fail closed. The seven-day session cookie is HttpOnly, SameSite=Strict, and signed with the password; changing the password invalidates existing sessions. The dashboard and its data, including on-demand OpenAI symbol analysis, require sign-in. Use **Log out** to end a session.
+
 The dashboard loads the shared RHTC symbol list from `/options/api/watchlist`. The list is stored in SQLite under `RHTC_DATA_DIR`; the Railway service must mount a persistent Volume at `/data` and set `RHTC_DATA_DIR=/data` to retain edits across deployments. Set `RHTC_WATCHLIST_ADMIN_TOKEN` to a private secret to authorize edits. The management UI prompts for this token when a change is saved. Do not commit the token. The first-time browser import can migrate the previous browser-local list into shared storage.
 
 The initial research universe contains 129 symbols, including XTND and OPTX in DS/I. The watchlist is a research universe, not a verified brokerage holdings ledger. Future RHTC analysis should use the live `/options/api/watchlist` endpoint as the current symbol source.

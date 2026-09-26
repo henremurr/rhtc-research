@@ -22,11 +22,51 @@ class OptionsRoutesTest(unittest.TestCase):
         self.data_dir.cleanup()
 
     def request(self, method, path, **kwargs):
+        authenticated = kwargs.pop("authenticated", True)
         async def run():
-            with patch.dict(os.environ, {"RHTC_DATA_DIR": self.data_dir.name, "RAILWAY_VOLUME_MOUNT_PATH": self.data_dir.name}, clear=False):
+            env = {"RHTC_DATA_DIR": self.data_dir.name, "RAILWAY_VOLUME_MOUNT_PATH": self.data_dir.name,
+                   "RHTC_DASHBOARD_PASSWORD": "test-dashboard-password-long-enough"}
+            with patch.dict(os.environ, env, clear=False):
                 async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+                    if authenticated:
+                        login = await client.post("/options/auth/login", json={"password": env["RHTC_DASHBOARD_PASSWORD"]})
+                        if login.status_code != 200:
+                            raise AssertionError(f"Test sign-in failed: {login.status_code} {login.text}")
                     return await client.request(method, path, **kwargs)
         return asyncio.run(run())
+
+    def test_dashboard_requires_sign_in_for_pages_and_apis(self):
+        page = self.request("GET", "/options/", authenticated=False)
+        self.assertEqual(page.status_code, 303)
+        self.assertTrue(page.headers["location"].startswith("/options/login?next="))
+        self.assertEqual(self.request("GET", "/options/login", authenticated=False).status_code, 200)
+        self.assertEqual(self.request("GET", "/options/api/watchlist", authenticated=False).status_code, 401)
+        self.assertEqual(self.request("POST", "/options/api/symbol-analysis", json={"symbol": "BW"}, authenticated=False).status_code, 401)
+
+    def test_dashboard_sign_in_and_sign_out(self):
+        async def run():
+            password = "test-dashboard-password-long-enough"
+            with patch.dict(os.environ, {"RHTC_DASHBOARD_PASSWORD": password}, clear=False):
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+                    bad = await client.post("/options/auth/login", json={"password": "wrong"})
+                    self.assertEqual(bad.status_code, 401)
+                    good = await client.post("/options/auth/login", json={"password": password})
+                    self.assertEqual(good.status_code, 200)
+                    self.assertIn("httponly", good.headers["set-cookie"].lower())
+                    self.assertIn("samesite=strict", good.headers["set-cookie"].lower())
+                    self.assertEqual((await client.get("/options/")).status_code, 200)
+                    await client.post("/options/auth/logout")
+                    self.assertEqual((await client.get("/options/")).status_code, 303)
+        asyncio.run(run())
+
+    def test_dashboard_fails_closed_without_password(self):
+        async def run():
+            with patch.dict(os.environ, {"RHTC_DASHBOARD_PASSWORD": ""}, clear=False):
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+                    self.assertEqual((await client.get("/options/")).status_code, 303)
+                    self.assertEqual((await client.get("/options/login")).status_code, 200)
+                    self.assertEqual((await client.get("/options/api/watchlist")).status_code, 503)
+        asyncio.run(run())
 
     def test_existing_routes_and_dashboard_assets(self):
         self.assertEqual(self.request("GET", "/health").status_code, 200)
@@ -54,8 +94,8 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertLess(page.text.index('<span>Rows</span>'), page.text.index('id="review-limit"'))
         self.assertIn('<span>Order by</span><select id="sort">', page.text)
         self.assertLess(page.text.index('Max Last'), page.text.index('<span>Order by</span>'))
-        self.assertIn('app.css?v=symbol-analysis-4', page.text)
-        self.assertIn('app.js?v=symbol-analysis-4', page.text)
+        self.assertIn('app.css?v=symbol-analysis-5', page.text)
+        self.assertIn('app.js?v=symbol-analysis-5', page.text)
         self.assertIn('id="symbol-analysis-modal"', page.text)
         self.assertIn('<th>CHG $</th><th>CHG %</th>', page.text)
         self.assertIn('title="Share price saved in Manage symbols">COST</th>', page.text)

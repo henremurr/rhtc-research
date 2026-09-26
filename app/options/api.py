@@ -9,20 +9,133 @@ import random
 import math
 import re
 import sqlite3
+import secrets
+import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 BASE = Path(__file__).parent
 app = FastAPI(title="RHTC Options Dashboard", version="0.1.0")
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
+
+DASHBOARD_PASSWORD_ENV = "RHTC_DASHBOARD_PASSWORD"
+DASHBOARD_SESSION_COOKIE = "rhtc_dashboard_session"
+DASHBOARD_SESSION_TTL = 7 * 24 * 60 * 60
+DASHBOARD_PASSWORD_MIN_LENGTH = 20
+_LOGIN_FAILURES: dict[str, tuple[int, float]] = {}
+
+
+def configured_dashboard_password() -> str | None:
+    password = os.getenv(DASHBOARD_PASSWORD_ENV, "")
+    return password if len(password) >= DASHBOARD_PASSWORD_MIN_LENGTH else None
+
+
+def dashboard_session_token(password: str, issued_at: int | None = None) -> str:
+    timestamp = int(time.time()) if issued_at is None else int(issued_at)
+    payload = f"{timestamp}.{secrets.token_urlsafe(18)}"
+    signature = hmac.new(password.encode("utf-8"), payload.encode("utf-8"), "sha256").hexdigest()
+    return f"{payload}.{signature}"
+
+
+def valid_dashboard_session(token: str | None, password: str | None, now: int | None = None) -> bool:
+    if not token or not password:
+        return False
+    try:
+        issued_text, nonce, signature = token.split(".", 2)
+        issued_at = int(issued_text)
+    except (ValueError, TypeError):
+        return False
+    current_time = int(time.time()) if now is None else int(now)
+    if issued_at > current_time or current_time - issued_at > DASHBOARD_SESSION_TTL:
+        return False
+    payload = f"{issued_text}.{nonce}"
+    expected = hmac.new(password.encode("utf-8"), payload.encode("utf-8"), "sha256").hexdigest()
+    return hmac.compare_digest(signature, expected)
+
+
+def dashboard_base_path(request: Request) -> str:
+    return str(request.scope.get("root_path", "")).rstrip("/") or "/options"
+
+
+def dashboard_local_path(request: Request) -> str:
+    path = request.scope.get("path", "/")
+    root_path = str(request.scope.get("root_path", "")).rstrip("/")
+    if root_path and path.startswith(root_path + "/"):
+        return path[len(root_path):]
+    if root_path and path == root_path:
+        return "/"
+    return path
+
+
+def render_dashboard_login_page(base_path: str, configured: bool) -> str:
+    disabled = "" if configured else " disabled"
+    setup_note = (
+        ""
+        if configured
+        else f"Set {DASHBOARD_PASSWORD_ENV} in the app's server environment to enable sign-in. Use at least {DASHBOARD_PASSWORD_MIN_LENGTH} characters."
+    )
+    return f'''<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign in · RHTC Options</title><style>
+:root{{color-scheme:light dark;--bg:#f5f4f1;--card:#fff;--ink:#233044;--muted:#748091;--gold:#927744;--line:#dce0e4}}
+@media(prefers-color-scheme:dark){{:root{{--bg:#171c23;--card:#202833;--ink:#e7ecf2;--muted:#a4afbd;--line:#3b4654}}}}
+*{{box-sizing:border-box}}body{{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:24px}}
+.card{{width:min(420px,100%);padding:32px;border:1px solid var(--line);border-radius:14px;background:var(--card);box-shadow:0 18px 50px #00000012}}
+.brand{{color:var(--gold);font-size:12px;font-weight:700;letter-spacing:1.5px}}h1{{font-size:26px;margin:10px 0 6px}}p{{color:var(--muted);font-size:14px;line-height:1.5;margin:0 0 22px}}
+label{{display:block;font-size:13px;font-weight:600;margin-bottom:8px}}input{{width:100%;height:46px;padding:0 13px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}}
+button{{width:100%;height:46px;margin-top:14px;border:0;border-radius:8px;background:#cfb36b;color:#171717;font-weight:700;font-size:15px;cursor:pointer}}button:disabled{{opacity:.5;cursor:not-allowed}}
+#message{{min-height:22px;margin:12px 0 0;color:#b34343;font-size:13px}}.setup{{margin-top:10px;padding:11px 12px;border-radius:7px;background:#b3434312;color:#b34343;font-size:13px;line-height:1.45}}
+</style></head><body><main class="card"><div class="brand">ROCKING HORSE · TRADING CO.</div><h1>Sign in</h1><p>Sign in to open the covered-call screening dashboard.</p>
+<form id="login-form"><label for="password">Dashboard password</label><input id="password" name="password" type="password" autocomplete="current-password" required autofocus{disabled}>
+<button id="submit" type="submit"{disabled}>Sign in</button><div id="message" role="status" aria-live="polite"></div></form>
+<div class="setup" id="setup-note">{setup_note}</div>
+</main><script>
+const base={base_path!r};const setupNote={json.dumps(bool(setup_note))};const form=document.getElementById('login-form');
+if(!setupNote)document.getElementById('setup-note').hidden=true;
+form.addEventListener('submit',async event=>{{event.preventDefault();const button=document.getElementById('submit');const message=document.getElementById('message');button.disabled=true;message.textContent='';
+try{{const response=await fetch(base+'/auth/login',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{password:document.getElementById('password').value}})}});const data=await response.json();if(!response.ok)throw Error(data.detail||'Sign-in failed.');const target=new URLSearchParams(location.search).get('next');const safeTarget=target&&target.startsWith(base+'/')&&!target.startsWith('//')?target:base+'/';location.replace(safeTarget)}}catch(error){{message.textContent=error.message;button.disabled=false;document.getElementById('password').select()}}}});
+</script></body></html>'''
+
+
+@app.middleware("http")
+async def require_dashboard_signin(request: Request, call_next):
+    path = dashboard_local_path(request)
+    public_paths = {"/login", "/auth/login", "/auth/logout"}
+    if path in public_paths:
+        return await call_next(request)
+
+    base_path = dashboard_base_path(request)
+    password = configured_dashboard_password()
+    is_api = path == "/api" or path.startswith("/api/")
+    if not password:
+        if is_api or request.method not in {"GET", "HEAD"}:
+            return JSONResponse({"detail": f"Dashboard sign-in is not configured. Set {DASHBOARD_PASSWORD_ENV} to a unique password with at least {DASHBOARD_PASSWORD_MIN_LENGTH} characters."}, status_code=503)
+        return RedirectResponse(f"{base_path}/login", status_code=303)
+
+    token = request.cookies.get(DASHBOARD_SESSION_COOKIE)
+    if valid_dashboard_session(token, password):
+        return await call_next(request)
+
+    if is_api or request.method not in {"GET", "HEAD"}:
+        return JSONResponse({"detail": "Sign in to use the RHTC options dashboard."}, status_code=401)
+
+    original = dashboard_local_path(request)
+    if original != "/" and not original.startswith("/"):
+        original = "/"
+    query = request.scope.get("query_string", b"").decode("latin-1")
+    next_path = f"{base_path}{original}" if original != "/" else f"{base_path}/"
+    if query:
+        next_path += f"?{query}"
+    return RedirectResponse(f"{base_path}/login?next={quote(next_path, safe='/?=&%')}", status_code=303)
 
 GROUPS = {
     "AI/I": "AMD ARM INTC NVDA QCOM ADI ALAB AVGO MRVL ON STM AMAT AMKR ASML GFS TER TSM MU SNDK STX WDC AAOI COHR CSCO GLW LITE SMTC AMZN CRWV DELL GOOG IBM MSFT NBIS ORCL RXT SMCI CRM PATH SNOW CRWD NET OKTA PANW INFQ IONQ QBTS QUBT RGTI AAPL META TSLA CBRS NVTS",
@@ -302,6 +415,63 @@ class Tradier:
 @app.get("/")
 async def home():
     return FileResponse(BASE / "templates" / "index.html")
+
+
+class DashboardLoginInput(BaseModel):
+    password: str = Field(min_length=1, max_length=512)
+
+
+@app.get("/login")
+async def dashboard_login_page(request: Request):
+    response = HTMLResponse(render_dashboard_login_page(dashboard_base_path(request), configured_dashboard_password() is not None))
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
+
+
+@app.post("/auth/login")
+async def dashboard_login(data: DashboardLoginInput, request: Request):
+    expected = configured_dashboard_password()
+    if not expected:
+        raise HTTPException(503, f"Set {DASHBOARD_PASSWORD_ENV} to a unique password with at least {DASHBOARD_PASSWORD_MIN_LENGTH} characters.")
+    client_ip = request.client.host if request.client else "unknown"
+    failures, locked_until = _LOGIN_FAILURES.get(client_ip, (0, 0.0))
+    if locked_until > time.monotonic():
+        raise HTTPException(429, "Too many incorrect attempts. Wait 15 minutes and try again.")
+    if not hmac.compare_digest(data.password.encode("utf-8"), expected.encode("utf-8")):
+        failures += 1
+        if client_ip not in _LOGIN_FAILURES and len(_LOGIN_FAILURES) >= 4096:
+            _LOGIN_FAILURES.pop(next(iter(_LOGIN_FAILURES)))
+        _LOGIN_FAILURES[client_ip] = (0, time.monotonic() + 15 * 60) if failures >= 5 else (failures, 0.0)
+        raise HTTPException(401, "That password did not match. Try again.")
+    _LOGIN_FAILURES.pop(client_ip, None)
+
+    response = JSONResponse({"ok": True})
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip().lower()
+    secure = request.url.scheme == "https" or forwarded_proto == "https"
+    response.set_cookie(
+        DASHBOARD_SESSION_COOKIE,
+        dashboard_session_token(expected),
+        max_age=DASHBOARD_SESSION_TTL,
+        path=dashboard_base_path(request),
+        secure=secure,
+        httponly=True,
+        samesite="strict",
+    )
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+@app.post("/auth/logout")
+async def dashboard_logout(request: Request):
+    response = JSONResponse({"ok": True})
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip().lower()
+    secure = request.url.scheme == "https" or forwarded_proto == "https"
+    response.delete_cookie(DASHBOARD_SESSION_COOKIE, path=dashboard_base_path(request), secure=secure, httponly=True, samesite="strict")
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 class WatchlistUpdate(BaseModel):
