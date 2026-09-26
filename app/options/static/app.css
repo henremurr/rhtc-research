@@ -88,7 +88,7 @@
 :root[data-theme="dark"] .symbol-add-form{background:#151e28;border-color:#303b48}
 :root[data-theme="dark"] .symbol-add-form label,:root[data-theme="dark"] .symbol-manager-toolbar,:root[data-theme="dark"] .symbol-description small,:root[data-theme="dark"] .symbol-empty{color:#9eabb9}
 :root[data-theme="dark"] .symbol-add-form input,:root[data-theme="dark"] .symbol-add-form select,:root[data-theme="dark"] .symbol-edit-ticker,:root[data-theme="dark"] .symbol-edit-peak,:root[data-theme="dark"] .symbol-edit-price,:root[data-theme="dark"] .symbol-edit-quantity,:root[data-theme="dark"] .symbol-peak-filter{background:#111a24;color:#dce4ed;border-color:#394654}
-:root[data-theme="dark"] .symbol-add-form>button{background:#d0b775;color:#17202a;border-color:#d0b775}
+:root[data-theme="dark"] .symbol-add-form>button{width:120px;justify-self:start;background:#3b434c;color:#c4ced9;border-color:#525d69}
 :root[data-theme="dark"] .symbol-list,:root[data-theme="dark"] .symbol-entry{border-color:#303b48}
 :root[data-theme="dark"] .symbol-description b{color:#e3e9f0}
 :root[data-theme="dark"] .symbol-actions button.danger{color:#e19a94}
