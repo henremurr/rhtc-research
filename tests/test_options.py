@@ -54,8 +54,8 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertLess(page.text.index('<span>Rows</span>'), page.text.index('id="review-limit"'))
         self.assertIn('<span>Order by</span><select id="sort">', page.text)
         self.assertLess(page.text.index('Max Last'), page.text.index('<span>Order by</span>'))
-        self.assertIn('app.css?v=symbol-analysis-1', page.text)
-        self.assertIn('app.js?v=symbol-analysis-1', page.text)
+        self.assertIn('app.css?v=symbol-analysis-2', page.text)
+        self.assertIn('app.js?v=symbol-analysis-2', page.text)
         self.assertIn('id="symbol-analysis-modal"', page.text)
         self.assertIn('<th>CHG $</th><th>CHG %</th>', page.text)
         self.assertIn('title="Share price saved in Manage symbols">COST</th>', page.text)
@@ -148,6 +148,8 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual(responses.kwargs["tools"], [{"type": "web_search"}])
         self.assertIn('"price":100', responses.kwargs["input"])
         self.assertNotIn("secret", responses.kwargs["input"])
+        self.assertIn("covered-call verdict", responses.kwargs["instructions"].lower())
+        self.assertLessEqual(responses.kwargs["max_output_tokens"], 1500)
 
     def test_max_last_ceiling_filters_screen_and_blank_leaves_it_unfiltered(self):
         with patch.dict(os.environ, {}, clear=True):

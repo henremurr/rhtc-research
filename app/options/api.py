@@ -513,27 +513,41 @@ async def analyze_symbol(data: SymbolAnalysisInput):
     screen_fields = (
         "price", "change", "change_pct", "strike", "expiry", "dte", "bid", "ask",
         "premium_yield", "delta", "iv", "open_interest", "volume", "bid_size", "ask_size",
-        "quote_time", "source",
+        "quote_time", "source", "contract", "quantity", "estimated_income", "ask_yield",
     )
     screen = {field: data.screen.get(field) for field in screen_fields if field in data.screen}
     screen_json = json.dumps(screen, allow_nan=False, separators=(",", ":"))
     instructions = (
-        "Prepare a detailed, current company analysis for a public-market research dashboard. "
-        "Use web search and cite material claims with sources. Verify the company matches the ticker; "
-        "prefer company filings, investor relations, government sources, and reputable financial reporting. "
-        "Use these sections: Business and revenue model; Market position and competitors; Recent developments "
-        "and catalysts; Financial condition (latest reported revenue, growth, margins, cash flow, debt, and "
-        "dilution when verifiable); Key risks and invalidation points; Three Peaks fit and cross-peak links; "
-        "Bottom-line assessment with bull, base, and bear considerations. Distinguish reported facts from "
-        "analysis, date time-sensitive facts, and say when data is unavailable instead of guessing. "
-        "If an options screen is supplied, briefly interpret it as a quote snapshot only; do not treat premium "
-        "yield as expected return. Do not give personalized financial advice or buy, sell, or trade instructions. "
-        "Do not assume user holdings or suitability. Return readable plain text with clear section headings."
+        "You are the decision-support analyst inside the RHTC covered-call screener. Produce a compact, "
+        "ticker-specific brief that helps a knowledgeable investor judge the DISPLAYED covered call, not a "
+        "generic company profile. Use current web search and cite every material, time-sensitive claim. Verify "
+        "the company matches the ticker and prioritize SEC filings, investor relations, government sources, "
+        "earnings releases, and reputable financial reporting.\n\n"
+        "Start with the decision, using exactly these Markdown sections:\n"
+        "## Covered-call verdict\n"
+        "Give a Strong / Mixed / Weak fit label and a one-sentence reason. Then show a compact scorecard with "
+        "Income, Upside cushion, Event risk, and Liquidity each scored 1-5. Interpret only the supplied snapshot. "
+        "State the displayed contract, share price, strike distance in dollars and percent, bid/ask, bid yield, "
+        "estimated gross income, DTE, OI/volume, and spread quality when available. Never invent missing Greeks.\n"
+        "## What matters before expiration\n"
+        "List only 2-4 dated catalysts or risks that could plausibly affect the stock before this contract expires. "
+        "Explicitly say whether a scheduled earnings date falls before expiration; if it cannot be verified, say so.\n"
+        "## Fundamental pulse\n"
+        "Use 3-5 bullets covering the latest revenue growth, margins/profitability, cash/debt or dilution, guidance, "
+        "and valuation only when verifiable. Favor numbers and year-over-year comparisons over narrative.\n"
+        "## Bull / base / bear\n"
+        "Give one concise, company-specific line for each scenario and identify what would invalidate the base case.\n"
+        "## Bottom line\n"
+        "In 2-3 sentences explain the premium-versus-upside tradeoff and the most important item to verify before acting.\n\n"
+        "Keep the entire brief under 700 words. Omit company-history filler, methodology disclaimers, and repeated "
+        "identity information. Use short bullets and bold labels. Do not print raw URLs in the prose; citations are "
+        "shown separately by the application. Clearly distinguish facts from inference. Bid yield is bid divided by "
+        "share price, not expected return. Do not give personalized financial advice or assume holdings/suitability."
     )
     prompt = (
         f"Analyze ticker {symbol} (RHTC theme: {peak}).\n"
         f"Current dashboard quote/options snapshot, if available: {screen_json}\n"
-        "Search current public information, including recent filings and company news."
+        "Search current public information, including the next earnings date, recent filings, guidance, and company news."
     )
     try:
         from openai import AsyncOpenAI
@@ -543,8 +557,8 @@ async def analyze_symbol(data: SymbolAnalysisInput):
             tools=[{"type": "web_search"}],
             instructions=instructions,
             input=prompt,
-            max_output_tokens=2400,
-            max_tool_calls=5,
+            max_output_tokens=1500,
+            max_tool_calls=6,
             store=False,
         )
     except Exception as exc:
