@@ -52,7 +52,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('<span>Order by</span><select id="sort">', page.text)
         self.assertLess(page.text.index('Max Last'), page.text.index('<span>Order by</span>'))
         self.assertIn('app.css?v=fit-columns-1', page.text)
-        self.assertIn('app.js?v=qty-column-1', page.text)
+        self.assertIn('app.js?v=income-sort-1', page.text)
         self.assertIn('<th>CHG $</th><th>CHG %</th>', page.text)
         self.assertIn('title="Cost basis: share price × quantity from Manage symbols">COST</th>', page.text)
         self.assertIn('colspan="12"', page.text)
