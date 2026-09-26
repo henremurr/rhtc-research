@@ -218,6 +218,7 @@ class OptionsRoutesTest(unittest.TestCase):
 
     def test_pe_ratio_parser_prefers_trailing_and_ignores_forward_or_invalid_values(self):
         self.assertEqual(extract_pe_ratio({"ratios": {"peRatio": 18.4, "forwardPE": 14.2}}), 18.4)
+        self.assertEqual(extract_pe_ratio({"results": [{"tables": {"valuation_ratios": [{"p_e_ratio": 22.7, "forward_p_e_ratio": 12}]}}]}), 22.7)
         self.assertEqual(extract_pe_ratio({"priceEarningsRatioTTM": {"value": 22.7}, "forwardPE": 12}), 22.7)
         self.assertIsNone(extract_pe_ratio({"forwardPE": 12.5, "peRatio": -2}))
 

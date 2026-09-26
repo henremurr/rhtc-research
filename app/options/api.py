@@ -209,6 +209,12 @@ def extract_pe_ratio(payload: Any) -> float | None:
               "trailingpriceearningsratio", "trailingpricetoearningsratio"}
 
     def numeric(value: Any) -> float | None:
+        if isinstance(value, list):
+            for item in value:
+                found = numeric(item)
+                if found is not None:
+                    return found
+            return None
         if isinstance(value, dict):
             for key in ("value", "raw", "ttm", "latest", "current"):
                 if key in value:
