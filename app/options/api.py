@@ -364,7 +364,7 @@ class Tradier:
             g = selected.get("greeks") or {}
             exp = date.fromisoformat(expiry)
             return {
-                "symbol": symbol, "peak": peak, "price": price,
+                "symbol": symbol, "description": quote.get("description"), "peak": peak, "price": price,
                 "change": parse_number(quote.get("change"), price - parse_number(quote.get("prevclose"), price)),
                 "change_pct": parse_number(quote.get("change_percentage")),
                 "strike": parse_number(selected.get("strike")), "expiry": expiry,
@@ -587,11 +587,12 @@ async def chain(symbol: str):
             demo_row(symbol, item["peak"], expiry_override=today + timedelta(days=days), seed_offset=i)
             for i, days in enumerate((7, 14, 21, 28))
         ]
-        return {"symbol": symbol, "source": "demo", "message": "Illustrative preview values; not live market data.", "rows": rows}
+        return {"symbol": symbol, "description": None, "source": "demo", "message": "Illustrative preview values; not live market data.", "rows": rows}
     provider = Tradier(token)
     try:
         rows = await provider.option_sets(symbol, item["peak"], count=4)
-        return {"symbol": symbol, "source": data_source(), "rows": rows}
+        description = next((r.get("description") for r in rows if r.get("description")), None)
+        return {"symbol": symbol, "description": description, "source": data_source(), "rows": rows}
     except Exception as exc:
         raise HTTPException(502, f"Market data request failed: {exc}") from exc
     finally:

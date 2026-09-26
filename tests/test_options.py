@@ -94,9 +94,10 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertLess(page.text.index('<span>Rows</span>'), page.text.index('id="review-limit"'))
         self.assertIn('<span>Order by</span><select id="sort">', page.text)
         self.assertLess(page.text.index('Max Last'), page.text.index('<span>Order by</span>'))
-        self.assertIn('app.css?v=symbol-analysis-5', page.text)
-        self.assertIn('app.js?v=symbol-analysis-5', page.text)
+        self.assertIn('app.css?v=ticker-description-1', page.text)
+        self.assertIn('app.js?v=ticker-description-1', page.text)
         self.assertIn('id="symbol-analysis-modal"', page.text)
+        self.assertIn('id="detail-description"', page.text)
         self.assertIn('<th>CHG $</th><th>CHG %</th>', page.text)
         self.assertIn('title="Share price saved in Manage symbols">COST</th>', page.text)
         self.assertIn('colspan="12"', page.text)
@@ -112,6 +113,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('class="ticker-ai-btn"', script)
         self.assertIn('aria-label="Open ChatGPT deep analysis for ${safe(r.symbol)}"', script)
         self.assertIn('async function analyzeSymbol(symbol)', script)
+        self.assertIn("description.textContent=state.chainDescription", script)
         self.assertNotIn('title="View chain"', script)
         for label in ('Ticker', 'Peak', 'Last', 'Change $', 'Change %', 'Cost', 'Call contract', 'Qty', 'Bid / ask', 'Bid / ask yield', 'Income', 'OI / Vol'):
             self.assertIn(f'data-label="{label}"', script)
@@ -336,7 +338,7 @@ class OptionsRoutesTest(unittest.TestCase):
 
         async def provider_get(provider, path, params):
             if path.endswith("/quotes"):
-                return {"quotes": {"quote": {"last": 100, "change_percentage": 1}}}
+                return {"quotes": {"quote": {"last": 100, "change_percentage": 1, "description": "Micron Technology, Inc."}}}
             if path.endswith("/expirations"):
                 return {"expirations": {"date": expiries}}
             if params["expiration"] == expiries[0]:
@@ -352,6 +354,7 @@ class OptionsRoutesTest(unittest.TestCase):
         data = response.json()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(data["source"], "tradier_sandbox")
+        self.assertEqual(data["description"], "Micron Technology, Inc.")
         self.assertEqual([row["expiry"] for row in data["rows"]], expiries[1:])
         self.assertEqual([row["dte"] for row in data["rows"]], [5, 10, 17, 22])
         self.assertEqual([row["dte_window"] for row in data["rows"]], ["0-7 DTE", "8-14 DTE", "15-21 DTE", "22+ DTE"])
