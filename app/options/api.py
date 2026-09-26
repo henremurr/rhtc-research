@@ -537,7 +537,7 @@ async def analyze_symbol(data: SymbolAnalysisInput):
     )
     try:
         from openai import AsyncOpenAI
-        client = AsyncOpenAI(api_key=key, timeout=90)
+        client = AsyncOpenAI(api_key=key, timeout=45, max_retries=0)
         response = await client.responses.create(
             model=os.getenv("OPENAI_ANALYSIS_MODEL", os.getenv("OPENAI_MODEL", "gpt-5-mini")),
             tools=[{"type": "web_search"}],
