@@ -493,7 +493,8 @@ def screen_only_analysis(symbol: str, screen: dict[str, Any]) -> str:
     income_score = 4 if (bid_yield or 0) >= 2 else 3 if (bid_yield or 0) >= 1 else 2
     upside_score = 5 if (cushion or 0) >= 5 else 4 if (cushion or 0) >= 3 else 3 if (cushion or 0) >= 1 else 1
     liquidity_score = 5 if (oi or 0) >= 500 and (spread or 100) <= 10 else 4 if (oi or 0) >= 100 and (spread or 100) <= 20 else 3 if (oi or 0) >= 50 and (spread or 100) <= 30 else 2
-    verdict = "Strong" if income_score >= 4 and upside_score >= 3 and liquidity_score >= 3 else "Weak" if income_score <= 2 or liquidity_score <= 1 else "Mixed"
+    thin_market = (spread is not None and spread > 25) or (oi is not None and oi < 25)
+    verdict = "Weak" if thin_market or income_score <= 2 or liquidity_score <= 1 else "Strong" if income_score >= 4 and upside_score >= 3 and liquidity_score >= 3 else "Mixed"
     contract = str(screen.get("contract") or "the displayed call")
     snapshot = [
         f"- **Contract:** {contract}; {int(dte)} DTE." if dte is not None else f"- **Contract:** {contract}.",
@@ -573,6 +574,11 @@ async def analyze_symbol(data: SymbolAnalysisInput):
         "## Covered-call verdict\n"
         "Give a Strong / Mixed / Weak fit label and a one-sentence reason. Then show a compact scorecard with "
         "Income, Upside cushion, Event risk, and Liquidity each scored 1-5. Interpret only the supplied snapshot. "
+        "For every score, 5 must mean most favorable to a covered-call seller (so Event risk 5 means low event risk). "
+        "Apply strict verdict guardrails: Strong requires Income at least 4, Upside cushion at least 3, Liquidity at "
+        "least 3, and no known binary event before expiration. If the bid/ask spread exceeds 25% of the midpoint or "
+        "open interest is below 25, the verdict must be Weak regardless of the displayed premium. Never call a very "
+        "wide spread or thin market a Strong fit. "
         "State the displayed contract, share price, strike distance in dollars and percent, bid/ask, bid yield, "
         "estimated gross income, DTE, OI/volume, and spread quality when available. Never invent missing Greeks.\n"
         "## What matters before expiration\n"

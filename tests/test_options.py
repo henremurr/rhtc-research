@@ -150,6 +150,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertNotIn("secret", responses.kwargs["input"])
         self.assertIn("covered-call verdict", responses.kwargs["instructions"].lower())
         self.assertIn("in plain english", responses.kwargs["instructions"].lower())
+        self.assertIn("verdict must be weak", responses.kwargs["instructions"].lower())
         self.assertGreaterEqual(responses.kwargs["max_output_tokens"], 12000)
         self.assertEqual(responses.kwargs["reasoning"], {"effort": "low"})
 
