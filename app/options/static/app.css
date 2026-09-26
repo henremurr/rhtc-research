@@ -59,12 +59,12 @@
 .manage-symbols-btn{height:31px;padding:0 12px;border:1px solid #e2e7eb;border-radius:4px;background:#fff;color:#687584;font:10px var(--sans);cursor:pointer}
 .manage-symbols-btn:hover{border-color:#cbb77f;color:#896f36;background:#fbf8f0}
 .symbols-modal{width:min(650px,100%);max-height:88vh;overflow:auto}
-.symbol-add-form{display:grid;grid-template-columns:1.15fr 1.25fr .8fr .8fr auto;align-items:end;gap:10px;margin:18px 0 16px;padding:13px;background:#f8f9fa;border:1px solid #edf0f2;border-radius:5px}
+.symbol-add-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:end;gap:10px;margin:18px 0 16px;padding:13px;background:#f8f9fa;border:1px solid #edf0f2;border-radius:5px}
 .symbol-add-form label{display:flex;flex-direction:column;gap:6px;color:#85909b;font:9px var(--mono);text-transform:uppercase;letter-spacing:.5px}
 .symbol-add-form input,.symbol-add-form select,.symbol-edit-ticker,.symbol-edit-peak,.symbol-edit-price,.symbol-edit-quantity{height:34px;min-width:0;padding:0 9px;border:1px solid #e1e6ea;border-radius:4px;background:white;color:#405064;font:11px var(--sans);outline:none}
 .symbol-add-form input:focus,.symbol-add-form select:focus,.symbol-edit-ticker:focus,.symbol-edit-peak:focus,.symbol-edit-price:focus,.symbol-edit-quantity:focus{border-color:#b9a16a;box-shadow:0 0 0 2px #b9a16a22}
 .symbol-add-form>button,.symbol-actions button,.symbol-entry.editing button{height:32px;padding:0 10px;border:1px solid #e2e7eb;border-radius:4px;background:#fff;color:#596778;font:10px var(--sans);cursor:pointer}
-.symbol-add-form>button{background:#263548;color:#fff;border-color:#263548;white-space:nowrap}
+.symbol-add-form>button{grid-column:1/-1;width:100%;display:block;background:#263548;color:#fff;border-color:#263548;white-space:nowrap}
 .symbol-manager-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;color:#929ca6;font:9px var(--mono)}
 .symbol-manager-toolbar .searchbox{height:30px;min-width:160px}
 .symbol-manager-toolbar .searchbox input{width:100%;font-size:10px}
