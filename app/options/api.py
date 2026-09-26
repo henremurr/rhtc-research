@@ -449,6 +449,30 @@ def basic_summary(rows: list[dict[str, Any]], source: str) -> str:
     return f"{label}: {len(valid)} call candidates are available; median bid yield is {median:.2f}%. Highest displayed ratios: {items}. These are screening metrics only. Confirm quote time, bid size, open interest, contract coverage, and the underlying before acting."
 
 
+def openai_error_message(exc: Exception) -> str:
+    status = getattr(exc, "status_code", None)
+    code = getattr(exc, "code", None)
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        error = body.get("error", body)
+        if isinstance(error, dict):
+            code = error.get("code") or code
+    text = str(exc).lower()
+    if status == 401:
+        return "OpenAI rejected the API key. Create a new key and replace OPENAI_API_KEY in Railway."
+    if status == 429 and (code == "insufficient_quota" or "quota" in text or "billing" in text):
+        return "OpenAI API billing or credits are unavailable. Add an API payment method or prepaid credits, then try again."
+    if status == 429:
+        return "OpenAI is temporarily rate limiting requests. Wait briefly and try again."
+    if status == 403:
+        return "This OpenAI project does not have permission to use the requested model or web search."
+    if status == 400:
+        return "OpenAI rejected the analysis request. Check the project model access and OPENAI_ANALYSIS_MODEL setting."
+    if "timeout" in text or "timed out" in text:
+        return "The OpenAI analysis timed out. Try again in a moment."
+    return "ChatGPT could not complete the analysis. Try again in a moment."
+
+
 @app.post("/api/summary")
 async def summarize(data: SummaryInput):
     rows = data.rows
@@ -524,7 +548,7 @@ async def analyze_symbol(data: SymbolAnalysisInput):
             store=False,
         )
     except Exception as exc:
-        raise HTTPException(502, "ChatGPT could not complete the analysis. Try again in a moment.") from exc
+        raise HTTPException(502, openai_error_message(exc)) from exc
 
     citations: list[dict[str, str]] = []
     seen_urls: set[str] = set()

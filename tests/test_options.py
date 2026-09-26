@@ -11,7 +11,7 @@ from unittest.mock import patch
 import httpx
 
 from main import app
-from app.options.api import Tradier, WATCHLIST, format_option_contract
+from app.options.api import Tradier, WATCHLIST, format_option_contract, openai_error_message
 
 
 class OptionsRoutesTest(unittest.TestCase):
@@ -119,6 +119,14 @@ class OptionsRoutesTest(unittest.TestCase):
             response = self.request("POST", "/options/api/symbol-analysis", json={"symbol": "MU"})
         self.assertEqual(response.status_code, 503)
         self.assertIn("OPENAI_API_KEY", response.json()["detail"])
+
+    def test_openai_errors_are_translated_into_actionable_messages(self):
+        quota = types.SimpleNamespace(status_code=429, code="insufficient_quota", body=None)
+        rejected = types.SimpleNamespace(status_code=401, code=None, body=None)
+        model = types.SimpleNamespace(status_code=400, code=None, body=None)
+        self.assertIn("billing or credits", openai_error_message(quota))
+        self.assertIn("rejected the API key", openai_error_message(rejected))
+        self.assertIn("model access", openai_error_message(model))
 
     def test_symbol_analysis_uses_web_search_and_returns_clickable_citations(self):
         class FakeResponses:
