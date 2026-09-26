@@ -9,7 +9,7 @@ from unittest.mock import patch
 import httpx
 
 from main import app
-from app.options.api import Tradier, WATCHLIST, format_option_contract
+from app.options.api import Tradier, WATCHLIST, extract_pe_ratio, format_option_contract
 
 
 class OptionsRoutesTest(unittest.TestCase):
@@ -215,6 +215,11 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual(format_option_contract("2026-09-05", 105), "20260905-105.0")
         self.assertEqual(format_option_contract("2026-09-05", "105.500"), "20260905-105.5")
         self.assertEqual(format_option_contract("2026-09-05", "105.250"), "20260905-105.25")
+
+    def test_pe_ratio_parser_prefers_trailing_and_ignores_forward_or_invalid_values(self):
+        self.assertEqual(extract_pe_ratio({"ratios": {"peRatio": 18.4, "forwardPE": 14.2}}), 18.4)
+        self.assertEqual(extract_pe_ratio({"priceEarningsRatioTTM": {"value": 22.7}, "forwardPE": 12}), 22.7)
+        self.assertIsNone(extract_pe_ratio({"forwardPE": 12.5, "peRatio": -2}))
 
     def test_chain_pages_through_four_expiration_sets(self):
         expiries = [(date.today() + timedelta(days=days)).isoformat() for days in (2, 5, 10, 17, 22)]
