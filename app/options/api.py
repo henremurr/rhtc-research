@@ -8,7 +8,6 @@ import random
 import math
 import re
 import sqlite3
-import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -180,7 +179,7 @@ def demo_row(
     bid = round(max(.05, price * rng.uniform(.006, .035)), 2)
     ask = round(bid + rng.uniform(.03, .30), 2)
     return {
-        "symbol": symbol, "peak": peak, "price": price, "change": change, "change_pct": change_pct, "pe_ratio": None,
+        "symbol": symbol, "peak": peak, "price": price, "change": change, "change_pct": change_pct,
         "strike": strike, "expiry": expiry.isoformat(), "dte": (expiry - date.today()).days,
         "bid": bid, "ask": ask, "mid": round((bid + ask) / 2, 2),
         "premium_yield": round(bid / price * 100, 2), "delta": round(rng.uniform(.18, .42), 2),
@@ -197,91 +196,20 @@ def parse_number(value: Any, default: float = 0.0) -> float:
         return default
 
 
-PE_CACHE: dict[str, tuple[float, float | None]] = {}
-PE_CACHE_TTL_SECONDS = 6 * 60 * 60
-
-
-def extract_pe_ratio(payload: Any) -> float | None:
-    """Find a positive trailing or generic P/E value in Tradier's nested ratios response."""
-    candidates: list[tuple[int, float]] = []
-    fields = {"pe", "peratio", "peratiottm", "pettm", "trailingpe", "trailingperatio", "trailingpettm",
-              "priceearningsratio", "priceearningsratiottm", "pricetoearningsratio", "pricetoearningsratiottm",
-              "trailingpriceearningsratio", "trailingpricetoearningsratio"}
-
-    def numeric(value: Any) -> float | None:
-        if isinstance(value, list):
-            for item in value:
-                found = numeric(item)
-                if found is not None:
-                    return found
-            return None
-        if isinstance(value, dict):
-            for key in ("value", "raw", "ttm", "latest", "current"):
-                if key in value:
-                    found = numeric(value[key])
-                    if found is not None:
-                        return found
-            for nested in value.values():
-                found = numeric(nested)
-                if found is not None:
-                    return found
-            return None
-        try:
-            result = float(value)
-        except (TypeError, ValueError):
-            return None
-        return result if math.isfinite(result) and result > 0 else None
-
-    def walk(value: Any) -> None:
-        if isinstance(value, dict):
-            for key, item in value.items():
-                normalized = re.sub(r"[^a-z0-9]", "", str(key).lower())
-                if "forward" not in normalized and normalized in fields:
-                    ratio = numeric(item)
-                    if ratio is not None:
-                        rank = 0 if "trailing" in normalized or "ttm" in normalized else 1
-                        candidates.append((rank, ratio))
-                walk(item)
-        elif isinstance(value, list):
-            for item in value:
-                walk(item)
-
-    walk(payload)
-    return min(candidates, key=lambda item: item[0])[1] if candidates else None
-
-
 class Tradier:
     DTE_WINDOWS = ((0, 7), (8, 14), (15, 21), (22, None))
 
     def __init__(self, token: str):
-        base_url = os.getenv("TRADIER_BASE_URL", "https://sandbox.tradier.com/v1").rstrip("/")
-        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
         self.client = httpx.AsyncClient(
-            base_url=base_url,
-            headers=headers,
+            base_url=os.getenv("TRADIER_BASE_URL", "https://sandbox.tradier.com/v1"),
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
             timeout=20,
         )
-        beta_base_url = base_url[:-3] + "/beta" if base_url.endswith("/v1") else base_url + "/beta"
-        self.fundamentals_client = httpx.AsyncClient(base_url=beta_base_url, headers=headers, timeout=20)
 
     async def get(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
         response = await self.client.get(path, params=params)
         response.raise_for_status()
         return response.json()
-
-    async def get_pe_ratio(self, symbol: str) -> float | None:
-        now = time.monotonic()
-        cached = PE_CACHE.get(symbol)
-        if cached and now - cached[0] < PE_CACHE_TTL_SECONDS:
-            return cached[1]
-        try:
-            response = await self.fundamentals_client.get("/markets/fundamentals/ratios", params={"symbols": symbol})
-            response.raise_for_status()
-            value = extract_pe_ratio(response.json())
-        except (httpx.HTTPError, ValueError):
-            return None
-        PE_CACHE[symbol] = (now, value)
-        return value
 
     async def option_sets(self, symbol: str, peak: str, count: int = 4, only_set: int | None = None) -> list[dict[str, Any]]:
         qdata = await self.get("/markets/quotes", {"symbols": symbol})
@@ -291,9 +219,6 @@ class Tradier:
         price = parse_number(quote.get("last")) or parse_number(quote.get("close"))
         if price <= 0:
             raise ValueError("No underlying price returned")
-        pe_ratio = parse_number(quote.get("pe_ratio"), None)
-        if pe_ratio is None or pe_ratio <= 0:
-            pe_ratio = await self.get_pe_ratio(symbol)
 
         edata = await self.get("/markets/options/expirations", {"symbol": symbol, "includeAllRoots": "false"})
         expiration_data = edata.get("expirations", {})
@@ -328,7 +253,6 @@ class Tradier:
                 "symbol": symbol, "peak": peak, "price": price,
                 "change": parse_number(quote.get("change"), price - parse_number(quote.get("prevclose"), price)),
                 "change_pct": parse_number(quote.get("change_percentage")),
-                "pe_ratio": pe_ratio,
                 "strike": parse_number(selected.get("strike")), "expiry": expiry,
                 "dte": (exp - today).days, "bid": bid, "ask": ask,
                 "mid": round((bid + ask) / 2, 2), "premium_yield": round(bid / price * 100, 2),
@@ -372,7 +296,6 @@ class Tradier:
 
     async def close(self) -> None:
         await self.client.aclose()
-        await self.fundamentals_client.aclose()
 
 
 @app.get("/")
