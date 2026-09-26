@@ -149,7 +149,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('"price":100', responses.kwargs["input"])
         self.assertNotIn("secret", responses.kwargs["input"])
         self.assertIn("covered-call verdict", responses.kwargs["instructions"].lower())
-        self.assertLessEqual(responses.kwargs["max_output_tokens"], 1500)
+        self.assertGreaterEqual(responses.kwargs["max_output_tokens"], 4000)
 
     def test_max_last_ceiling_filters_screen_and_blank_leaves_it_unfiltered(self):
         with patch.dict(os.environ, {}, clear=True):

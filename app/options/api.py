@@ -557,7 +557,9 @@ async def analyze_symbol(data: SymbolAnalysisInput):
             tools=[{"type": "web_search"}],
             instructions=instructions,
             input=prompt,
-            max_output_tokens=1500,
+            # Reasoning tokens count against this budget. A web-search response can
+            # otherwise exhaust a small budget before producing visible text.
+            max_output_tokens=4000,
             max_tool_calls=6,
             store=False,
         )
