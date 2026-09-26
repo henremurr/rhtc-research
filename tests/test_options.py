@@ -70,7 +70,10 @@ class OptionsRoutesTest(unittest.TestCase):
             self.assertIn(f'data-label="{label}"', script)
         self.assertIn('function quantityForPrice(price)', script)
         self.assertIn('Math.trunc(ceiling/last)', script)
-        self.assertIn(')*100*(qtyValue??1)', script)
+        self.assertIn('function incomeForRow(row)', script)
+        self.assertIn('return ((bid+ask)/2)*100*quantityForPrice(row.price)', script)
+        self.assertIn("else if(state.sort==='income')", script)
+        self.assertIn('return bi-ai', script)
         css = self.request("GET", "/options/static/app.css").text
         self.assertIn('.review-limit-control{height:31px;display:flex;align-items:center;', css)
         self.assertIn('.sort-control{height:31px;display:flex;align-items:center;', css)
