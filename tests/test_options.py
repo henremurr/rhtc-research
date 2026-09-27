@@ -124,6 +124,9 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('async function analyzeSymbol(symbol)', script)
         self.assertIn('function toggleAnalysisSpeech()', script)
         self.assertIn('read.hidden=!supported', script)
+        self.assertIn("$('#analysis-read-btn').addEventListener('click',toggleAnalysisSpeech)", script)
+        self.assertIn("$('#analysis-stop-btn').addEventListener('click',()=>stopAnalysisSpeech())", script)
+        self.assertIn("window.hideSymbolAnalysis=()=>{stopAnalysisSpeech();", script)
         self.assertIn("description.textContent=state.chainDescription", script)
         self.assertNotIn('title="View chain"', script)
         for label in ('Ticker', 'Peak', 'Last', 'Change $', 'Change %', 'Cost', 'Call contract', 'Qty', 'Bid / ask', 'Bid / ask yield', 'Income', 'OI / Vol'):
