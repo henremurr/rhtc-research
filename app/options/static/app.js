@@ -59,7 +59,40 @@ function updateStats(){let good=state.rows.filter(r=>!r.error&&Number.isFinite(N
 async function loadRows({ai=false,snapshot=false}={}){const btn=$('#refresh');btn.disabled=true;$('.refresh-icon').classList.add('spin');$('#rows').innerHTML='<tr><td colspan="12" class="loading">Loading the RHTC option screen…</td></tr>';try{const p=new URLSearchParams({peak:state.peak,q:state.query,sort:state.sort,limit:String(state.scanLimit),expiration_set:String(state.expirationSet),holdings_only:String(state.costOnly)});const maxLast=$('#max-last').value.trim();if(maxLast!=='')p.set('max_last',maxLast);const res=await fetch(`/options/api/opportunities?${p}`);if(!res.ok)throw Error(await res.text());const data=await res.json();state.rows=data.rows;state.source=data.source;updateStats();drawPeakBars();renderRows();if(snapshot)saveSnapshot();if(ai)await loadSummary();}catch(e){$('#rows').innerHTML=`<tr><td colspan="12" class="empty">Could not load data: ${safe(e.message)}. Check the server connection and try again.</td></tr>`;toast('Refresh failed. See the table message.')}finally{btn.disabled=false;$('.refresh-icon').classList.remove('spin')}}
 function saveSnapshot(){if(!state.rows.length)return;const history=JSON.parse(localStorage.getItem('rhtc-option-history')||'[]');history.push({at:new Date().toISOString(),rows:state.rows.map(({symbol,peak,price,change,change_pct,strike,expiry,dte,bid,ask,premium_yield,delta,iv,open_interest,volume,bid_size,ask_size,quote_time,contract,share_price,quantity})=>({symbol,peak,price,change,change_pct,strike,expiry,dte,bid,ask,premium_yield,delta,iv,open_interest,volume,contract,share_price,quantity}))});localStorage.setItem('rhtc-option-history',JSON.stringify(history.slice(-12)))}
 async function loadSummary(){let text=$('#ai-summary-text');if(!text)return;text.innerHTML='<span class="summary-loading">Reviewing the latest screen…</span>';try{const response=await fetch('/options/api/summary',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:state.source,rows:state.rows})});const data=await response.json();text.textContent=data.summary;$('#ai-summary-mode').textContent=data.mode==='openai'?'OPENAI SUMMARY':'RULE-BASED SUMMARY';}catch(e){text.textContent='Summary is unavailable. The quote table remains available for review.'}}
-function renderChainPage(){const x=state.chainRows[state.chainIndex];if(!x)return;$('#chain-page').textContent=DTE_WINDOWS[state.chainIndex]||x.dte_window||'';$('#chain-prev').disabled=state.chainIndex===0;$('#chain-next').disabled=state.chainIndex===state.chainRows.length-1;if(x.error){$('#detail-subtitle').textContent=x.dte_window||DTE_WINDOWS[state.chainIndex];$('#detail-content').innerHTML=`<p class="error-text">${safe(x.error)}</p>`;return}$('#detail-subtitle').textContent=`${x.expiry} · ${x.dte} days to expiration`;$('#detail-content').innerHTML=`<div class="detail-grid"><div><small>Underlying</small><b>$${fmt(x.price)}</b></div><div><small>Nearest OTM strike</small><b>$${fmt(x.strike)}</b></div><div><small>Bid / ask</small><b>$${fmt(x.bid)} / $${fmt(x.ask)}</b></div><div><small>Bid yield</small><b>${fmt(x.premium_yield)}%</b></div><div><small>Delta / IV</small><b>${fmt(x.delta,2)} / ${fmt(x.iv,1)}%</b></div><div><small>Bid / ask size</small><b>${Number(x.bid_size||0).toLocaleString()} / ${Number(x.ask_size||0).toLocaleString()}</b></div><div><small>Open interest / volume</small><b>${Number(x.open_interest||0).toLocaleString()} / ${Number(x.volume||0).toLocaleString()}</b></div><div><small>Quote timestamp</small><b>${safe(x.quote_time||'Unavailable')}</b></div></div><p class="detail-note">${state.chainSource==='demo'?'Illustrative preview values; not live market data.':state.chainSource==='tradier_sandbox'?'Tradier sandbox data may be delayed. Check quote time and liquidity before relying on it.':'Quote from Tradier. Check quote time and liquidity before relying on it.'} This is the closest call strike above the share price for this expiration.</p>`}
+function renderChainPage(){
+  const x=state.chainRows[state.chainIndex];
+  if(!x)return;
+  $('#chain-page').textContent=DTE_WINDOWS[state.chainIndex]||x.dte_window||'';
+  $('#chain-prev').disabled=state.chainIndex===0;
+  $('#chain-next').disabled=state.chainIndex===state.chainRows.length-1;
+  if(x.error){
+    $('#detail-subtitle').textContent=x.dte_window||DTE_WINDOWS[state.chainIndex];
+    $('#detail-content').innerHTML='<p class="error-text">'+safe(x.error)+'</p>';
+    return;
+  }
+  $('#detail-subtitle').textContent='Selected call candidate · '+(x.dte_window||DTE_WINDOWS[state.chainIndex]||'');
+  const note=state.chainSource==='demo'
+    ?'Illustrative preview values; not live market data.'
+    :state.chainSource==='tradier_sandbox'
+      ?'Tradier sandbox data may be delayed. Check quote time and liquidity before relying on it.'
+      :'Quote from Tradier. Check quote time and liquidity before acting.';
+  $('#detail-content').innerHTML=
+    '<div class="detail-call-block">'+
+      '<div><small>Call strike</small><b>$'+fmt(x.strike)+'</b></div>'+
+      '<div><small>Expiration date</small><b>'+safe(x.expiry)+'</b></div>'+
+      '<div><small>Days to expiration</small><b>'+Number(x.dte)+' days</b></div>'+
+      '<div><small>Call bid / ask</small><b>$'+fmt(x.bid)+' / $'+fmt(x.ask)+'</b></div>'+
+      '<div><small>Bid yield</small><b>'+fmt(x.premium_yield)+'%</b></div>'+
+    '</div>'+
+    '<div class="detail-grid">'+
+      '<div><small>Underlying</small><b>$'+fmt(x.price)+'</b></div>'+
+      '<div><small>Delta / IV</small><b>'+fmt(x.delta,2)+' / '+fmt(x.iv,1)+'%</b></div>'+
+      '<div><small>Bid / ask size</small><b>'+Number(x.bid_size||0).toLocaleString()+' / '+Number(x.ask_size||0).toLocaleString()+'</b></div>'+
+      '<div><small>Open interest / volume</small><b>'+Number(x.open_interest||0).toLocaleString()+' / '+Number(x.volume||0).toLocaleString()+'</b></div>'+
+      '<div><small>Quote timestamp</small><b>'+safe(x.quote_time||'Unavailable')+'</b></div>'+
+    '</div>'+
+    '<p class="detail-note">'+note+' This is the closest call strike above the share price for this expiration.</p>';
+}
 function quoteCell(label,value,kind='price'){
   let shown='—';
   if(value!==null&&value!==undefined&&value!==''&&Number.isFinite(Number(value))){
