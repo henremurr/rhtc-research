@@ -5,7 +5,7 @@
   <title>RHTC Options Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/options/static/app.css?v=ticker-description-1">
+  <link rel="stylesheet" href="/options/static/app.css?v=rhtc-news-1">
 </head>
 <body>
 <div class="shell">
@@ -15,6 +15,7 @@
     <button class="nav-item active"><span class="nav-icon">▦</span> Covered Call Screening Tool <span class="nav-count" id="count-overview">127</span></button>
     <button class="nav-item" data-filter="holdings"><span class="nav-icon">◈</span> Focus symbols</button>
     <button class="nav-item" data-filter="history"><span class="nav-icon">◷</span> Snapshot history</button>
+    <button class="nav-item" data-filter="news"><span class="nav-icon">▤</span> RHTC News <span class="nav-count" id="count-news">—</span></button>
     <div class="nav-label peaks-label">THREE PEAKS</div>
     <button class="peak-item selected" data-peak="All Peaks"><span class="peak-dot all"></span> All watchlist <span class="peak-count" id="count-all">127</span></button>
     <button class="peak-item" data-peak="Holdings"><span class="peak-dot holdings"></span> Holdings <span class="peak-count" id="count-holdings">0</span></button>
@@ -27,6 +28,7 @@
   <main class="main">
     <header class="topbar"><div class="crumb">RESEARCH <span>/</span> OPTIONS</div><div class="top-actions"><div class="market-state"><span class="market-dot"></span><span>US MARKET</span><span class="sep">·</span><span id="market-clock">--:-- ET</span></div><button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch to dark mode" title="Switch to dark mode">☾</button><button class="logout-btn" id="dashboard-logout" type="button">Log out</button></div></header>
     <div class="content">
+      <div id="options-view">
       <div class="page-head"><div><div class="eyebrow">THREE PEAKS · INCOME ENGINE</div><h1>Covered Call Screening Tool</h1><p class="subhead">Screening ratios across the RHTC research watchlist.</p></div><div class="head-actions"><span class="source-pill" id="source-pill"><span class="source-dot"></span> DEMO DATA</span><button class="manage-symbols-btn" id="manage-symbols" type="button">Manage symbols</button><button class="refresh-btn" id="refresh"><span class="refresh-icon">↻</span> Refresh quotes</button></div></div>
       <div class="demo-alert" id="demo-alert"><span class="alert-symbol">ⓘ</span><div><b>Preview data only</b><span>Sample values are shown. Add your Tradier API token in the deployment environment to load market data.</span></div><button onclick="this.parentElement.remove()" aria-label="Dismiss">×</button></div>
       <section class="metric-grid">
@@ -47,6 +49,15 @@
         <article class="content-card note-card"><div class="section-title"><div><h2>Screening notes</h2><p>How candidate rows are selected</p></div><span class="note-icon">✳</span></div><div class="note-list"><div><span class="note-num">01</span><p><b>Nearest listed expiry</b><br>Uses the first available expiration on or after today.</p></div><div><span class="note-num">02</span><p><b>Nearest out-of-the-money call</b><br>Selects the closest call strike above the share price.</p></div><div><span class="note-num">03</span><p><b>Premium ratio, not a return forecast</b><br>Bid ÷ share price; excludes assignment, tax, and opportunity-cost assumptions.</p></div></div></article>
       </section>
       <footer class="footer"><span>RHTC OPTIONS MONITOR <i>·</i> INTERNAL RESEARCH</span><span id="foot-source">Data mode: demo</span></footer>
+      </div>
+      <section id="news-view" class="news-view" hidden>
+        <div class="page-head"><div><div class="eyebrow">THREE PEAKS · DAILY RESEARCH SCAN</div><h1>RHTC News Feed</h1><p class="subhead">New developments across AI compute, power and fuels, defense and security, and space.</p></div><div class="head-actions"><span class="source-pill news-status" id="news-last-scanned">Checking scan status…</span><button class="refresh-btn" id="scan-news" type="button"><span class="refresh-icon">↻</span> Scan for news</button></div></div>
+        <section class="content-card news-card">
+          <div class="table-header"><div><h2>Recent stories</h2><p id="news-count">Loading saved stories…</p></div><div class="table-controls"><label class="review-limit-control"><span>Peak</span><select id="news-peak" aria-label="Filter news by RHTC peak"><option value="All">All Peaks</option><option value="AI/I">AI / Infrastructure</option><option value="EFM/I">Energy / Infrastructure</option><option value="DS/I">Defense / Space</option><option value="Cross-Peak">Cross-Peak</option><option value="Other">Other</option></select></label><label class="searchbox"><span>⌕</span><input id="news-search" type="search" placeholder="Search stories" autocomplete="off"></label></div></div>
+          <div id="news-items" class="news-items"><p class="loading">Loading recent news…</p></div>
+          <div class="table-footer"><span>Perplexity Search · refreshed daily at 6:00 a.m. Pacific</span><span>Headlines link to original sources. Summaries are source snippets.</span></div>
+        </section>
+      </section>
     </div>
   </main>
 </div>
@@ -55,6 +66,6 @@
 <div class="modal-backdrop" id="settings-modal" onclick="if(event.target===this)hideSettings()"><div class="modal"><button class="modal-close" onclick="hideSettings()">×</button><div class="eyebrow">CONNECTION SETTINGS</div><h2>Market data source</h2><p>This dashboard reads <code>TRADIER_API_TOKEN</code> from the server environment. The token is never sent to the browser. Without it, the interface uses clearly labeled demo values.</p><div class="setting-row"><span>Provider</span><b>Tradier Brokerage API</b></div><div class="setting-row"><span>Current mode</span><b id="modal-mode">Demo</b></div><div class="setting-hint">For live data, configure the sandbox token in Railway Variables when deployment is approved. Sandbox quotes are delayed by about 15 minutes. Refresh loads the RHTC watchlist from the server.</div><button class="refresh-btn modal-done" onclick="hideSettings()">Done</button></div></div>
 <div class="modal-backdrop" id="detail-modal" onclick="if(event.target===this)hideDetail()"><div class="modal detail-modal"><button class="modal-close" onclick="hideDetail()">×</button><div class="eyebrow">OPTION CANDIDATE</div><h2 id="detail-title">Covered-call screen</h2><p id="detail-description" class="detail-description" hidden></p><p id="detail-subtitle"></p><div class="chain-pager"><button id="chain-prev" type="button" aria-label="Previous expiration">‹ Previous</button><span id="chain-page">0–7 DTE</span><button id="chain-next" type="button" aria-label="Next expiration">Next ›</button></div><div id="detail-content"></div><button class="refresh-btn modal-done" onclick="hideDetail()">Close</button></div></div>
 <div class="modal-backdrop" id="symbol-analysis-modal" onclick="if(event.target===this)hideSymbolAnalysis()"><div class="modal analysis-modal"><button class="modal-close" onclick="hideSymbolAnalysis()" aria-label="Close ChatGPT analysis">×</button><div class="eyebrow">CHATGPT RESEARCH</div><h2 id="symbol-analysis-title">Ticker · Deep analysis</h2><p id="symbol-analysis-subtitle"></p><div id="symbol-analysis-status" class="analysis-status" role="status" aria-live="polite"></div><div id="symbol-analysis-body" class="analysis-body"></div><div class="analysis-sources-wrap"><h3>Sources</h3><ol id="symbol-analysis-sources" class="analysis-sources"></ol></div><button class="refresh-btn modal-done" onclick="hideSymbolAnalysis()">Close</button></div></div>
-<script src="/options/static/app.js?v=ticker-description-1"></script>
+<script src="/options/static/app.js?v=rhtc-news-1"></script>
 </body>
 </html>
