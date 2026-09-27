@@ -11,7 +11,7 @@ from unittest.mock import patch
 import httpx
 
 from main import app
-from app.options.api import Tradier, WATCHLIST, format_option_contract, openai_error_message
+from app.options.api import Tradier, WATCHLIST, format_option_contract, openai_error_message, split_speech_chunks, strip_mp3_metadata
 from app.options import news
 
 
@@ -95,8 +95,10 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertLess(page.text.index('<span>Rows</span>'), page.text.index('id="review-limit"'))
         self.assertIn('<span>Order by</span><select id="sort">', page.text)
         self.assertLess(page.text.index('Max Last'), page.text.index('<span>Order by</span>'))
-        self.assertIn('app.css?v=rhtc-analysis-readaloud-1', page.text)
-        self.assertIn('app.js?v=rhtc-analysis-readaloud-2', page.text)
+        self.assertIn('app.css?v=rhtc-analysis-podcast-1', page.text)
+        self.assertIn('app.js?v=rhtc-analysis-readaloud-4', page.text)
+        self.assertIn('id="analysis-mp3-btn"', page.text)
+        self.assertIn('id="analysis-podcast-transcript"', page.text)
         self.assertIn('data-filter="news"', page.text)
         self.assertIn('id="news-view"', page.text)
         self.assertIn('id="news-items"', page.text)
@@ -126,6 +128,9 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('read.hidden=!supported', script)
         self.assertIn("$('#analysis-read-btn').addEventListener('click',toggleAnalysisSpeech)", script)
         self.assertIn("$('#analysis-stop-btn').addEventListener('click',()=>stopAnalysisSpeech())", script)
+        self.assertIn("$('#analysis-mp3-btn').addEventListener('click',createAnalysisPodcast)", script)
+        self.assertIn("/options/api/analysis-podcast/transcript", script)
+        self.assertIn("/options/api/analysis-podcast/audio", script)
         self.assertIn("window.hideSymbolAnalysis=()=>{stopAnalysisSpeech();", script)
         self.assertIn("description.textContent=state.chainDescription", script)
         self.assertNotIn('title="View chain"', script)
@@ -276,6 +281,61 @@ class OptionsRoutesTest(unittest.TestCase):
             summary = self.request("POST", "/options/api/summary", json={"source": "demo", "rows": data["rows"]})
             self.assertEqual(summary.json()["mode"], "rules")
             self.assertIn("Illustrative", summary.json()["summary"])
+
+
+    def test_analysis_podcast_transcript_uses_source_analysis_and_enforces_limit(self):
+        class FakeResponses:
+            async def create(self, **kwargs):
+                self.kwargs = kwargs
+                return types.SimpleNamespace(output_text="Welcome to RHTC Policy & Power. This episode reviews the supplied analysis.")
+
+        responses = FakeResponses()
+        fake_openai = types.SimpleNamespace(AsyncOpenAI=lambda **kwargs: types.SimpleNamespace(responses=responses))
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key", "OPENAI_PODCAST_SCRIPT_MODEL": "test-script-model"}, clear=False):
+            with patch.dict(sys.modules, {"openai": fake_openai}):
+                result = self.request("POST", "/options/api/analysis-podcast/transcript", json={
+                    "title": "MU · Deep analysis", "subtitle": "AI / Infrastructure", "analysis": "Source analysis has this verified fact."
+                })
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json()["character_count"], len(result.json()["transcript"]))
+        self.assertLessEqual(result.json()["character_count"], 11500)
+        self.assertEqual(responses.kwargs["model"], "test-script-model")
+        self.assertIn("Source analysis has this verified fact.", responses.kwargs["input"])
+        self.assertIn("under 11,500 characters", responses.kwargs["instructions"])
+
+    def test_analysis_podcast_audio_splits_text_and_returns_mp3(self):
+        calls = []
+
+        class FakeSpeech:
+            async def create(self, **kwargs):
+                calls.append(kwargs)
+                return types.SimpleNamespace(content=b"\\xff\\xfbframe" + bytes([len(calls)]))
+
+        fake_openai = types.SimpleNamespace(AsyncOpenAI=lambda **kwargs: types.SimpleNamespace(audio=types.SimpleNamespace(speech=FakeSpeech())))
+        transcript = "Opening sentence. " + ("careful podcast narration " * 220)
+        self.assertEqual(strip_mp3_metadata(b"\\xff\\xfbframe"), b"\\xff\\xfbframe")
+        chunks = split_speech_chunks(transcript)
+        self.assertGreater(len(chunks), 1)
+        self.assertTrue(all(len(chunk) <= 4096 for chunk in chunks))
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=False):
+            with patch.dict(sys.modules, {"openai": fake_openai}):
+                response = self.request("POST", "/options/api/analysis-podcast/audio", json={"title": "MU Deep Analysis", "transcript": transcript})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "audio/mpeg")
+        self.assertIn("RHTC_mu-deep-analysis_Spotify.mp3", response.headers["content-disposition"])
+        self.assertEqual(len(calls), len(chunks))
+        self.assertTrue(all(call["model"] == "gpt-4o-mini-tts" and call["response_format"] == "mp3" for call in calls))
+        self.assertTrue(all(len(call["input"]) <= 4096 for call in calls))
+        self.assertEqual(response.content, b"".join(b"\\xff\\xfbframe" + bytes([i]) for i in range(1, len(calls) + 1)))
+
+    def test_analysis_podcast_endpoints_require_dashboard_auth_and_openai_key(self):
+        unauthorized = self.request("POST", "/options/api/analysis-podcast/transcript", authenticated=False, json={"title": "Story", "analysis": "Some analysis"})
+        self.assertEqual(unauthorized.status_code, 401)
+        with patch.dict(os.environ, {"OPENAI_API_KEY": ""}, clear=False):
+            unavailable = self.request("POST", "/options/api/analysis-podcast/transcript", json={"title": "Story", "analysis": "Some analysis"})
+        self.assertEqual(unavailable.status_code, 503)
+        too_long = self.request("POST", "/options/api/analysis-podcast/audio", json={"title": "Story", "transcript": "x" * 11501})
+        self.assertEqual(too_long.status_code, 422)
 
     def test_symbol_analysis_requires_server_openai_key(self):
         with patch.dict(os.environ, {}, clear=True):
