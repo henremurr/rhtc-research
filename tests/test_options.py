@@ -95,7 +95,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertLess(page.text.index('<span>Rows</span>'), page.text.index('id="review-limit"'))
         self.assertIn('<span>Order by</span><select id="sort">', page.text)
         self.assertLess(page.text.index('Max Last'), page.text.index('<span>Order by</span>'))
-        self.assertIn('app.css?v=rhtc-analysis-readaloud-1', page.text)
+        self.assertIn('app.css?v=rhtc-analysis-podcast-1', page.text)
         self.assertIn('app.js?v=rhtc-analysis-readaloud-4', page.text)
         self.assertIn('id="analysis-mp3-btn"', page.text)
         self.assertIn('id="analysis-podcast-transcript"', page.text)
