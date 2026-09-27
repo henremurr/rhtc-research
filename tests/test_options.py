@@ -98,6 +98,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('app.css?v=rhtc-analysis-podcast-1', page.text)
         self.assertIn('app.js?v=rhtc-analysis-readaloud-4', page.text)
         self.assertIn('app.css?v=rhtc-stock-quote-2', page.text)
+        self.assertIn('app.js?v=rhtc-call-details-1', page.text)
         self.assertIn('app.js?v=rhtc-stock-quote-1', page.text)
         self.assertIn('id="analysis-mp3-btn"', page.text)
         self.assertIn('id="analysis-podcast-transcript"', page.text)
