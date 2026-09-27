@@ -19,6 +19,8 @@ router = APIRouter(prefix="/api/news", tags=["news"])
 SEARCH_URL = "https://api.perplexity.ai/search"
 PACIFIC = ZoneInfo("America/Los_Angeles")
 SCAN_LOCK = asyncio.Lock()
+MAX_ARTICLES_PER_SCAN = 25
+MAX_RESULTS_PER_QUERY = 20
 
 SEARCH_QUERIES = [
     "AI compute infrastructure, semiconductors, GPUs, memory, networking, hyperscalers and data center investment latest news",
@@ -118,7 +120,7 @@ async def scan_news(*, scheduled: bool = False) -> dict[str, Any]:
 
         payload = {
             "query": SEARCH_QUERIES,
-            "max_results": 8,
+            "max_results": MAX_RESULTS_PER_QUERY,
             "search_type": "fast",
             "search_recency_filter": "day",
             "search_language_filter": ["en"],
@@ -155,6 +157,8 @@ async def scan_news(*, scheduled: bool = False) -> dict[str, Any]:
                 cleaned = clean_result(raw, seen_at)
                 if cleaned:
                     clean_items[cleaned["url"]] = cleaned
+                    if len(clean_items) >= MAX_ARTICLES_PER_SCAN:
+                        break
 
         with closing(connect_db()) as connection:
             connection.executemany(
