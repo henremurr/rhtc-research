@@ -123,6 +123,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('aria-label="Open ChatGPT deep analysis for ${safe(r.symbol)}"', script)
         self.assertIn('async function analyzeSymbol(symbol)', script)
         self.assertIn('function toggleAnalysisSpeech()', script)
+        self.assertIn('read.hidden=!supported', script)
         self.assertIn("description.textContent=state.chainDescription", script)
         self.assertNotIn('title="View chain"', script)
         for label in ('Ticker', 'Peak', 'Last', 'Change $', 'Change %', 'Cost', 'Call contract', 'Qty', 'Bid / ask', 'Bid / ask yield', 'Income', 'OI / Vol'):
