@@ -12,6 +12,7 @@ import httpx
 
 from main import app
 from app.options.api import Tradier, WATCHLIST, format_option_contract, openai_error_message
+from app.options import news
 
 
 class OptionsRoutesTest(unittest.TestCase):
@@ -163,6 +164,43 @@ class OptionsRoutesTest(unittest.TestCase):
             response = self.request("POST", "/options/api/news/scan")
         self.assertEqual(response.status_code, 503)
         self.assertIn("PERPLEXITY_API_KEY", response.json()["detail"])
+
+    def test_news_scan_requests_supported_max_and_caps_at_25_unique_articles(self):
+        payloads = []
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"results": [
+                    {"title": f"Article {index}", "url": f"https://example.com/{index}"}
+                    for index in range(40)
+                ]}
+
+        class FakeClient:
+            def __init__(self, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def post(self, url, *, headers, json):
+                payloads.append(json)
+                return FakeResponse()
+
+        async def run_scan():
+            with patch.dict(os.environ, {"RHTC_DATA_DIR": self.data_dir.name, "PERPLEXITY_API_KEY": "test-key"}, clear=False):
+                with patch.object(news.httpx, "AsyncClient", FakeClient):
+                    return await news.scan_news(scheduled=True)
+
+        result = asyncio.run(run_scan())
+        self.assertEqual(payloads[0]["max_results"], 20)
+        self.assertEqual(len(payloads[0]["query"]), 5)
+        self.assertEqual(result["added"], 25)
 
     def test_demo_scan_and_summary(self):
         with patch.dict(os.environ, {}, clear=True):
