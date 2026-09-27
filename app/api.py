@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 
 from app.models import BatchRequest
 from app.options.api import app as options_app
+from app.options.news import start_daily_news_scheduler
 from app.perplexity_client import analyze_one
 from app.reporting import create_pdf
 from app.three_peaks import (
@@ -28,6 +29,11 @@ app = FastAPI(
     description="Three Peaks batch research, classification, and PDF reporting.",
 )
 app.mount("/options", options_app)
+
+
+@app.on_event("startup")
+async def start_news_scheduler() -> None:
+    app.state.news_scheduler = start_daily_news_scheduler()
 
 HOLDINGS_PATH = Path("config/holdings.json")
 REPORT_DIR = Path("reports")
