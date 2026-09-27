@@ -574,6 +574,56 @@ async def opportunities(
     return {"rows": rows, "count": len(rows), "total": len(universe), "source": source, "as_of": utc_now().isoformat()}
 
 
+@app.get("/api/quote/{symbol}")
+async def stock_quote(symbol: str):
+    symbol = symbol.upper()
+    if not SYMBOL_PATTERN.fullmatch(symbol):
+        raise HTTPException(404, "Invalid ticker symbol")
+    item = next((row for row in read_watchlist() if row["symbol"] == symbol), {"symbol": symbol, "peak": "Other"})
+    token = os.getenv("TRADIER_API_TOKEN")
+    if not token:
+        row = demo_row(symbol, item["peak"])
+        return {
+            "symbol": symbol, "description": None, "price": row["price"],
+            "change": row["change"], "change_pct": row["change_pct"],
+            "bid": None, "ask": None, "volume": None, "average_volume": None,
+            "open": None, "high": None, "low": None, "previous_close": None,
+            "quote_time": "DEMO DATA", "source": "demo",
+        }
+    provider = Tradier(token)
+    try:
+        data = await provider.get("/markets/quotes", {"symbols": symbol})
+        quote = data.get("quotes", {}).get("quote", {})
+        if isinstance(quote, list):
+            quote = quote[0] if quote else {}
+        if not quote or quote.get("type") == "error":
+            raise HTTPException(404, f"No stock quote was returned for {symbol}.")
+        last = parse_number(quote.get("last")) or parse_number(quote.get("close"))
+        return {
+            "symbol": symbol,
+            "description": quote.get("description"),
+            "price": last or None,
+            "change": parse_number(quote.get("change")) if quote.get("change") is not None else None,
+            "change_pct": parse_number(quote.get("change_percentage")) if quote.get("change_percentage") is not None else None,
+            "bid": parse_number(quote.get("bid")) if quote.get("bid") is not None else None,
+            "ask": parse_number(quote.get("ask")) if quote.get("ask") is not None else None,
+            "volume": int(parse_number(quote.get("volume"))) if quote.get("volume") is not None else None,
+            "average_volume": int(parse_number(quote.get("average_volume"))) if quote.get("average_volume") is not None else None,
+            "open": parse_number(quote.get("open")) if quote.get("open") is not None else None,
+            "high": parse_number(quote.get("high")) if quote.get("high") is not None else None,
+            "low": parse_number(quote.get("low")) if quote.get("low") is not None else None,
+            "previous_close": parse_number(quote.get("prevclose")) if quote.get("prevclose") is not None else None,
+            "quote_time": quote.get("trade_date") or quote.get("ask_date") or quote.get("bid_date"),
+            "source": data_source(),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(502, f"Stock quote request failed: {exc}") from exc
+    finally:
+        await provider.close()
+
+
 @app.get("/api/chain/{symbol}")
 async def chain(symbol: str):
     symbol = symbol.upper()
