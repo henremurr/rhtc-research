@@ -834,7 +834,7 @@ MAX_TTS_CHUNK_CHARS = 4000
 def split_speech_chunks(text: str, max_chars: int = MAX_TTS_CHUNK_CHARS) -> list[str]:
     chunks: list[str] = []
     current = ""
-    pieces = [piece.strip() for piece in re.split(r"(?<=[.!?])\\s+|\\n+", text.strip()) if piece.strip()]
+    pieces = [piece.strip() for piece in re.split(r"(?<=[.!?])\s+|\n+", text.strip()) if piece.strip()]
     for piece in pieces:
         if len(piece) > max_chars:
             words = piece.split()
