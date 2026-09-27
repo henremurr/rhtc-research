@@ -101,19 +101,6 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('id="symbol-analysis-modal"', page.text)
         self.assertIn('id="detail-description"', page.text)
 
-    def test_news_feed_is_authenticated_and_uses_persistent_database(self):
-        unauthorized = self.request("GET", "/options/api/news", authenticated=False)
-        self.assertEqual(unauthorized.status_code, 401)
-        response = self.request("GET", "/options/api/news")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["items"], [])
-        self.assertFalse(response.json()["configured"])
-
-    def test_news_scan_reports_missing_provider_key(self):
-        with patch.dict(os.environ, {"PERPLEXITY_API_KEY": ""}, clear=False):
-            response = self.request("POST", "/options/api/news/scan")
-        self.assertEqual(response.status_code, 503)
-        self.assertIn("PERPLEXITY_API_KEY", response.json()["detail"])
         self.assertIn('<th>CHG $</th><th>CHG %</th>', page.text)
         self.assertIn('title="Share price saved in Manage symbols">COST</th>', page.text)
         self.assertIn('colspan="12"', page.text)
@@ -156,6 +143,20 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('th,td{white-space:normal;overflow-wrap:anywhere}', css)
         self.assertIn('@media(max-width:900px){.table-wrap{max-height:none;overflow:visible}', css)
         self.assertEqual(self.request("GET", "/options/api/health").json()["watchlist_count"], 129)
+
+    def test_news_feed_is_authenticated_and_uses_persistent_database(self):
+        unauthorized = self.request("GET", "/options/api/news", authenticated=False)
+        self.assertEqual(unauthorized.status_code, 401)
+        response = self.request("GET", "/options/api/news")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["items"], [])
+        self.assertFalse(response.json()["configured"])
+
+    def test_news_scan_reports_missing_provider_key(self):
+        with patch.dict(os.environ, {"PERPLEXITY_API_KEY": ""}, clear=False):
+            response = self.request("POST", "/options/api/news/scan")
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("PERPLEXITY_API_KEY", response.json()["detail"])
 
     def test_demo_scan_and_summary(self):
         with patch.dict(os.environ, {}, clear=True):
