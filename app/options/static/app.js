@@ -85,6 +85,10 @@ async function viewChain(symbol){
     const quote=await responses[0].json(),chainData=await responses[1].json();
     if(!responses[0].ok)throw Error(quote.detail||'Stock quote unavailable.');
     const sourceLabel=quote.source==='demo'?'Illustrative demo values · Not live market data':quote.source==='tradier_sandbox'?'Tradier sandbox quote · May be delayed':'Tradier stock quote';
+    $('#detail-title').textContent=quote.description?symbol+' · '+quote.description:symbol+' stock quote and covered-call screen';
+    $('#detail-subtitle').textContent=sourceLabel;
+    const rawTime=quote.quote_time;
+    const quoteTime=rawTime&&Number.isFinite(Number(rawTime))&&Number(rawTime)>0?new Date(Number(rawTime)).toLocaleString():rawTime?String(rawTime):'Quote timestamp unavailable';
     quoteBox.innerHTML='<div class="detail-quote-stats">'+[
       quoteCell('Last',quote.price),
       quoteCell('Change',quote.change,'change'),
@@ -97,19 +101,20 @@ async function viewChain(symbol){
       quoteCell('Previous close',quote.previous_close),
       quoteCell('Volume',quote.volume,'volume'),
       quoteCell('Average volume',quote.average_volume,'volume')
-    ].join('')+'</div><p class="detail-quote-source">'+sourceLabel+(quote.quote_time?' · Quote time: '+safe(String(quote.quote_time)):' · Quote timestamp unavailable')+'</p>';
-    if(!responses[1].ok)throw Error(chainData.detail||'Covered-call data unavailable.');
+    ].join('')+'</div><p class="detail-quote-source">'+sourceLabel+' · Quote time: '+safe(quoteTime)+'</p>';
+    if(!responses[1].ok){
+      detail.innerHTML='<p class="detail-quote-error">'+safe(chainData.detail||'Covered-call data unavailable.')+'</p>';
+      return;
+    }
     state.chainRows=chainData.rows||[];
     state.chainSource=chainData.source||'demo';
     state.chainDescription=chainData.description||quote.description||'';
     state.chainIndex=0;
     if(!state.chainRows.length)detail.innerHTML='<div class="empty">No covered-call rows were returned for this symbol.</div>';
     else renderChainPage();
-    $('#detail-title').textContent=quote.description?symbol+' · '+quote.description:symbol+' stock quote and covered-call screen';
     const description=$('#detail-description');
     description.textContent=state.chainDescription;
     description.hidden=!state.chainDescription;
-    $('#detail-subtitle').textContent=sourceLabel;
   }catch(error){
     quoteBox.innerHTML='<p class="detail-quote-error">'+safe(error.message)+'</p>';
     $('#detail-subtitle').textContent='Quote details may be incomplete.';
