@@ -95,8 +95,8 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertLess(page.text.index('<span>Rows</span>'), page.text.index('id="review-limit"'))
         self.assertIn('<span>Order by</span><select id="sort">', page.text)
         self.assertLess(page.text.index('Max Last'), page.text.index('<span>Order by</span>'))
-        self.assertIn('app.css?v=rhtc-news-readaloud-1', page.text)
-        self.assertIn('app.js?v=rhtc-news-readaloud-1', page.text)
+        self.assertIn('app.css?v=rhtc-news-impact-1', page.text)
+        self.assertIn('app.js?v=rhtc-news-impact-1', page.text)
         self.assertIn('data-filter="news"', page.text)
         self.assertIn('id="news-view"', page.text)
         self.assertIn('id="news-items"', page.text)
@@ -110,6 +110,8 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertLess(page.text.index('<th>QTY</th>'), page.text.index('>BID / ASK</th>'))
         self.assertNotIn('<th></th>', page.text)
         script = self.request("GET", "/options/static/app.js").text
+        self.assertIn('data-news-action="analyze"', script)
+        self.assertIn("/options/api/news/analyze", script)
         self.assertIn("sort:'income'", script)
         self.assertIn('ticker-details-btn', script)
         self.assertIn('<button class="ticker-details-btn" title="View ${safe(r.symbol)} option details"', script)
@@ -201,6 +203,57 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual(payloads[0]["max_results"], 20)
         self.assertEqual(len(payloads[0]["query"]), 5)
         self.assertEqual(result["added"], 25)
+
+    def test_news_analysis_is_authenticated_and_maps_story_to_watchlist_and_thesis(self):
+        payload = {
+            "title": "New grid equipment contract",
+            "url": "https://example.com/grid-award",
+            "snippet": "The company won a contract to reinforce regional transmission.",
+            "published_at": "2026-09-27",
+        }
+        denied = self.request("POST", "/options/api/news/analyze", authenticated=False, json=payload)
+        self.assertEqual(denied.status_code, 401)
+
+        class FakeResponses:
+            async def create(self, **kwargs):
+                self.kwargs = kwargs
+                citation = types.SimpleNamespace(url="https://source.example.com/release", title="Company release")
+                annotation = types.SimpleNamespace(type="url_citation", url_citation=citation)
+                content = types.SimpleNamespace(annotations=[annotation])
+                return types.SimpleNamespace(output=[types.SimpleNamespace(content=[content])], output_text="Thesis impact")
+
+        responses = FakeResponses()
+        fake_openai = types.SimpleNamespace(AsyncOpenAI=lambda **kwargs: types.SimpleNamespace(responses=responses))
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key", "OPENAI_ANALYSIS_MODEL": "test-model"}, clear=False):
+            with patch.dict(sys.modules, {"openai": fake_openai}):
+                with patch("app.options.api.read_watchlist", return_value=[
+                    {"symbol": "ET", "peak": "EFM/I", "share_price": 18.5, "quantity": 1000},
+                    {"symbol": "NOC", "peak": "DS/I", "share_price": 500, "quantity": 100},
+                ]):
+                    result = self.request("POST", "/options/api/news/analyze", json=payload)
+
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json()["analysis"], "Thesis impact")
+        self.assertEqual(result.json()["citations"], [{"title": "Company release", "url": "https://source.example.com/release"}])
+        self.assertEqual(responses.kwargs["tools"], [{"type": "web_search"}])
+        self.assertIn("ET", responses.kwargs["input"])
+        self.assertIn("NOC", responses.kwargs["input"])
+        self.assertNotIn("18.5", responses.kwargs["input"])
+        self.assertIn("AI/I", responses.kwargs["instructions"])
+        self.assertIn("EFM/I", responses.kwargs["instructions"])
+        self.assertIn("DS/I", responses.kwargs["instructions"])
+        self.assertIn("untrusted source material", responses.kwargs["instructions"])
+        self.assertIn("Overall Three Peaks thesis", responses.kwargs["instructions"])
+        self.assertIn("direct/indirect", responses.kwargs["instructions"])
+
+    def test_news_analysis_rejects_invalid_article_url_and_reports_missing_key(self):
+        invalid = self.request("POST", "/options/api/news/analyze", json={"title": "Story", "url": "javascript:alert(1)"})
+        self.assertEqual(invalid.status_code, 400)
+        self.assertIn("valid web address", invalid.json()["detail"])
+        with patch.dict(os.environ, {"OPENAI_API_KEY": ""}, clear=False):
+            unavailable = self.request("POST", "/options/api/news/analyze", json={"title": "Story", "url": "https://example.com/story"})
+        self.assertEqual(unavailable.status_code, 503)
+        self.assertIn("OPENAI_API_KEY", unavailable.json()["detail"])
 
     def test_demo_scan_and_summary(self):
         with patch.dict(os.environ, {}, clear=True):
