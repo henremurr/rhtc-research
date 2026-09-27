@@ -60,7 +60,67 @@ async function loadRows({ai=false,snapshot=false}={}){const btn=$('#refresh');bt
 function saveSnapshot(){if(!state.rows.length)return;const history=JSON.parse(localStorage.getItem('rhtc-option-history')||'[]');history.push({at:new Date().toISOString(),rows:state.rows.map(({symbol,peak,price,change,change_pct,strike,expiry,dte,bid,ask,premium_yield,delta,iv,open_interest,volume,bid_size,ask_size,quote_time,contract,share_price,quantity})=>({symbol,peak,price,change,change_pct,strike,expiry,dte,bid,ask,premium_yield,delta,iv,open_interest,volume,contract,share_price,quantity}))});localStorage.setItem('rhtc-option-history',JSON.stringify(history.slice(-12)))}
 async function loadSummary(){let text=$('#ai-summary-text');if(!text)return;text.innerHTML='<span class="summary-loading">Reviewing the latest screen…</span>';try{const response=await fetch('/options/api/summary',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:state.source,rows:state.rows})});const data=await response.json();text.textContent=data.summary;$('#ai-summary-mode').textContent=data.mode==='openai'?'OPENAI SUMMARY':'RULE-BASED SUMMARY';}catch(e){text.textContent='Summary is unavailable. The quote table remains available for review.'}}
 function renderChainPage(){const x=state.chainRows[state.chainIndex];if(!x)return;$('#chain-page').textContent=DTE_WINDOWS[state.chainIndex]||x.dte_window||'';$('#chain-prev').disabled=state.chainIndex===0;$('#chain-next').disabled=state.chainIndex===state.chainRows.length-1;if(x.error){$('#detail-subtitle').textContent=x.dte_window||DTE_WINDOWS[state.chainIndex];$('#detail-content').innerHTML=`<p class="error-text">${safe(x.error)}</p>`;return}$('#detail-subtitle').textContent=`${x.expiry} · ${x.dte} days to expiration`;$('#detail-content').innerHTML=`<div class="detail-grid"><div><small>Underlying</small><b>$${fmt(x.price)}</b></div><div><small>Nearest OTM strike</small><b>$${fmt(x.strike)}</b></div><div><small>Bid / ask</small><b>$${fmt(x.bid)} / $${fmt(x.ask)}</b></div><div><small>Bid yield</small><b>${fmt(x.premium_yield)}%</b></div><div><small>Delta / IV</small><b>${fmt(x.delta,2)} / ${fmt(x.iv,1)}%</b></div><div><small>Bid / ask size</small><b>${Number(x.bid_size||0).toLocaleString()} / ${Number(x.ask_size||0).toLocaleString()}</b></div><div><small>Open interest / volume</small><b>${Number(x.open_interest||0).toLocaleString()} / ${Number(x.volume||0).toLocaleString()}</b></div><div><small>Quote timestamp</small><b>${safe(x.quote_time||'Unavailable')}</b></div></div><p class="detail-note">${state.chainSource==='demo'?'Illustrative preview values; not live market data.':state.chainSource==='tradier_sandbox'?'Tradier sandbox data may be delayed. Check quote time and liquidity before relying on it.':'Quote from Tradier. Check quote time and liquidity before relying on it.'} This is the closest call strike above the share price for this expiration.</p>`}
-async function viewChain(symbol){try{const r=await fetch(`/options/api/chain/${encodeURIComponent(symbol)}`);const d=await r.json();if(!r.ok)throw Error(d.detail||'Quote unavailable');state.chainRows=d.rows||[];state.chainSource=d.source||'demo';state.chainDescription=d.description||'';state.chainIndex=0;if(!state.chainRows.length)throw Error('No out-of-the-money calls returned');$('#detail-title').textContent=`${symbol} covered-call screen`;const description=$('#detail-description');description.textContent=state.chainDescription;description.hidden=!state.chainDescription;renderChainPage();$('#detail-modal').classList.add('open')}catch(e){toast(`${symbol}: ${e.message}`)}}
+function quoteCell(label,value,kind='price'){
+  let shown='—';
+  if(value!==null&&value!==undefined&&value!==''&&Number.isFinite(Number(value))){
+    const n=Number(value);
+    shown=kind==='price'?'$'+fmt(n):kind==='percent'?changeText(n,'%'):kind==='change'?changeText(n,'$'):Math.round(n).toLocaleString('en-US');
+  }
+  const cls=kind==='change'||kind==='percent'?changeClass(value):'';
+  return '<div class="detail-quote-stat"><span>'+label+'</span><b class="'+cls+'">'+shown+'</b></div>';
+}
+async function viewChain(symbol){
+  const modal=$('#detail-modal'),quoteBox=$('#detail-quote-content'),detail=$('#detail-content');
+  $('#detail-title').textContent=symbol+' stock quote and covered-call screen';
+  $('#detail-subtitle').textContent='Loading stock quote and listed call candidates…';
+  $('#detail-description').hidden=true;
+  quoteBox.innerHTML='<div class="loading">Retrieving stock quote…</div>';
+  detail.innerHTML='<div class="loading">Retrieving covered-call data…</div>';
+  modal.classList.add('open');
+  try{
+    const responses=await Promise.all([
+      fetch('/options/api/quote/'+encodeURIComponent(symbol)),
+      fetch('/options/api/chain/'+encodeURIComponent(symbol))
+    ]);
+    const quote=await responses[0].json(),chainData=await responses[1].json();
+    if(!responses[0].ok)throw Error(quote.detail||'Stock quote unavailable.');
+    const sourceLabel=quote.source==='demo'?'Illustrative demo values · Not live market data':quote.source==='tradier_sandbox'?'Tradier sandbox quote · May be delayed':'Tradier stock quote';
+    $('#detail-title').textContent=quote.description?symbol+' · '+quote.description:symbol+' stock quote and covered-call screen';
+    $('#detail-subtitle').textContent=sourceLabel;
+    const rawTime=quote.quote_time;
+    const quoteTime=rawTime&&Number.isFinite(Number(rawTime))&&Number(rawTime)>0?new Date(Number(rawTime)).toLocaleString():rawTime?String(rawTime):'Quote timestamp unavailable';
+    quoteBox.innerHTML='<div class="detail-quote-stats">'+[
+      quoteCell('Last',quote.price),
+      quoteCell('Change',quote.change,'change'),
+      quoteCell('Change %',quote.change_pct,'percent'),
+      quoteCell('Bid',quote.bid),
+      quoteCell('Ask',quote.ask),
+      quoteCell('Open',quote.open),
+      quoteCell('Day high',quote.high),
+      quoteCell('Day low',quote.low),
+      quoteCell('Previous close',quote.previous_close),
+      quoteCell('Volume',quote.volume,'volume'),
+      quoteCell('Average volume',quote.average_volume,'volume')
+    ].join('')+'</div><p class="detail-quote-source">'+sourceLabel+' · Quote time: '+safe(quoteTime)+'</p>';
+    if(!responses[1].ok){
+      detail.innerHTML='<p class="detail-quote-error">'+safe(chainData.detail||'Covered-call data unavailable.')+'</p>';
+      return;
+    }
+    state.chainRows=chainData.rows||[];
+    state.chainSource=chainData.source||'demo';
+    state.chainDescription=chainData.description||quote.description||'';
+    state.chainIndex=0;
+    if(!state.chainRows.length)detail.innerHTML='<div class="empty">No covered-call rows were returned for this symbol.</div>';
+    else renderChainPage();
+    const description=$('#detail-description');
+    description.textContent=state.chainDescription;
+    description.hidden=!state.chainDescription;
+  }catch(error){
+    quoteBox.innerHTML='<p class="detail-quote-error">'+safe(error.message)+'</p>';
+    $('#detail-subtitle').textContent='Quote details may be incomplete.';
+    toast(symbol+': '+error.message);
+  }
+}
 async function analyzeSymbol(symbol){
   const modal=$('#symbol-analysis-modal'),body=$('#symbol-analysis-body'),sources=$('#symbol-analysis-sources'),status=$('#symbol-analysis-status');
   const row=state.rows.find(item=>item.symbol===symbol)||{};

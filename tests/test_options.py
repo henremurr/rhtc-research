@@ -97,6 +97,8 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertLess(page.text.index('Max Last'), page.text.index('<span>Order by</span>'))
         self.assertIn('app.css?v=rhtc-analysis-podcast-1', page.text)
         self.assertIn('app.js?v=rhtc-analysis-readaloud-4', page.text)
+        self.assertIn('app.css?v=rhtc-stock-quote-1', page.text)
+        self.assertIn('app.js?v=rhtc-stock-quote-1', page.text)
         self.assertIn('id="analysis-mp3-btn"', page.text)
         self.assertIn('id="analysis-podcast-transcript"', page.text)
         self.assertIn('data-filter="news"', page.text)
@@ -118,6 +120,9 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn("/options/api/news/analyze", script)
         self.assertIn("sort:'income'", script)
         self.assertIn('ticker-details-btn', script)
+        self.assertIn('id="detail-quote-content"', page.text)
+        self.assertIn("fetch('/options/api/quote/'+encodeURIComponent(symbol))", script)
+        self.assertIn('/options/api/quote/', script)
         self.assertIn('<button class="ticker-details-btn" title="View ${safe(r.symbol)} option details"', script)
         self.assertIn('>${safe(r.symbol)}</button>', script)
         self.assertIn('title="View ${safe(r.symbol)} option details" aria-label="View ${safe(r.symbol)} option details"', script)
@@ -476,6 +481,32 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(reloaded.json()["rows"], [])
         self.assertEqual(reloaded.json()["count"], 0)
+
+    def test_stock_quote_returns_tradier_fields_and_demo_fallback(self):
+        async def provider_get(provider, path, params):
+            self.assertEqual(path, "/markets/quotes")
+            self.assertEqual(params, {"symbols": "MU"})
+            return {"quotes": {"quote": {
+                "symbol": "MU", "description": "Micron Technology, Inc.", "last": 128.5,
+                "change": 1.25, "change_percentage": 0.98, "bid": 128.4, "ask": 128.6,
+                "volume": 123456, "average_volume": 200000, "open": 127.0, "high": 130.0,
+                "low": 126.5, "prevclose": 127.25, "trade_date": 1780000000000,
+            }}}
+        with patch.dict(os.environ, {"TRADIER_API_TOKEN": "test-token"}, clear=True), patch.object(Tradier, "get", provider_get):
+            response = self.request("GET", "/options/api/quote/MU")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["description"], "Micron Technology, Inc.")
+        self.assertEqual(data["price"], 128.5)
+        self.assertEqual(data["change_pct"], 0.98)
+        self.assertEqual(data["previous_close"], 127.25)
+        self.assertEqual(data["source"], "tradier_sandbox")
+        with patch.dict(os.environ, {}, clear=True):
+            demo = self.request("GET", "/options/api/quote/MU")
+        self.assertEqual(demo.status_code, 200)
+        self.assertEqual(demo.json()["source"], "demo")
+        self.assertIsNone(demo.json()["bid"])
+        self.assertEqual(self.request("GET", "/options/api/quote/bad!").status_code, 404)
 
     def test_tradier_selection_and_error_rows(self):
         expiries = [(date.today() + timedelta(days=days)).isoformat() for days in (3, 10, 17, 22)]
