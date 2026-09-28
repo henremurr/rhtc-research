@@ -514,7 +514,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual(parse_finnhub_metrics({}, {"metric": {}}), {"market_cap": None, "price_earnings_ratio": None, "earnings_per_share": None, "profit_margin": None, "revenue": None, "shares_outstanding": None, "total_debt_to_capital": None, "institutional_ownership": None})
         metrics = parse_finnhub_metrics(
             {"shareOutstanding": 500},
-            {"metric": {"totalDebtToTotalCapitalQuarterly": 0.42}},
+            {"metric": {"totalDebt/totalCapitalQuarterly": 0.42}},
             {"ownership": [
                 {"name": "Fund A", "filingDate": "2025-12-31", "share": 100000000},
                 {"name": "Fund A", "filingDate": "2024-12-31", "share": 90000000},
