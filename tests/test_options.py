@@ -142,6 +142,8 @@ class OptionsRoutesTest(unittest.TestCase):
             "quoteCell('52-L',quote.week_52_low)",
             "quoteCell('Average volume',quote.average_volume,'volume')",
             "quoteCell('Previous close',quote.previous_close)",
+            "quoteCell('Market cap',quote.market_cap,'marketcap')",
+            "quoteCell('P/E',quote.price_earnings_ratio,'ratio')",
         ]
         self.assertEqual(sorted(quote_order, key=script.index), quote_order)
         self.assertIn('detail-call-block', script)
@@ -509,8 +511,8 @@ class OptionsRoutesTest(unittest.TestCase):
 
     def test_stock_quote_returns_tradier_fields_and_demo_fallback(self):
         async def provider_get(provider, path, params):
-            self.assertEqual(path, "/markets/quotes")
             self.assertEqual(params, {"symbols": "MU"})
+            self.assertEqual(path, "/markets/quotes")
             return {"quotes": {"quote": {
                 "symbol": "MU", "description": "Micron Technology, Inc.", "last": 128.5,
                 "change": 1.25, "change_percentage": 0.98, "bid": 128.4, "ask": 128.6,
@@ -518,7 +520,11 @@ class OptionsRoutesTest(unittest.TestCase):
                 "low": 126.5, "week_52_high": 165.0, "week_52_low": 84.5,
                 "prevclose": 127.25, "trade_date": 1780000000000,
             }}}
-        with patch.dict(os.environ, {"TRADIER_API_TOKEN": "test-token"}, clear=True), patch.object(Tradier, "get", provider_get):
+        async def provider_metrics(provider, symbol):
+            self.assertEqual(symbol, "MU")
+            return {"market_cap": 148000000000.0, "price_earnings_ratio": 17.25}
+
+        with patch.dict(os.environ, {"TRADIER_API_TOKEN": "test-token"}, clear=True), patch.object(Tradier, "get", provider_get), patch.object(Tradier, "company_metrics", provider_metrics):
             response = self.request("GET", "/options/api/quote/MU")
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -528,12 +534,16 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual(data["previous_close"], 127.25)
         self.assertEqual(data["week_52_high"], 165.0)
         self.assertEqual(data["week_52_low"], 84.5)
+        self.assertEqual(data["market_cap"], 148000000000.0)
+        self.assertEqual(data["price_earnings_ratio"], 17.25)
         self.assertEqual(data["source"], "tradier_sandbox")
         with patch.dict(os.environ, {}, clear=True):
             demo = self.request("GET", "/options/api/quote/MU")
         self.assertEqual(demo.status_code, 200)
         self.assertEqual(demo.json()["source"], "demo")
         self.assertIsNone(demo.json()["bid"])
+        self.assertIsNone(demo.json()["market_cap"])
+        self.assertIsNone(demo.json()["price_earnings_ratio"])
         self.assertEqual(self.request("GET", "/options/api/quote/bad!").status_code, 404)
 
     def test_tradier_selection_and_error_rows(self):
