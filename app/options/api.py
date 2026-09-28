@@ -312,6 +312,34 @@ def parse_number(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def fundamental_metric(data: Any, aliases: set[str]) -> float | None:
+    normalized_aliases = {re.sub(r"[^a-z0-9]", "", key.lower()) for key in aliases}
+
+    def find(value: Any) -> float | None:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                normalized_key = re.sub(r"[^a-z0-9]", "", str(key).lower())
+                if normalized_key in normalized_aliases and item is not None:
+                    try:
+                        number = float(item)
+                        if math.isfinite(number):
+                            return number
+                    except (TypeError, ValueError):
+                        pass
+            for item in value.values():
+                found = find(item)
+                if found is not None:
+                    return found
+        elif isinstance(value, list):
+            for item in value:
+                found = find(item)
+                if found is not None:
+                    return found
+        return None
+
+    return find(data)
+
+
 class Tradier:
     DTE_WINDOWS = ((0, 7), (8, 14), (15, 21), (22, None))
 
@@ -326,6 +354,38 @@ class Tradier:
         response = await self.client.get(path, params=params)
         response.raise_for_status()
         return response.json()
+
+    async def company_metrics(self, symbol: str) -> dict[str, float | None]:
+        base_url = os.getenv("TRADIER_BASE_URL", "https://sandbox.tradier.com/v1").rstrip("/")
+        beta_base_url = re.sub(r"/v1$", "/beta", base_url)
+        async with httpx.AsyncClient(
+            base_url=beta_base_url,
+            headers=self.client.headers,
+            timeout=10,
+        ) as beta_client:
+            async def request(path: str) -> dict[str, Any]:
+                response = await beta_client.get(path, params={"symbols": symbol})
+                response.raise_for_status()
+                return response.json()
+
+            company, ratios = await asyncio.gather(
+                request("/markets/fundamentals/company"),
+                request("/markets/fundamentals/ratios"),
+                return_exceptions=True,
+            )
+        if isinstance(company, BaseException):
+            company = {}
+        if isinstance(ratios, BaseException):
+            ratios = {}
+        return {
+            "market_cap": fundamental_metric(company, {
+                "market_cap", "market_capitalization", "market_capitalisation",
+            }),
+            "price_earnings_ratio": fundamental_metric(ratios, {
+                "pe_ratio", "pe_ttm", "trailing_pe", "trailing_pe_ratio",
+                "price_earnings", "price_earnings_ratio", "price_to_earnings",
+            }),
+        }
 
     async def option_sets(self, symbol: str, peak: str, count: int = 4, only_set: int | None = None) -> list[dict[str, Any]]:
         qdata = await self.get("/markets/quotes", {"symbols": symbol})
@@ -588,6 +648,7 @@ async def stock_quote(symbol: str):
             "change": row["change"], "change_pct": row["change_pct"],
             "bid": None, "ask": None, "volume": None, "average_volume": None,
             "open": None, "high": None, "low": None, "week_52_high": None, "week_52_low": None, "previous_close": None,
+            "market_cap": None, "price_earnings_ratio": None,
             "quote_time": "DEMO DATA", "source": "demo",
         }
     provider = Tradier(token)
@@ -615,6 +676,7 @@ async def stock_quote(symbol: str):
             "week_52_high": parse_number(quote.get("week_52_high")) if quote.get("week_52_high") is not None else None,
             "week_52_low": parse_number(quote.get("week_52_low")) if quote.get("week_52_low") is not None else None,
             "previous_close": parse_number(quote.get("prevclose")) if quote.get("prevclose") is not None else None,
+            **(await provider.company_metrics(symbol)),
             "quote_time": quote.get("trade_date") or quote.get("ask_date") or quote.get("bid_date"),
             "source": data_source(),
         }
