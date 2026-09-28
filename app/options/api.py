@@ -345,13 +345,23 @@ _FINNHUB_METRICS_TTL = 6 * 60 * 60
 
 
 def parse_finnhub_metrics(profile: dict[str, Any], financials: dict[str, Any]) -> dict[str, float | None]:
-    market_cap_millions = parse_number(profile.get("marketCapitalization"))
-    shares_outstanding_millions = parse_number(profile.get("shareOutstanding"))
     metric = financials.get("metric", {}) if isinstance(financials, dict) else {}
     metric = metric if isinstance(metric, dict) else {}
 
+    def optional_number(value: Any) -> float | None:
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        return number if math.isfinite(number) else None
+
     def first_number(keys: tuple[str, ...]) -> float | None:
-        return next((value for key in keys if (value := parse_number(metric.get(key))) is not None), None)
+        return next((value for key in keys if (value := optional_number(metric.get(key))) is not None), None)
+
+    market_cap_millions = optional_number(profile.get("marketCapitalization"))
+    shares_outstanding_millions = optional_number(profile.get("shareOutstanding"))
 
     pe = first_number(("peTTM", "peBasicExclExtraTTM", "peInclExtraTTM", "peAnnual"))
     earnings_per_share = first_number(("epsTTM", "epsInclExtraItemsTTM", "epsExclExtraItemsTTM", "netIncomePerShareTTM"))
