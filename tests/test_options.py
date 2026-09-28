@@ -98,7 +98,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('app.css?v=rhtc-analysis-podcast-1', page.text)
         self.assertIn('app.js?v=rhtc-analysis-readaloud-4', page.text)
         self.assertIn('app.css?v=rhtc-dark-popup-3', page.text)
-        self.assertIn('app.js?v=rhtc-call-details-2', page.text)
+        self.assertIn('app.js?v=rhtc-call-details-3', page.text)
         self.assertIn('id="analysis-mp3-btn"', page.text)
         self.assertIn('id="analysis-podcast-transcript"', page.text)
         self.assertIn('data-filter="news"', page.text)
@@ -134,6 +134,16 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn("fetch('/options/api/quote/'+encodeURIComponent(symbol))", script)
         self.assertIn("quoteCell('52-H',quote.week_52_high)", script)
         self.assertIn("quoteCell('52-L',quote.week_52_low)", script)
+        quote_order = [
+            "quoteCell('Day high',quote.high)",
+            "quoteCell('Day low',quote.low)",
+            "quoteCell('Volume',quote.volume,'volume')",
+            "quoteCell('52-H',quote.week_52_high)",
+            "quoteCell('52-L',quote.week_52_low)",
+            "quoteCell('Average volume',quote.average_volume,'volume')",
+            "quoteCell('Previous close',quote.previous_close)",
+        ]
+        self.assertEqual(sorted(quote_order, key=script.index), quote_order)
         self.assertIn('detail-call-block', script)
         self.assertIn('Expiration date', script)
         self.assertIn('Days to expiration', script)
