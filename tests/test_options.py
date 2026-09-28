@@ -531,7 +531,7 @@ class OptionsRoutesTest(unittest.TestCase):
             }}}
         async def provider_metrics(provider, symbol):
             self.assertEqual(symbol, "MU")
-            return {"market_cap": 148000000000.0, "price_earnings_ratio": 17.25}
+            return {"market_cap": 148000000000.0, "price_earnings_ratio": 17.25, "earnings_per_share": 3.5, "profit_margin": 20.0, "revenue": 20000000000.0}
 
         with patch.dict(os.environ, {"TRADIER_API_TOKEN": "test-token"}, clear=True), patch.object(Tradier, "get", provider_get), patch.object(Tradier, "company_metrics", provider_metrics):
             response = self.request("GET", "/options/api/quote/MU")
@@ -545,6 +545,9 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual(data["week_52_low"], 84.5)
         self.assertEqual(data["market_cap"], 148000000000.0)
         self.assertEqual(data["price_earnings_ratio"], 17.25)
+        self.assertEqual(data["earnings_per_share"], 3.5)
+        self.assertEqual(data["profit_margin"], 20.0)
+        self.assertEqual(data["revenue"], 20000000000.0)
         self.assertEqual(data["source"], "tradier_sandbox")
         with patch.dict(os.environ, {}, clear=True):
             demo = self.request("GET", "/options/api/quote/MU")
@@ -553,6 +556,9 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIsNone(demo.json()["bid"])
         self.assertIsNone(demo.json()["market_cap"])
         self.assertIsNone(demo.json()["price_earnings_ratio"])
+        self.assertIsNone(demo.json()["earnings_per_share"])
+        self.assertIsNone(demo.json()["profit_margin"])
+        self.assertIsNone(demo.json()["revenue"])
         self.assertEqual(self.request("GET", "/options/api/quote/bad!").status_code, 404)
 
     def test_tradier_selection_and_error_rows(self):
