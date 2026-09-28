@@ -755,7 +755,7 @@ async def stock_quote(symbol: str):
             "change": row["change"], "change_pct": row["change_pct"],
             "bid": None, "ask": None, "volume": None, "average_volume": None,
             "open": None, "high": None, "low": None, "week_52_high": None, "week_52_low": None, "previous_close": None,
-            "market_cap": None, "price_earnings_ratio": None, "earnings_per_share": None, "profit_margin": None, "revenue": None, "company_profile": None,
+            "market_cap": None, "price_earnings_ratio": None, "earnings_per_share": None, "profit_margin": None, "revenue": None, "shares_outstanding": None, "total_debt_to_capital": None, "institutional_ownership": None, "company_profile": None,
             "quote_time": "DEMO DATA", "source": "demo",
         }
     provider = Tradier(token)
