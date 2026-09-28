@@ -344,7 +344,7 @@ _FINNHUB_METRICS_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _FINNHUB_METRICS_TTL = 6 * 60 * 60
 
 
-def parse_finnhub_metrics(profile: dict[str, Any], financials: dict[str, Any], ownership: dict[str, Any] | None = None) -> dict[str, float | None]:
+def parse_finnhub_metrics(profile: dict[str, Any], financials: dict[str, Any]) -> dict[str, float | None]:
     metric = financials.get("metric", {}) if isinstance(financials, dict) else {}
     metric = metric if isinstance(metric, dict) else {}
 
@@ -398,24 +398,6 @@ def parse_finnhub_metrics(profile: dict[str, Any], financials: dict[str, Any], o
                     break
     debt_to_capital = debt_to_capital_raw * 100 if debt_to_capital_raw is not None and abs(debt_to_capital_raw) <= 1 else debt_to_capital_raw
 
-    reported_ownership_pct = None
-    ownership_rows = ownership.get("ownership", []) if isinstance(ownership, dict) else []
-    if isinstance(ownership_rows, list) and shares_outstanding and shares_outstanding > 0:
-        latest_by_investor: dict[str, tuple[str, float]] = {}
-        for item in ownership_rows:
-            if not isinstance(item, dict):
-                continue
-            share_count = optional_number(item.get("share"))
-            investor = str(item.get("name") or item.get("cik") or "").strip()
-            if share_count is None or share_count < 0 or not investor:
-                continue
-            report_date = str(item.get("filingDate") or item.get("reportDate") or "")
-            prior = latest_by_investor.get(investor)
-            if prior is None or report_date >= prior[0]:
-                latest_by_investor[investor] = (report_date, share_count)
-        if latest_by_investor:
-            reported_ownership_pct = sum(value for _, value in latest_by_investor.values()) / shares_outstanding * 100
-
     return {
         "market_cap": market_cap_millions * 1_000_000 if market_cap_millions is not None else None,
         "price_earnings_ratio": pe,
@@ -424,8 +406,33 @@ def parse_finnhub_metrics(profile: dict[str, Any], financials: dict[str, Any], o
         "revenue": revenue,
         "shares_outstanding": shares_outstanding,
         "total_debt_to_capital": debt_to_capital,
-        "institutional_ownership": reported_ownership_pct,
     }
+
+
+def parse_finnhub_insider_sentiment(payload: dict[str, Any]) -> tuple[float | None, str | None]:
+    rows = payload.get("data", []) if isinstance(payload, dict) else []
+    if not isinstance(rows, list):
+        return None, None
+
+    observations: list[tuple[tuple[int, int], float, str]] = []
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        try:
+            year = int(item.get("year"))
+            month = int(item.get("month"))
+            mspr = float(item.get("mspr"))
+        except (TypeError, ValueError):
+            continue
+        if not (1 <= month <= 12 and math.isfinite(mspr)):
+            continue
+        month_label = datetime(year, month, 1).strftime("%b %Y")
+        observations.append(((year, month), mspr, month_label))
+
+    if not observations:
+        return None, None
+    _, mspr, month_label = max(observations, key=lambda row: row[0])
+    return mspr, month_label
 
 
 
@@ -462,7 +469,7 @@ class Tradier:
     async def company_metrics(self, symbol: str) -> dict[str, Any]:
         api_key = os.getenv("FINNHUB_API_KEY")
         if not api_key:
-            return {"market_cap": None, "price_earnings_ratio": None, "earnings_per_share": None, "profit_margin": None, "revenue": None, "shares_outstanding": None, "total_debt_to_capital": None, "institutional_ownership": None, "company_profile": None}
+            return {"market_cap": None, "price_earnings_ratio": None, "earnings_per_share": None, "profit_margin": None, "revenue": None, "shares_outstanding": None, "total_debt_to_capital": None, "insider_sentiment_mspr": None, "insider_sentiment_month": None, "company_profile": None}
 
         cache_key = symbol.upper()
         cached = _FINNHUB_METRICS_CACHE.get(cache_key)
@@ -480,18 +487,19 @@ class Tradier:
                 payload = response.json()
                 return payload if isinstance(payload, dict) else {}
 
-            basic_profile, financials, full_profile, ownership = await asyncio.gather(
+            basic_profile, financials, full_profile, insider_sentiment = await asyncio.gather(
                 request("/stock/profile2"),
                 request("/stock/metric", {"metric": "all"}),
                 request("/stock/profile"),
-                request("/stock/ownership", {"limit": "100"}),
+                request("/stock/insider-sentiment"),
                 return_exceptions=True,
             )
         basic_profile = {} if isinstance(basic_profile, BaseException) else basic_profile
         financials = {} if isinstance(financials, BaseException) else financials
         full_profile = {} if isinstance(full_profile, BaseException) else full_profile
-        ownership = {} if isinstance(ownership, BaseException) else ownership
-        result: dict[str, Any] = parse_finnhub_metrics(basic_profile, financials, ownership)
+        insider_sentiment = {} if isinstance(insider_sentiment, BaseException) else insider_sentiment
+        result: dict[str, Any] = parse_finnhub_metrics(basic_profile, financials)
+        result["insider_sentiment_mspr"], result["insider_sentiment_month"] = parse_finnhub_insider_sentiment(insider_sentiment)
         result["company_profile"] = parse_finnhub_company_overview(basic_profile, full_profile)
         _FINNHUB_METRICS_CACHE[cache_key] = (time.monotonic(), result.copy())
         return result
@@ -757,7 +765,7 @@ async def stock_quote(symbol: str):
             "change": row["change"], "change_pct": row["change_pct"],
             "bid": None, "ask": None, "volume": None, "average_volume": None,
             "open": None, "high": None, "low": None, "week_52_high": None, "week_52_low": None, "previous_close": None,
-            "market_cap": None, "price_earnings_ratio": None, "earnings_per_share": None, "profit_margin": None, "revenue": None, "shares_outstanding": None, "total_debt_to_capital": None, "institutional_ownership": None, "company_profile": None,
+            "market_cap": None, "price_earnings_ratio": None, "earnings_per_share": None, "profit_margin": None, "revenue": None, "shares_outstanding": None, "total_debt_to_capital": None, "insider_sentiment_mspr": None, "insider_sentiment_month": None, "company_profile": None,
             "quote_time": "DEMO DATA", "source": "demo",
         }
     provider = Tradier(token)
