@@ -156,3 +156,6 @@ th,td{white-space:normal;overflow-wrap:anywhere}
 .detail-modal>#detail-stock-pane{grid-column:1;min-width:0}
 .detail-modal>#detail-options-pane{grid-column:2;min-width:0}
 @media(max-width:759px){.detail-modal>#detail-stock-pane,.detail-modal>#detail-options-pane{width:100%}}
+
+/* Use the full popup width for the company overview beneath both detail panes. */
+.detail-modal>#detail-company-overview{grid-column:1/-1;min-width:0;width:100%}
