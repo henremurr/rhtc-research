@@ -340,7 +340,7 @@ def fundamental_metric(data: Any, aliases: set[str]) -> float | None:
     return find(data)
 
 
-_FINNHUB_METRICS_CACHE: dict[str, tuple[float, dict[str, float | None]]] = {}
+_FINNHUB_METRICS_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _FINNHUB_METRICS_TTL = 6 * 60 * 60
 
 
@@ -359,6 +359,21 @@ def parse_finnhub_metrics(profile: dict[str, Any], financials: dict[str, Any]) -
     }
 
 
+def parse_finnhub_company_overview(basic: dict[str, Any], full: dict[str, Any]) -> dict[str, str | None]:
+    basic = basic if isinstance(basic, dict) else {}
+    full = full if isinstance(full, dict) else {}
+    return {
+        "name": str(full.get("name") or basic.get("name") or "").strip() or None,
+        "description": str(full.get("description") or "").strip() or None,
+        "industry": str(full.get("finnhubIndustry") or basic.get("finnhubIndustry") or "").strip() or None,
+        "city": str(full.get("city") or "").strip() or None,
+        "state": str(full.get("state") or "").strip() or None,
+        "country": str(full.get("country") or basic.get("country") or "").strip() or None,
+        "ipo": str(full.get("ipo") or basic.get("ipo") or "").strip() or None,
+        "website": str(full.get("weburl") or basic.get("weburl") or "").strip() or None,
+    }
+
+
 class Tradier:
     DTE_WINDOWS = ((0, 7), (8, 14), (15, 21), (22, None))
 
@@ -374,10 +389,10 @@ class Tradier:
         response.raise_for_status()
         return response.json()
 
-    async def company_metrics(self, symbol: str) -> dict[str, float | None]:
+    async def company_metrics(self, symbol: str) -> dict[str, Any]:
         api_key = os.getenv("FINNHUB_API_KEY")
         if not api_key:
-            return {"market_cap": None, "price_earnings_ratio": None}
+            return {"market_cap": None, "price_earnings_ratio": None, "company_profile": None}
 
         cache_key = symbol.upper()
         cached = _FINNHUB_METRICS_CACHE.get(cache_key)
@@ -389,23 +404,26 @@ class Tradier:
             headers={"X-Finnhub-Token": api_key},
             timeout=10,
         ) as client:
-            async def request(path: str) -> dict[str, Any]:
-                response = await client.get(path, params={"symbol": cache_key, **({"metric": "all"} if path.endswith("/metric") else {})})
+            async def request(path: str, extra_params: dict[str, str] | None = None) -> dict[str, Any]:
+                response = await client.get(path, params={"symbol": cache_key, **(extra_params or {})})
                 response.raise_for_status()
                 payload = response.json()
                 return payload if isinstance(payload, dict) else {}
 
-            profile, financials = await asyncio.gather(
+            basic_profile, financials, full_profile = await asyncio.gather(
                 request("/stock/profile2"),
-                request("/stock/metric"),
+                request("/stock/metric", {"metric": "all"}),
+                request("/stock/profile"),
                 return_exceptions=True,
             )
-        metrics = parse_finnhub_metrics(
-            {} if isinstance(profile, BaseException) else profile,
-            {} if isinstance(financials, BaseException) else financials,
-        )
-        _FINNHUB_METRICS_CACHE[cache_key] = (time.monotonic(), metrics.copy())
-        return metrics
+        basic_profile = {} if isinstance(basic_profile, BaseException) else basic_profile
+        financials = {} if isinstance(financials, BaseException) else financials
+        full_profile = {} if isinstance(full_profile, BaseException) else full_profile
+        result: dict[str, Any] = parse_finnhub_metrics(basic_profile, financials)
+        result["company_profile"] = parse_finnhub_company_overview(basic_profile, full_profile)
+        _FINNHUB_METRICS_CACHE[cache_key] = (time.monotonic(), result.copy())
+        return result
+
     async def option_sets(self, symbol: str, peak: str, count: int = 4, only_set: int | None = None) -> list[dict[str, Any]]:
         qdata = await self.get("/markets/quotes", {"symbols": symbol})
         quote = qdata.get("quotes", {}).get("quote", {})
@@ -667,7 +685,7 @@ async def stock_quote(symbol: str):
             "change": row["change"], "change_pct": row["change_pct"],
             "bid": None, "ask": None, "volume": None, "average_volume": None,
             "open": None, "high": None, "low": None, "week_52_high": None, "week_52_low": None, "previous_close": None,
-            "market_cap": None, "price_earnings_ratio": None,
+            "market_cap": None, "price_earnings_ratio": None, "company_profile": None,
             "quote_time": "DEMO DATA", "source": "demo",
         }
     provider = Tradier(token)
