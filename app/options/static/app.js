@@ -87,15 +87,719 @@ function renderChainPage(){
       '<div><small>Quote timestamp</small><b>'+safe(x.quote_time||'Unavailable')+'</b></div>'+
     '</div>';
 }
-function quoteCell(label,value,kind='price'){
+function quoteCell(label,value,kind='price',hint=''){
   let shown='—';
   if(value!==null&&value!==undefined&&value!==''&&Number.isFinite(Number(value))){
     const n=Number(value),abs=Math.abs(n);
     const compact=abs>=1e12?fmt(abs/1e12,2)+'T':abs>=1e9?fmt(abs/1e9,2)+'B':abs>=1e6?fmt(abs/1e6,2)+'M':fmt(abs,2);
-    shown=kind==='price'?'$'+fmt(n):kind==='percent'?changeText(n,'%'):kind==='change'?changeText(n,'$'):kind==='marketcap'?'$'+(abs>=1e12?fmt(abs/1e12,2)+'T':abs>=1e9?fmt(abs/1e9,2)+'B':abs>=1e6?fmt(abs/1e6,2)+'M':fmt(n,0)):kind==='money'?(n<0?'−':'')+'$'+compact:kind==='margin'?fmt(n,2)+'%':kind==='ratio'?fmt(n,2)+'x':Math.round(n).toLocaleString('en-US');
+    shown=kind==='price'?'
+function companyPublicHistory(ipo){
+  if(!ipo)return 'Finnhub IPO date is unavailable.';
+  const date=new Date(String(ipo)+'T00:00:00Z');
+  if(!Number.isFinite(date.getTime()))return 'Finnhub IPO date is unavailable.';
+  const now=new Date();
+  let years=now.getUTCFullYear()-date.getUTCFullYear();
+  const beforeAnniversary=now.getUTCMonth()<date.getUTCMonth()||(now.getUTCMonth()===date.getUTCMonth()&&now.getUTCDate()<date.getUTCDate());
+  if(beforeAnniversary)years--;
+  const since=date.toLocaleDateString('en-US',{month:'short',year:'numeric',timeZone:'UTC'});
+  return years>0?'Public since '+since+' · '+years+' '+(years===1?'year':'years')+' listed':'Public since '+since;
+}
+function renderCompanyOverview(profile,symbol,quoteName){
+  const info=profile&&typeof profile==='object'?profile:{};
+  const name=info.name||quoteName||symbol;
+  const summary=info.description||(
+    info.industry
+      ? 'Finnhub classifies this company in the '+info.industry+' industry. A fuller business description is unavailable in the profile returned for this ticker.'
+      : 'Finnhub did not return a business description for this ticker.'
+  );
+  const countryNames={US:'United States',GB:'United Kingdom',CA:'Canada',DE:'Germany',FR:'France',JP:'Japan',CN:'China',AU:'Australia',IL:'Israel',IN:'India',IE:'Ireland',NL:'Netherlands',CH:'Switzerland',KR:'South Korea',TW:'Taiwan'};
+  const country=info.country?(countryNames[info.country.toUpperCase()]||info.country):'';
+  const headquarters=[info.city,info.state,country].filter(Boolean).join(', ')||'Not available in Finnhub profile';
+  const website=typeof info.website==='string'&&(info.website.startsWith('https://')||info.website.startsWith('http://'))?'<a href="'+safe(info.website)+'" target="_blank" rel="noopener noreferrer">Company website ↗</a>':'';
+  return '<section class="company-overview"><div class="company-overview-heading"><h3>About '+safe(name)+'</h3>'+website+'</div><p>'+safe(summary)+'</p><div class="company-overview-facts"><div><small>Industry</small><b>'+safe(info.industry||'Not available')+'</b></div><div><small>Headquarters</small><b>'+safe(headquarters)+'</b></div><div><small>Public-market history</small><b>'+safe(companyPublicHistory(info.ipo))+'</b></div></div><small class="company-overview-note">IPO date shows time as a public company; the business may be older.</small></section>';
+}
+async function viewChain(symbol){
+  const modal=$('#detail-modal'),quoteBox=$('#detail-quote-content'),detail=$('#detail-content');
+  $('#detail-title').textContent=symbol+' stock quote and covered-call screen';
+  $('#detail-subtitle').textContent='Loading stock quote and listed call candidates…';
+  $('#detail-description').hidden=true;
+  $('#detail-company-overview').innerHTML='<div class="loading">Loading company overview…</div>';
+  $('#detail-option-source').innerHTML='';
+  quoteBox.innerHTML='<div class="loading">Retrieving stock quote…</div>';
+  detail.innerHTML='<div class="loading">Retrieving covered-call data…</div>';
+  modal.classList.add('open');
+  try{
+    const responses=await Promise.all([
+      fetch('/options/api/quote/'+encodeURIComponent(symbol)),
+      fetch('/options/api/chain/'+encodeURIComponent(symbol))
+    ]);
+    const quote=await responses[0].json(),chainData=await responses[1].json();
+    if(!responses[0].ok)throw Error(quote.detail||'Stock quote unavailable.');
+    const sourceLabel=quote.source==='demo'?'Illustrative demo values · Not live market data':quote.source==='tradier_sandbox'?'Tradier sandbox quote · May be delayed':'Tradier stock quote';
+    $('#detail-title').textContent=quote.description?symbol+' · '+quote.description:symbol+' stock quote and covered-call screen';
+    $('#detail-subtitle').textContent=sourceLabel;
+    $('#detail-company-overview').innerHTML=renderCompanyOverview(quote.company_profile,symbol,quote.description);
+    const rawTime=quote.quote_time;
+    const quoteTime=rawTime&&Number.isFinite(Number(rawTime))&&Number(rawTime)>0?new Date(Number(rawTime)).toLocaleString():rawTime?String(rawTime):'Quote timestamp unavailable';
+    quoteBox.innerHTML='<div class="detail-quote-stats">'+[
+      quoteCell('Last',quote.price),
+      quoteCell('Change',quote.change,'change'),
+      quoteCell('Change %',quote.change_pct,'percent'),
+      quoteCell('Bid',quote.bid),
+      quoteCell('Ask',quote.ask),
+      quoteCell('Open',quote.open),
+      quoteCell('Day high',quote.high),
+      quoteCell('Day low',quote.low),
+      quoteCell('Volume',quote.volume,'volume'),
+      quoteCell('52-H',quote.week_52_high),
+      quoteCell('52-L',quote.week_52_low),
+      quoteCell('Average volume',quote.average_volume,'volume'),
+      quoteCell('Previous close',quote.previous_close),
+      quoteCell('Market cap',quote.market_cap,'marketcap'),
+      quoteCell('P/E ratio',quote.price_earnings_ratio,'ratio'),
+      quoteCell('Earnings / share (TTM)',quote.earnings_per_share,'money'),
+      quoteCell('Net margin (TTM)',quote.profit_margin,'margin'),
+      quoteCell('Revenue (TTM)',quote.revenue,'money'),
+      quoteCell('Shares outstanding',quote.shares_outstanding,'shares'),
+      quoteCell('Total debt to capital',quote.total_debt_to_capital,'percentvalue'),
+      quoteCell('Institutional ownership*',quote.institutional_ownership,'percentvalue','Estimated from Finnhub institutional filings. Reported holdings may be incomplete and lag the current date.')
+    ].join('')+'</div>';
+    $('#detail-option-source').innerHTML='<p class="detail-quote-source">'+sourceLabel+' · Quote time: '+safe(quoteTime)+'</p>';
+    if(!responses[1].ok){
+      detail.innerHTML='<p class="detail-quote-error">'+safe(chainData.detail||'Covered-call data unavailable.')+'</p>';
+      return;
+    }
+    state.chainRows=chainData.rows||[];
+    state.chainSource=chainData.source||'demo';
+    state.chainDescription=chainData.description||quote.description||'';
+    state.chainIndex=0;
+    if(!state.chainRows.length)detail.innerHTML='<div class="empty">No covered-call rows were returned for this symbol.</div>';
+    else renderChainPage();
+    const description=$('#detail-description');
+    description.textContent=state.chainDescription;
+    const titleText=$('#detail-title').textContent.trim().toLocaleLowerCase();
+    const descriptionText=String(state.chainDescription||'').trim().toLocaleLowerCase();
+    description.hidden=!descriptionText||titleText.includes(descriptionText);
+  }catch(error){
+    quoteBox.innerHTML='<p class="detail-quote-error">'+safe(error.message)+'</p>';
+    $('#detail-subtitle').textContent='Quote details may be incomplete.';
+    toast(symbol+': '+error.message);
+  }
+}
+async function analyzeSymbol(symbol){
+  const modal=$('#symbol-analysis-modal'),body=$('#symbol-analysis-body'),sources=$('#symbol-analysis-sources'),status=$('#symbol-analysis-status');
+  const row=state.rows.find(item=>item.symbol===symbol)||{};
+  $('#symbol-analysis-title').textContent=`${symbol} · Deep analysis`;
+  $('#symbol-analysis-subtitle').textContent=`${peakName(row.peak||'Other')} · Current-source research with citations`;
+  stopNewsSpeech(false);resetAnalysisPodcast();$('#analysis-read-btn').hidden=true;$('#analysis-mp3-btn').disabled=true;body.textContent='Searching current sources and preparing the analysis…';sources.innerHTML='';status.textContent='';modal.classList.add('open');
+  const screen=Object.fromEntries(['price','change','change_pct','strike','expiry','dte','bid','ask','premium_yield','delta','iv','open_interest','volume','bid_size','ask_size','quote_time','source'].filter(key=>row[key]!==undefined).map(key=>[key,row[key]]));
+  screen.contract=contractLabel(row);
+  screen.quantity=quantityForPrice(row.price);
+  screen.estimated_income=incomeForRow(row);
+  screen.ask_yield=Number(row.price)>0&&Number(row.ask)>0?Number(row.ask)/Number(row.price)*100:null;
+  try{
+    const response=await fetch('/options/api/symbol-analysis',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol,screen})});
+    const data=await response.json();
+    if(!response.ok)throw Error(data.detail||'Analysis request failed.');
+    body.innerHTML=renderAnalysis(data.analysis||'No analysis was returned.');
+    sources.innerHTML=(data.citations||[]).map((citation,index)=>`<li><a href="${safe(citation.url)}" target="_blank" rel="noopener noreferrer">${safe(citation.title||citation.url)}</a></li>`).join('');
+    status.textContent=data.mode==='screen_fallback'?'Quote-based verdict · Current-source research did not finish':`Generated by ChatGPT${data.citations?.length?` · ${data.citations.length} cited sources`:''}`;
+    updateAnalysisSpeechControls();
+    $('#analysis-mp3-btn').disabled=false;
+  }catch(error){body.textContent=error.message.includes('OPENAI_API_KEY')?'ChatGPT analysis is not enabled on the server yet. Add OPENAI_API_KEY to Railway Variables, then redeploy.':error.message;status.textContent='Analysis unavailable';}
+}
+function pageChain(delta){const next=state.chainIndex+delta;if(next<0||next>=state.chainRows.length)return;state.chainIndex=next;renderChainPage()}
+function newsDate(value){if(!value)return 'Date unavailable';const d=new Date(value);return Number.isNaN(d.getTime())?value:new Intl.DateTimeFormat('en-US',{month:'short',day:'numeric',year:'numeric'}).format(d)}
+function newsPeakChip(peak){const cls=peak==='AI/I'?'ai':peak==='EFM/I'?'efm':peak==='DS/I'?'defense':peak==='Cross-Peak'?'other':'other';return `<span class="peak-chip ${cls}"><i class="mini-dot"></i>${safe(peak||'Other')}</span>`}
+let activeNewsSpeech=null,activeAnalysisSpeech=null;
+let analysisPodcastAudioUrl=null,analysisPodcastTextUrl=null;
+
+function resetAnalysisPodcast(){if(analysisPodcastAudioUrl)URL.revokeObjectURL(analysisPodcastAudioUrl);if(analysisPodcastTextUrl)URL.revokeObjectURL(analysisPodcastTextUrl);analysisPodcastAudioUrl=null;analysisPodcastTextUrl=null;$('#analysis-podcast-result').hidden=true;$('#analysis-podcast-transcript').value='';$('#analysis-podcast-audio').removeAttribute('src');$('#analysis-podcast-audio').load();$('#analysis-download-mp3').hidden=true;$('#analysis-download-transcript').removeAttribute('href');$('#analysis-download-mp3').removeAttribute('href');$('#analysis-podcast-status').textContent='Uses OpenAI API credits to make a Spotify-ready transcript and narrated MP3.'}
+function podcastFileSlug(value){return String(value||'analysis').normalize('NFKD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,72)||'analysis'}
+async function readApiError(response,fallback){try{const data=await response.json();return data.detail||fallback}catch(error){return fallback}}
+async function createAnalysisPodcast(){const button=$('#analysis-mp3-btn'),status=$('#analysis-podcast-status'),title=$('#symbol-analysis-title').textContent.trim(),subtitle=$('#symbol-analysis-subtitle').textContent.trim(),analysis=$('#symbol-analysis-body').innerText.trim();if(!analysis){status.textContent='Wait for the analysis to finish, then try again.';return}resetAnalysisPodcast();button.disabled=true;button.textContent='Creating Spotify transcript + MP3…';status.textContent='Writing a Spotify-ready spoken transcript…';try{const scriptResponse=await fetch('/options/api/analysis-podcast/transcript',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,subtitle,analysis})});if(!scriptResponse.ok)throw Error(await readApiError(scriptResponse,'Transcript generation failed.'));const scriptData=await scriptResponse.json();const transcript=String(scriptData.transcript||'').trim();if(!transcript)throw Error('OpenAI returned an empty transcript.');$('#analysis-podcast-transcript').value=transcript;analysisPodcastTextUrl=URL.createObjectURL(new Blob([transcript],{type:'text/plain;charset=utf-8'}));const slug=podcastFileSlug(title),transcriptLink=$('#analysis-download-transcript');transcriptLink.href=analysisPodcastTextUrl;transcriptLink.download='RHTC_'+slug+'_Spotify_Transcript.txt';$('#analysis-podcast-result').hidden=false;status.textContent='Transcript ready ('+transcript.length.toLocaleString()+' characters). Creating the MP3…';const audioResponse=await fetch('/options/api/analysis-podcast/audio',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,transcript})});if(!audioResponse.ok)throw Error(await readApiError(audioResponse,'MP3 generation failed.'));const mp3=await audioResponse.blob();if(!mp3.size)throw Error('The MP3 file was empty. Try again.');analysisPodcastAudioUrl=URL.createObjectURL(mp3);$('#analysis-podcast-audio').src=analysisPodcastAudioUrl;const mp3Link=$('#analysis-download-mp3');mp3Link.href=analysisPodcastAudioUrl;mp3Link.download='RHTC_'+slug+'_Spotify.mp3';mp3Link.hidden=false;status.textContent='Ready to review or publish. Download the transcript and MP3 below.'}catch(error){status.textContent=error.message||'Could not create the Spotify assets. Try again.'}finally{button.disabled=false;button.textContent='🎙 Create Spotify Transcript + MP3'}}
+async function copyAnalysisPodcastTranscript(){const text=$('#analysis-podcast-transcript').value;if(!text)return;try{await navigator.clipboard.writeText(text);toast('Spotify transcript copied.')}catch(error){const field=$('#analysis-podcast-transcript');field.focus();field.select();toast('Select and copy the transcript.')}}
+
+function updateAnalysisSpeechControls(){const read=$('#analysis-read-btn'),stop=$('#analysis-stop-btn'),supported='speechSynthesis'in window&&'SpeechSynthesisUtterance'in window;if(!read||!stop)return;read.hidden=!supported;read.disabled=!supported;read.textContent=activeAnalysisSpeech?(activeAnalysisSpeech.paused?'▶ Resume':'Ⅱ Pause'):'🔊 Read analysis';stop.hidden=!activeAnalysisSpeech}
+function stopAnalysisSpeech(refresh=true){const current=activeAnalysisSpeech;activeAnalysisSpeech=null;if(current&&'speechSynthesis'in window)window.speechSynthesis.cancel();if(refresh)updateAnalysisSpeechControls();return current}
+function toggleAnalysisSpeech(){if(!('speechSynthesis'in window)||!('SpeechSynthesisUtterance'in window)){toast('Read aloud is not available in this browser.');return}if(activeAnalysisSpeech){if(activeAnalysisSpeech.paused){window.speechSynthesis.resume();activeAnalysisSpeech.paused=false}else{window.speechSynthesis.pause();activeAnalysisSpeech.paused=true}updateAnalysisSpeechControls();return}stopNewsSpeech(false);const text=[$('#symbol-analysis-title').textContent,$('#symbol-analysis-subtitle').textContent,$('#symbol-analysis-body').innerText].filter(Boolean).join('. ');if(!text.trim())return;const utterance=new SpeechSynthesisUtterance(text),speech={utterance,paused:false};activeAnalysisSpeech=speech;const finish=()=>{if(activeAnalysisSpeech===speech){activeAnalysisSpeech=null;updateAnalysisSpeechControls()}};utterance.onend=finish;utterance.onerror=finish;try{window.speechSynthesis.speak(utterance);updateAnalysisSpeechControls();updateNewsSpeechControls()}catch(error){finish();toast('Could not read this analysis aloud.')}}
+function stopNewsSpeech(refresh=true){const current=activeNewsSpeech;activeNewsSpeech=null;if(activeAnalysisSpeech){activeAnalysisSpeech=null;updateAnalysisSpeechControls()}if('speechSynthesis'in window)window.speechSynthesis.cancel();if(refresh){updateNewsSpeechControls();updateAnalysisSpeechControls()}return current}
+function updateNewsSpeechControls(){const supported='speechSynthesis'in window&&'SpeechSynthesisUtterance'in window;document.querySelectorAll('.news-item').forEach(card=>{const read=card.querySelector('[data-news-action="read"]'),stop=card.querySelector('[data-news-action="stop"]');if(!read||!stop)return;const current=activeNewsSpeech&&activeNewsSpeech.url===card.dataset.newsUrl;read.disabled=!supported;read.textContent=current?(activeNewsSpeech.paused?'▶ Resume':'Ⅱ Pause'):'🔊 Read excerpt';read.setAttribute('aria-label',current?`${activeNewsSpeech.paused?'Resume':'Pause'} reading ${card.querySelector('h3 a')?.textContent||'this story'}`:`Read title and excerpt aloud: ${card.querySelector('h3 a')?.textContent||'story'}`);stop.hidden=!current})}
+function toggleNewsSpeech(card){if(!('speechSynthesis'in window)||!('SpeechSynthesisUtterance'in window)){toast('Read aloud is not available in this browser.');return}if(activeNewsSpeech&&activeNewsSpeech.url===card.dataset.newsUrl){if(activeNewsSpeech.paused){window.speechSynthesis.resume();activeNewsSpeech.paused=false}else{window.speechSynthesis.pause();activeNewsSpeech.paused=true}updateNewsSpeechControls();return}stopAnalysisSpeech(false);stopNewsSpeech(false);const title=card.querySelector('h3 a')?.textContent||'';const source=card.querySelector('.news-source')?.textContent||'';const excerpt=card.querySelector('.news-excerpt')?.textContent||'';const utterance=new SpeechSynthesisUtterance([title,source?`Source: ${source}`:'',excerpt].filter(Boolean).join('. '));const speech={url:card.dataset.newsUrl,utterance,paused:false};activeNewsSpeech=speech;const finish=()=>{if(activeNewsSpeech===speech){activeNewsSpeech=null;updateNewsSpeechControls()}};utterance.onend=finish;utterance.onerror=finish;try{window.speechSynthesis.speak(utterance);updateNewsSpeechControls();updateAnalysisSpeechControls()}catch(error){finish();toast('Could not read this excerpt aloud.')}}
+async function analyzeNewsStory(card,button){
+  const modal=$('#symbol-analysis-modal'),body=$('#symbol-analysis-body'),sources=$('#symbol-analysis-sources'),status=$('#symbol-analysis-status');
+  const title=card.dataset.newsTitle||card.querySelector('h3 a')?.textContent||'News story';
+  $('#symbol-analysis-title').textContent='RHTC impact analysis';
+  stopNewsSpeech(false);resetAnalysisPodcast();$('#analysis-read-btn').hidden=true;$('#analysis-mp3-btn').disabled=true;$('#symbol-analysis-subtitle').textContent=`${title} · Watchlist companies, Three Peaks, and thesis`;body.textContent='Checking current sources and mapping potential impacts…';sources.innerHTML='';status.textContent='Uses OpenAI web search. Impacts are analytical assessments, not price targets.';modal.classList.add('open');button.disabled=true;
+  try{
+    const response=await fetch('/options/api/news/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,url:card.dataset.newsUrl||'',snippet:card.dataset.newsSnippet||'',published_at:card.dataset.newsPublishedAt||''})});
+    const data=await response.json();if(!response.ok)throw Error(data.detail||'News analysis request failed.');
+    body.innerHTML=renderAnalysis(data.analysis||'No analysis was returned.');
+    sources.innerHTML=(data.citations||[]).map(citation=>`<li><a href="${safe(citation.url)}" target="_blank" rel="noopener noreferrer">${safe(citation.title||citation.url)}</a></li>`).join('');
+    status.textContent=`Generated by ChatGPT${data.citations?.length?` · ${data.citations.length} cited sources`:''}`;
+    updateAnalysisSpeechControls();
+    $('#analysis-mp3-btn').disabled=false;
+  }catch(error){body.textContent=error.message.includes('OPENAI_API_KEY')?'News analysis is not enabled on the server yet. Add OPENAI_API_KEY to Railway Variables, then redeploy.':error.message;status.textContent='Analysis unavailable'}
+  finally{button.disabled=false}
+}
+function renderNews(items){if(activeNewsSpeech)stopNewsSpeech(false);const container=$('#news-items');$('#news-count').textContent=items.length?`${items.length} stories · last 14 days`:'No matching stories in the last 14 days.';$('#count-news').textContent=items.length?String(items.length):'0';if(!items.length){container.innerHTML='<p class="news-empty">No stories match these filters yet. The daily scan runs at 6:00 a.m. Pacific; use Scan for news to search now.</p>';return}container.innerHTML=items.map(item=>{const url=/^https?:\/\//i.test(item.url||'')?item.url:'#';return `<article class="news-item" data-news-url="${safe(url)}" data-news-title="${safe(item.title||'')}" data-news-snippet="${safe(item.snippet||'')}" data-news-published-at="${safe(item.published_at||item.first_seen_at||'')}"><div class="news-item-meta">${newsPeakChip(item.peak)}<span class="news-source">${safe(item.source||'Source')}</span><time>${safe(newsDate(item.published_at||item.first_seen_at))}</time></div><h3><a href="${safe(url)}" target="_blank" rel="noopener noreferrer">${safe(item.title)}</a></h3><p class="news-excerpt">${safe(item.snippet||'No source excerpt was returned.')}</p><div class="news-item-actions"><button class="news-read-btn" type="button" data-news-action="read">🔊 Read excerpt</button><button class="news-stop-btn" type="button" data-news-action="stop" aria-label="Stop reading this excerpt" hidden>Stop</button><button class="news-analyze-btn" type="button" data-news-action="analyze">✦ Analyze RHTC impact</button></div></article>`}).join('');updateNewsSpeechControls()}
+async function loadNews({quiet=false}={}){try{const params=new URLSearchParams({days:'14',peak:$('#news-peak').value,q:$('#news-search').value.trim()});const response=await fetch(`/options/api/news?${params}`);if(!response.ok)throw Error('News feed is unavailable.');const data=await response.json();renderNews(data.items||[]);const stamp=data.last_scan_at?new Intl.DateTimeFormat('en-US',{timeZone:'America/Los_Angeles',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}).format(new Date(data.last_scan_at))+' PT':'Not scanned yet';$('#news-last-scanned').textContent=data.configured?`LAST SCAN · ${stamp}`:'PERPLEXITY KEY NOT CONFIGURED';if(!data.configured)$('#news-count').textContent='Add PERPLEXITY_API_KEY in Railway Variables to enable scanning.'}catch(error){if(!quiet){$('#news-items').innerHTML=`<p class="news-empty">${safe(error.message)}</p>`;toast('Could not load the RHTC news feed.')}}}
+async function scanNews(){const button=$('#scan-news');button.disabled=true;button.querySelector('.refresh-icon').classList.add('spin');try{const response=await fetch('/options/api/news/scan',{method:'POST'});const data=await response.json();if(!response.ok)throw Error(data.detail||'News scan failed.');await loadNews({quiet:true});toast(data.status==='recent'?'The feed was scanned recently; showing saved stories.':`${data.added} stories refreshed.`)}catch(error){toast(error.message)}finally{button.disabled=false;button.querySelector('.refresh-icon').classList.remove('spin')}}
+function setMode(mode){state.mode=mode;const isNews=mode==='news';if(!isNews)stopNewsSpeech();$('#options-view').hidden=isNews;$('#news-view').hidden=!isNews;$('#main-pager').hidden=mode==='history';document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.filter===mode||(!n.dataset.filter&&mode==='overview')));if(isNews){loadNews()}else if(mode==='history'){renderRows();toast('Snapshots are saved in this browser.')}else if(mode==='holdings'){state.selectedOnly=true;state.peak='All Peaks';document.querySelectorAll('.peak-item').forEach(n=>n.classList.toggle('selected',n.dataset.peak==='All Peaks'));loadRows({ai:false,snapshot:false})}else{state.selectedOnly=false;renderRows()}}
+function pageMain(delta){const next=state.expirationSet+delta;if(next<1||next>4)return;state.expirationSet=next;$('#main-page').textContent=DTE_WINDOWS[next-1];$('#main-prev').disabled=next===1;$('#main-next').disabled=next===4;loadRows({ai:false,snapshot:false})}
+async function saveServerWatchlist(rows){if(!state.editingEnabled)throw Error('Shared editing is not enabled yet. Configure the Railway Volume and admin token shown above.');let token=sessionStorage.getItem('rhtc-watchlist-admin-token');if(!token){token=window.prompt('Enter the RHTC watchlist admin token configured in Railway.');if(!token)throw Error('No changes saved. Enter the admin token to continue.')}const response=await fetch('/options/api/watchlist',{method:'PUT',headers:{'Content-Type':'application/json','X-RHTC-Admin-Token':token},body:JSON.stringify({rows})});if(!response.ok){if(response.status===401)sessionStorage.removeItem('rhtc-watchlist-admin-token');let detail='Could not save the shared symbol list.';try{detail=(await response.json()).detail||detail}catch(e){}throw Error(detail)}sessionStorage.setItem('rhtc-watchlist-admin-token',token);return (await response.json()).rows}
+async function saveSymbolList(rows){setSymbolError('Saving to the shared RHTC list…');try{state.watchlist=await saveServerWatchlist(rows);state.migrationOpen=false;state.legacyWatchlist=null;localStorage.removeItem(WATCHLIST_KEY);updateWatchlistCounts();updateStorageNote();renderSymbolList();renderRows();setSymbolError('Saved for every browser.');loadRows({ai:false,snapshot:false});return true}catch(e){setSymbolError(e.message);return false}}
+function validTicker(symbol){return /^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol)}
+async function addSymbol(){const symbol=$('#new-symbol').value.trim().toUpperCase();const peak=$('#new-peak').value;if(!validTicker(symbol)){setSymbolError('Enter a valid ticker (letters, numbers, dots, or dashes).');return}if(state.watchlist.some(r=>r.symbol===symbol)){setSymbolError(`${symbol} is already on the list.`);return}const added={symbol,peak,share_price:optionalNumber($('#new-share-price')),quantity:optionalNumber($('#new-quantity'))};if(await saveSymbolList([added,...state.watchlist])){$('#new-symbol').value='';$('#new-share-price').value='';$('#new-quantity').value='';renderSymbolList()}}
+async function saveEditedSymbol(row){const oldSymbol=row.dataset.symbol;const symbol=row.querySelector('.symbol-edit-ticker').value.trim().toUpperCase();const peak=row.querySelector('.symbol-edit-peak').value;if(!validTicker(symbol)){setSymbolError('Enter a valid ticker (letters, numbers, dots, or dashes).');return}if(state.watchlist.some(r=>r.symbol===symbol&&r.symbol!==oldSymbol)){setSymbolError(`${symbol} is already on the list.`);return}const share_price=optionalNumber(row.querySelector('.symbol-edit-price'));const quantity=optionalNumber(row.querySelector('.symbol-edit-quantity'));const updated=state.watchlist.map(r=>r.symbol===oldSymbol?{symbol,peak,share_price,quantity}:r);if(await saveSymbolList(updated)){state.editingSymbol=null;renderSymbolList()}}
+window.showSettings=()=>$('#settings-modal').classList.add('open');window.hideSettings=()=>$('#settings-modal').classList.remove('open');window.hideDetail=()=>$('#detail-modal').classList.remove('open');window.hideSymbols=()=>$('#symbols-modal').classList.remove('open');window.hideSymbolAnalysis=()=>{stopAnalysisSpeech();$('#symbol-analysis-modal').classList.remove('open')};window.viewChain=viewChain;window.analyzeSymbol=analyzeSymbol;
+$('#manage-symbols').addEventListener('click',openSymbols);$('#add-symbol').addEventListener('click',addSymbol);$('#new-symbol').addEventListener('keydown',e=>{if(e.key==='Enter')addSymbol()});$('#symbol-filter').addEventListener('input',renderSymbolList);$('#symbol-peak-filter').addEventListener('change',renderSymbolList);$('#import-browser-list').addEventListener('click',()=>{if(state.legacyWatchlist)saveSymbolList(state.legacyWatchlist)});
+$('#symbol-list').addEventListener('click',async e=>{const button=e.target.closest('button[data-action]');if(!button)return;const row=button.closest('.symbol-entry');if(!row)return;const action=button.dataset.action;setSymbolError();if(action==='edit'){state.editingSymbol=row.dataset.symbol;renderSymbolList()}else if(action==='cancel'){state.editingSymbol=null;renderSymbolList()}else if(action==='save'){saveEditedSymbol(row)}else if(action==='delete'){const updated=state.watchlist.filter(r=>r.symbol!==row.dataset.symbol);if(await saveSymbolList(updated)){state.editingSymbol=null;renderSymbolList()}}});
+$('#theme-toggle').addEventListener('click',()=>setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark'));
+$('#sidebar-toggle').addEventListener('click',()=>setSidebarCollapsed(!$('.sidebar').classList.contains('collapsed')));
+$('#chain-prev').addEventListener('click',()=>pageChain(-1));$('#chain-next').addEventListener('click',()=>pageChain(1));
+$('#main-prev').addEventListener('click',()=>pageMain(-1));$('#main-next').addEventListener('click',()=>pageMain(1));$('#main-prev').disabled=true;
+document.querySelectorAll('.peak-item').forEach(el=>el.addEventListener('click',()=>{const holdings=el.dataset.peak==='Holdings';state.costOnly=holdings;state.peak=holdings?'All Peaks':el.dataset.peak;state.mode='overview';state.selectedOnly=false;document.querySelectorAll('.peak-item').forEach(n=>n.classList.toggle('selected',n===el));setMode('overview');loadRows({ai:false,snapshot:false})}));
+document.querySelectorAll('.nav-item').forEach(el=>el.addEventListener('click',()=>{const wasCostOnly=state.costOnly;state.costOnly=false;setMode(el.dataset.filter||'overview');if(wasCostOnly)loadRows({ai:false,snapshot:false})}));
+$('#scan-news').addEventListener('click',scanNews);$('#news-peak').addEventListener('change',()=>loadNews());let newsSearchTimer;$('#news-search').addEventListener('input',()=>{clearTimeout(newsSearchTimer);newsSearchTimer=setTimeout(()=>loadNews({quiet:true}),220)});
+$('#analysis-read-btn').addEventListener('click',toggleAnalysisSpeech);$('#analysis-stop-btn').addEventListener('click',()=>stopAnalysisSpeech());
+$('#analysis-mp3-btn').addEventListener('click',createAnalysisPodcast);$('#analysis-copy-transcript').addEventListener('click',copyAnalysisPodcastTranscript);
+$('#news-items').addEventListener('click',event=>{const button=event.target.closest('[data-news-action]');if(!button)return;const card=button.closest('.news-item');if(!card)return;if(button.dataset.newsAction==='read')toggleNewsSpeech(card);else if(button.dataset.newsAction==='stop')stopNewsSpeech();else if(button.dataset.newsAction==='analyze')analyzeNewsStory(card,button)});
+$('#refresh').addEventListener('click',()=>loadRows({ai:true,snapshot:true}));$('#review-limit').addEventListener('change',e=>{state.scanLimit=Number(e.target.value);loadRows({ai:false,snapshot:false})});$('#max-last').addEventListener('change',()=>loadRows({ai:false,snapshot:false}));$('#sort').addEventListener('change',e=>{state.sort=e.target.value;loadRows({ai:false,snapshot:false})});let searchTimer;$('#search').addEventListener('input',e=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.query=e.target.value.trim();loadRows({ai:false,snapshot:false})},220)});
+$('#market-clock').textContent=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date())+' ET';
+initializeWatchlist();
+loadNews({quiet:true});
+$('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/options/auth/logout',{method:'POST',credentials:'same-origin'})}finally{location.replace('/options/login')}});
++fmt(n):kind==='percent'?changeText(n,'%'):kind==='percentvalue'?fmt(n,2)+'%':kind==='shares'?compact+' shares':kind==='change'?changeText(n,'
+function companyPublicHistory(ipo){
+  if(!ipo)return 'Finnhub IPO date is unavailable.';
+  const date=new Date(String(ipo)+'T00:00:00Z');
+  if(!Number.isFinite(date.getTime()))return 'Finnhub IPO date is unavailable.';
+  const now=new Date();
+  let years=now.getUTCFullYear()-date.getUTCFullYear();
+  const beforeAnniversary=now.getUTCMonth()<date.getUTCMonth()||(now.getUTCMonth()===date.getUTCMonth()&&now.getUTCDate()<date.getUTCDate());
+  if(beforeAnniversary)years--;
+  const since=date.toLocaleDateString('en-US',{month:'short',year:'numeric',timeZone:'UTC'});
+  return years>0?'Public since '+since+' · '+years+' '+(years===1?'year':'years')+' listed':'Public since '+since;
+}
+function renderCompanyOverview(profile,symbol,quoteName){
+  const info=profile&&typeof profile==='object'?profile:{};
+  const name=info.name||quoteName||symbol;
+  const summary=info.description||(
+    info.industry
+      ? 'Finnhub classifies this company in the '+info.industry+' industry. A fuller business description is unavailable in the profile returned for this ticker.'
+      : 'Finnhub did not return a business description for this ticker.'
+  );
+  const countryNames={US:'United States',GB:'United Kingdom',CA:'Canada',DE:'Germany',FR:'France',JP:'Japan',CN:'China',AU:'Australia',IL:'Israel',IN:'India',IE:'Ireland',NL:'Netherlands',CH:'Switzerland',KR:'South Korea',TW:'Taiwan'};
+  const country=info.country?(countryNames[info.country.toUpperCase()]||info.country):'';
+  const headquarters=[info.city,info.state,country].filter(Boolean).join(', ')||'Not available in Finnhub profile';
+  const website=typeof info.website==='string'&&(info.website.startsWith('https://')||info.website.startsWith('http://'))?'<a href="'+safe(info.website)+'" target="_blank" rel="noopener noreferrer">Company website ↗</a>':'';
+  return '<section class="company-overview"><div class="company-overview-heading"><h3>About '+safe(name)+'</h3>'+website+'</div><p>'+safe(summary)+'</p><div class="company-overview-facts"><div><small>Industry</small><b>'+safe(info.industry||'Not available')+'</b></div><div><small>Headquarters</small><b>'+safe(headquarters)+'</b></div><div><small>Public-market history</small><b>'+safe(companyPublicHistory(info.ipo))+'</b></div></div><small class="company-overview-note">IPO date shows time as a public company; the business may be older.</small></section>';
+}
+async function viewChain(symbol){
+  const modal=$('#detail-modal'),quoteBox=$('#detail-quote-content'),detail=$('#detail-content');
+  $('#detail-title').textContent=symbol+' stock quote and covered-call screen';
+  $('#detail-subtitle').textContent='Loading stock quote and listed call candidates…';
+  $('#detail-description').hidden=true;
+  $('#detail-company-overview').innerHTML='<div class="loading">Loading company overview…</div>';
+  $('#detail-option-source').innerHTML='';
+  quoteBox.innerHTML='<div class="loading">Retrieving stock quote…</div>';
+  detail.innerHTML='<div class="loading">Retrieving covered-call data…</div>';
+  modal.classList.add('open');
+  try{
+    const responses=await Promise.all([
+      fetch('/options/api/quote/'+encodeURIComponent(symbol)),
+      fetch('/options/api/chain/'+encodeURIComponent(symbol))
+    ]);
+    const quote=await responses[0].json(),chainData=await responses[1].json();
+    if(!responses[0].ok)throw Error(quote.detail||'Stock quote unavailable.');
+    const sourceLabel=quote.source==='demo'?'Illustrative demo values · Not live market data':quote.source==='tradier_sandbox'?'Tradier sandbox quote · May be delayed':'Tradier stock quote';
+    $('#detail-title').textContent=quote.description?symbol+' · '+quote.description:symbol+' stock quote and covered-call screen';
+    $('#detail-subtitle').textContent=sourceLabel;
+    $('#detail-company-overview').innerHTML=renderCompanyOverview(quote.company_profile,symbol,quote.description);
+    const rawTime=quote.quote_time;
+    const quoteTime=rawTime&&Number.isFinite(Number(rawTime))&&Number(rawTime)>0?new Date(Number(rawTime)).toLocaleString():rawTime?String(rawTime):'Quote timestamp unavailable';
+    quoteBox.innerHTML='<div class="detail-quote-stats">'+[
+      quoteCell('Last',quote.price),
+      quoteCell('Change',quote.change,'change'),
+      quoteCell('Change %',quote.change_pct,'percent'),
+      quoteCell('Bid',quote.bid),
+      quoteCell('Ask',quote.ask),
+      quoteCell('Open',quote.open),
+      quoteCell('Day high',quote.high),
+      quoteCell('Day low',quote.low),
+      quoteCell('Volume',quote.volume,'volume'),
+      quoteCell('52-H',quote.week_52_high),
+      quoteCell('52-L',quote.week_52_low),
+      quoteCell('Average volume',quote.average_volume,'volume'),
+      quoteCell('Previous close',quote.previous_close),
+      quoteCell('Market cap',quote.market_cap,'marketcap'),
+      quoteCell('P/E ratio',quote.price_earnings_ratio,'ratio'),
+      quoteCell('Earnings / share (TTM)',quote.earnings_per_share,'money'),
+      quoteCell('Net margin (TTM)',quote.profit_margin,'margin'),
+      quoteCell('Revenue (TTM)',quote.revenue,'money')
+    ].join('')+'</div>';
+    $('#detail-option-source').innerHTML='<p class="detail-quote-source">'+sourceLabel+' · Quote time: '+safe(quoteTime)+'</p>';
+    if(!responses[1].ok){
+      detail.innerHTML='<p class="detail-quote-error">'+safe(chainData.detail||'Covered-call data unavailable.')+'</p>';
+      return;
+    }
+    state.chainRows=chainData.rows||[];
+    state.chainSource=chainData.source||'demo';
+    state.chainDescription=chainData.description||quote.description||'';
+    state.chainIndex=0;
+    if(!state.chainRows.length)detail.innerHTML='<div class="empty">No covered-call rows were returned for this symbol.</div>';
+    else renderChainPage();
+    const description=$('#detail-description');
+    description.textContent=state.chainDescription;
+    const titleText=$('#detail-title').textContent.trim().toLocaleLowerCase();
+    const descriptionText=String(state.chainDescription||'').trim().toLocaleLowerCase();
+    description.hidden=!descriptionText||titleText.includes(descriptionText);
+  }catch(error){
+    quoteBox.innerHTML='<p class="detail-quote-error">'+safe(error.message)+'</p>';
+    $('#detail-subtitle').textContent='Quote details may be incomplete.';
+    toast(symbol+': '+error.message);
+  }
+}
+async function analyzeSymbol(symbol){
+  const modal=$('#symbol-analysis-modal'),body=$('#symbol-analysis-body'),sources=$('#symbol-analysis-sources'),status=$('#symbol-analysis-status');
+  const row=state.rows.find(item=>item.symbol===symbol)||{};
+  $('#symbol-analysis-title').textContent=`${symbol} · Deep analysis`;
+  $('#symbol-analysis-subtitle').textContent=`${peakName(row.peak||'Other')} · Current-source research with citations`;
+  stopNewsSpeech(false);resetAnalysisPodcast();$('#analysis-read-btn').hidden=true;$('#analysis-mp3-btn').disabled=true;body.textContent='Searching current sources and preparing the analysis…';sources.innerHTML='';status.textContent='';modal.classList.add('open');
+  const screen=Object.fromEntries(['price','change','change_pct','strike','expiry','dte','bid','ask','premium_yield','delta','iv','open_interest','volume','bid_size','ask_size','quote_time','source'].filter(key=>row[key]!==undefined).map(key=>[key,row[key]]));
+  screen.contract=contractLabel(row);
+  screen.quantity=quantityForPrice(row.price);
+  screen.estimated_income=incomeForRow(row);
+  screen.ask_yield=Number(row.price)>0&&Number(row.ask)>0?Number(row.ask)/Number(row.price)*100:null;
+  try{
+    const response=await fetch('/options/api/symbol-analysis',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol,screen})});
+    const data=await response.json();
+    if(!response.ok)throw Error(data.detail||'Analysis request failed.');
+    body.innerHTML=renderAnalysis(data.analysis||'No analysis was returned.');
+    sources.innerHTML=(data.citations||[]).map((citation,index)=>`<li><a href="${safe(citation.url)}" target="_blank" rel="noopener noreferrer">${safe(citation.title||citation.url)}</a></li>`).join('');
+    status.textContent=data.mode==='screen_fallback'?'Quote-based verdict · Current-source research did not finish':`Generated by ChatGPT${data.citations?.length?` · ${data.citations.length} cited sources`:''}`;
+    updateAnalysisSpeechControls();
+    $('#analysis-mp3-btn').disabled=false;
+  }catch(error){body.textContent=error.message.includes('OPENAI_API_KEY')?'ChatGPT analysis is not enabled on the server yet. Add OPENAI_API_KEY to Railway Variables, then redeploy.':error.message;status.textContent='Analysis unavailable';}
+}
+function pageChain(delta){const next=state.chainIndex+delta;if(next<0||next>=state.chainRows.length)return;state.chainIndex=next;renderChainPage()}
+function newsDate(value){if(!value)return 'Date unavailable';const d=new Date(value);return Number.isNaN(d.getTime())?value:new Intl.DateTimeFormat('en-US',{month:'short',day:'numeric',year:'numeric'}).format(d)}
+function newsPeakChip(peak){const cls=peak==='AI/I'?'ai':peak==='EFM/I'?'efm':peak==='DS/I'?'defense':peak==='Cross-Peak'?'other':'other';return `<span class="peak-chip ${cls}"><i class="mini-dot"></i>${safe(peak||'Other')}</span>`}
+let activeNewsSpeech=null,activeAnalysisSpeech=null;
+let analysisPodcastAudioUrl=null,analysisPodcastTextUrl=null;
+
+function resetAnalysisPodcast(){if(analysisPodcastAudioUrl)URL.revokeObjectURL(analysisPodcastAudioUrl);if(analysisPodcastTextUrl)URL.revokeObjectURL(analysisPodcastTextUrl);analysisPodcastAudioUrl=null;analysisPodcastTextUrl=null;$('#analysis-podcast-result').hidden=true;$('#analysis-podcast-transcript').value='';$('#analysis-podcast-audio').removeAttribute('src');$('#analysis-podcast-audio').load();$('#analysis-download-mp3').hidden=true;$('#analysis-download-transcript').removeAttribute('href');$('#analysis-download-mp3').removeAttribute('href');$('#analysis-podcast-status').textContent='Uses OpenAI API credits to make a Spotify-ready transcript and narrated MP3.'}
+function podcastFileSlug(value){return String(value||'analysis').normalize('NFKD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,72)||'analysis'}
+async function readApiError(response,fallback){try{const data=await response.json();return data.detail||fallback}catch(error){return fallback}}
+async function createAnalysisPodcast(){const button=$('#analysis-mp3-btn'),status=$('#analysis-podcast-status'),title=$('#symbol-analysis-title').textContent.trim(),subtitle=$('#symbol-analysis-subtitle').textContent.trim(),analysis=$('#symbol-analysis-body').innerText.trim();if(!analysis){status.textContent='Wait for the analysis to finish, then try again.';return}resetAnalysisPodcast();button.disabled=true;button.textContent='Creating Spotify transcript + MP3…';status.textContent='Writing a Spotify-ready spoken transcript…';try{const scriptResponse=await fetch('/options/api/analysis-podcast/transcript',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,subtitle,analysis})});if(!scriptResponse.ok)throw Error(await readApiError(scriptResponse,'Transcript generation failed.'));const scriptData=await scriptResponse.json();const transcript=String(scriptData.transcript||'').trim();if(!transcript)throw Error('OpenAI returned an empty transcript.');$('#analysis-podcast-transcript').value=transcript;analysisPodcastTextUrl=URL.createObjectURL(new Blob([transcript],{type:'text/plain;charset=utf-8'}));const slug=podcastFileSlug(title),transcriptLink=$('#analysis-download-transcript');transcriptLink.href=analysisPodcastTextUrl;transcriptLink.download='RHTC_'+slug+'_Spotify_Transcript.txt';$('#analysis-podcast-result').hidden=false;status.textContent='Transcript ready ('+transcript.length.toLocaleString()+' characters). Creating the MP3…';const audioResponse=await fetch('/options/api/analysis-podcast/audio',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,transcript})});if(!audioResponse.ok)throw Error(await readApiError(audioResponse,'MP3 generation failed.'));const mp3=await audioResponse.blob();if(!mp3.size)throw Error('The MP3 file was empty. Try again.');analysisPodcastAudioUrl=URL.createObjectURL(mp3);$('#analysis-podcast-audio').src=analysisPodcastAudioUrl;const mp3Link=$('#analysis-download-mp3');mp3Link.href=analysisPodcastAudioUrl;mp3Link.download='RHTC_'+slug+'_Spotify.mp3';mp3Link.hidden=false;status.textContent='Ready to review or publish. Download the transcript and MP3 below.'}catch(error){status.textContent=error.message||'Could not create the Spotify assets. Try again.'}finally{button.disabled=false;button.textContent='🎙 Create Spotify Transcript + MP3'}}
+async function copyAnalysisPodcastTranscript(){const text=$('#analysis-podcast-transcript').value;if(!text)return;try{await navigator.clipboard.writeText(text);toast('Spotify transcript copied.')}catch(error){const field=$('#analysis-podcast-transcript');field.focus();field.select();toast('Select and copy the transcript.')}}
+
+function updateAnalysisSpeechControls(){const read=$('#analysis-read-btn'),stop=$('#analysis-stop-btn'),supported='speechSynthesis'in window&&'SpeechSynthesisUtterance'in window;if(!read||!stop)return;read.hidden=!supported;read.disabled=!supported;read.textContent=activeAnalysisSpeech?(activeAnalysisSpeech.paused?'▶ Resume':'Ⅱ Pause'):'🔊 Read analysis';stop.hidden=!activeAnalysisSpeech}
+function stopAnalysisSpeech(refresh=true){const current=activeAnalysisSpeech;activeAnalysisSpeech=null;if(current&&'speechSynthesis'in window)window.speechSynthesis.cancel();if(refresh)updateAnalysisSpeechControls();return current}
+function toggleAnalysisSpeech(){if(!('speechSynthesis'in window)||!('SpeechSynthesisUtterance'in window)){toast('Read aloud is not available in this browser.');return}if(activeAnalysisSpeech){if(activeAnalysisSpeech.paused){window.speechSynthesis.resume();activeAnalysisSpeech.paused=false}else{window.speechSynthesis.pause();activeAnalysisSpeech.paused=true}updateAnalysisSpeechControls();return}stopNewsSpeech(false);const text=[$('#symbol-analysis-title').textContent,$('#symbol-analysis-subtitle').textContent,$('#symbol-analysis-body').innerText].filter(Boolean).join('. ');if(!text.trim())return;const utterance=new SpeechSynthesisUtterance(text),speech={utterance,paused:false};activeAnalysisSpeech=speech;const finish=()=>{if(activeAnalysisSpeech===speech){activeAnalysisSpeech=null;updateAnalysisSpeechControls()}};utterance.onend=finish;utterance.onerror=finish;try{window.speechSynthesis.speak(utterance);updateAnalysisSpeechControls();updateNewsSpeechControls()}catch(error){finish();toast('Could not read this analysis aloud.')}}
+function stopNewsSpeech(refresh=true){const current=activeNewsSpeech;activeNewsSpeech=null;if(activeAnalysisSpeech){activeAnalysisSpeech=null;updateAnalysisSpeechControls()}if('speechSynthesis'in window)window.speechSynthesis.cancel();if(refresh){updateNewsSpeechControls();updateAnalysisSpeechControls()}return current}
+function updateNewsSpeechControls(){const supported='speechSynthesis'in window&&'SpeechSynthesisUtterance'in window;document.querySelectorAll('.news-item').forEach(card=>{const read=card.querySelector('[data-news-action="read"]'),stop=card.querySelector('[data-news-action="stop"]');if(!read||!stop)return;const current=activeNewsSpeech&&activeNewsSpeech.url===card.dataset.newsUrl;read.disabled=!supported;read.textContent=current?(activeNewsSpeech.paused?'▶ Resume':'Ⅱ Pause'):'🔊 Read excerpt';read.setAttribute('aria-label',current?`${activeNewsSpeech.paused?'Resume':'Pause'} reading ${card.querySelector('h3 a')?.textContent||'this story'}`:`Read title and excerpt aloud: ${card.querySelector('h3 a')?.textContent||'story'}`);stop.hidden=!current})}
+function toggleNewsSpeech(card){if(!('speechSynthesis'in window)||!('SpeechSynthesisUtterance'in window)){toast('Read aloud is not available in this browser.');return}if(activeNewsSpeech&&activeNewsSpeech.url===card.dataset.newsUrl){if(activeNewsSpeech.paused){window.speechSynthesis.resume();activeNewsSpeech.paused=false}else{window.speechSynthesis.pause();activeNewsSpeech.paused=true}updateNewsSpeechControls();return}stopAnalysisSpeech(false);stopNewsSpeech(false);const title=card.querySelector('h3 a')?.textContent||'';const source=card.querySelector('.news-source')?.textContent||'';const excerpt=card.querySelector('.news-excerpt')?.textContent||'';const utterance=new SpeechSynthesisUtterance([title,source?`Source: ${source}`:'',excerpt].filter(Boolean).join('. '));const speech={url:card.dataset.newsUrl,utterance,paused:false};activeNewsSpeech=speech;const finish=()=>{if(activeNewsSpeech===speech){activeNewsSpeech=null;updateNewsSpeechControls()}};utterance.onend=finish;utterance.onerror=finish;try{window.speechSynthesis.speak(utterance);updateNewsSpeechControls();updateAnalysisSpeechControls()}catch(error){finish();toast('Could not read this excerpt aloud.')}}
+async function analyzeNewsStory(card,button){
+  const modal=$('#symbol-analysis-modal'),body=$('#symbol-analysis-body'),sources=$('#symbol-analysis-sources'),status=$('#symbol-analysis-status');
+  const title=card.dataset.newsTitle||card.querySelector('h3 a')?.textContent||'News story';
+  $('#symbol-analysis-title').textContent='RHTC impact analysis';
+  stopNewsSpeech(false);resetAnalysisPodcast();$('#analysis-read-btn').hidden=true;$('#analysis-mp3-btn').disabled=true;$('#symbol-analysis-subtitle').textContent=`${title} · Watchlist companies, Three Peaks, and thesis`;body.textContent='Checking current sources and mapping potential impacts…';sources.innerHTML='';status.textContent='Uses OpenAI web search. Impacts are analytical assessments, not price targets.';modal.classList.add('open');button.disabled=true;
+  try{
+    const response=await fetch('/options/api/news/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,url:card.dataset.newsUrl||'',snippet:card.dataset.newsSnippet||'',published_at:card.dataset.newsPublishedAt||''})});
+    const data=await response.json();if(!response.ok)throw Error(data.detail||'News analysis request failed.');
+    body.innerHTML=renderAnalysis(data.analysis||'No analysis was returned.');
+    sources.innerHTML=(data.citations||[]).map(citation=>`<li><a href="${safe(citation.url)}" target="_blank" rel="noopener noreferrer">${safe(citation.title||citation.url)}</a></li>`).join('');
+    status.textContent=`Generated by ChatGPT${data.citations?.length?` · ${data.citations.length} cited sources`:''}`;
+    updateAnalysisSpeechControls();
+    $('#analysis-mp3-btn').disabled=false;
+  }catch(error){body.textContent=error.message.includes('OPENAI_API_KEY')?'News analysis is not enabled on the server yet. Add OPENAI_API_KEY to Railway Variables, then redeploy.':error.message;status.textContent='Analysis unavailable'}
+  finally{button.disabled=false}
+}
+function renderNews(items){if(activeNewsSpeech)stopNewsSpeech(false);const container=$('#news-items');$('#news-count').textContent=items.length?`${items.length} stories · last 14 days`:'No matching stories in the last 14 days.';$('#count-news').textContent=items.length?String(items.length):'0';if(!items.length){container.innerHTML='<p class="news-empty">No stories match these filters yet. The daily scan runs at 6:00 a.m. Pacific; use Scan for news to search now.</p>';return}container.innerHTML=items.map(item=>{const url=/^https?:\/\//i.test(item.url||'')?item.url:'#';return `<article class="news-item" data-news-url="${safe(url)}" data-news-title="${safe(item.title||'')}" data-news-snippet="${safe(item.snippet||'')}" data-news-published-at="${safe(item.published_at||item.first_seen_at||'')}"><div class="news-item-meta">${newsPeakChip(item.peak)}<span class="news-source">${safe(item.source||'Source')}</span><time>${safe(newsDate(item.published_at||item.first_seen_at))}</time></div><h3><a href="${safe(url)}" target="_blank" rel="noopener noreferrer">${safe(item.title)}</a></h3><p class="news-excerpt">${safe(item.snippet||'No source excerpt was returned.')}</p><div class="news-item-actions"><button class="news-read-btn" type="button" data-news-action="read">🔊 Read excerpt</button><button class="news-stop-btn" type="button" data-news-action="stop" aria-label="Stop reading this excerpt" hidden>Stop</button><button class="news-analyze-btn" type="button" data-news-action="analyze">✦ Analyze RHTC impact</button></div></article>`}).join('');updateNewsSpeechControls()}
+async function loadNews({quiet=false}={}){try{const params=new URLSearchParams({days:'14',peak:$('#news-peak').value,q:$('#news-search').value.trim()});const response=await fetch(`/options/api/news?${params}`);if(!response.ok)throw Error('News feed is unavailable.');const data=await response.json();renderNews(data.items||[]);const stamp=data.last_scan_at?new Intl.DateTimeFormat('en-US',{timeZone:'America/Los_Angeles',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}).format(new Date(data.last_scan_at))+' PT':'Not scanned yet';$('#news-last-scanned').textContent=data.configured?`LAST SCAN · ${stamp}`:'PERPLEXITY KEY NOT CONFIGURED';if(!data.configured)$('#news-count').textContent='Add PERPLEXITY_API_KEY in Railway Variables to enable scanning.'}catch(error){if(!quiet){$('#news-items').innerHTML=`<p class="news-empty">${safe(error.message)}</p>`;toast('Could not load the RHTC news feed.')}}}
+async function scanNews(){const button=$('#scan-news');button.disabled=true;button.querySelector('.refresh-icon').classList.add('spin');try{const response=await fetch('/options/api/news/scan',{method:'POST'});const data=await response.json();if(!response.ok)throw Error(data.detail||'News scan failed.');await loadNews({quiet:true});toast(data.status==='recent'?'The feed was scanned recently; showing saved stories.':`${data.added} stories refreshed.`)}catch(error){toast(error.message)}finally{button.disabled=false;button.querySelector('.refresh-icon').classList.remove('spin')}}
+function setMode(mode){state.mode=mode;const isNews=mode==='news';if(!isNews)stopNewsSpeech();$('#options-view').hidden=isNews;$('#news-view').hidden=!isNews;$('#main-pager').hidden=mode==='history';document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.filter===mode||(!n.dataset.filter&&mode==='overview')));if(isNews){loadNews()}else if(mode==='history'){renderRows();toast('Snapshots are saved in this browser.')}else if(mode==='holdings'){state.selectedOnly=true;state.peak='All Peaks';document.querySelectorAll('.peak-item').forEach(n=>n.classList.toggle('selected',n.dataset.peak==='All Peaks'));loadRows({ai:false,snapshot:false})}else{state.selectedOnly=false;renderRows()}}
+function pageMain(delta){const next=state.expirationSet+delta;if(next<1||next>4)return;state.expirationSet=next;$('#main-page').textContent=DTE_WINDOWS[next-1];$('#main-prev').disabled=next===1;$('#main-next').disabled=next===4;loadRows({ai:false,snapshot:false})}
+async function saveServerWatchlist(rows){if(!state.editingEnabled)throw Error('Shared editing is not enabled yet. Configure the Railway Volume and admin token shown above.');let token=sessionStorage.getItem('rhtc-watchlist-admin-token');if(!token){token=window.prompt('Enter the RHTC watchlist admin token configured in Railway.');if(!token)throw Error('No changes saved. Enter the admin token to continue.')}const response=await fetch('/options/api/watchlist',{method:'PUT',headers:{'Content-Type':'application/json','X-RHTC-Admin-Token':token},body:JSON.stringify({rows})});if(!response.ok){if(response.status===401)sessionStorage.removeItem('rhtc-watchlist-admin-token');let detail='Could not save the shared symbol list.';try{detail=(await response.json()).detail||detail}catch(e){}throw Error(detail)}sessionStorage.setItem('rhtc-watchlist-admin-token',token);return (await response.json()).rows}
+async function saveSymbolList(rows){setSymbolError('Saving to the shared RHTC list…');try{state.watchlist=await saveServerWatchlist(rows);state.migrationOpen=false;state.legacyWatchlist=null;localStorage.removeItem(WATCHLIST_KEY);updateWatchlistCounts();updateStorageNote();renderSymbolList();renderRows();setSymbolError('Saved for every browser.');loadRows({ai:false,snapshot:false});return true}catch(e){setSymbolError(e.message);return false}}
+function validTicker(symbol){return /^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol)}
+async function addSymbol(){const symbol=$('#new-symbol').value.trim().toUpperCase();const peak=$('#new-peak').value;if(!validTicker(symbol)){setSymbolError('Enter a valid ticker (letters, numbers, dots, or dashes).');return}if(state.watchlist.some(r=>r.symbol===symbol)){setSymbolError(`${symbol} is already on the list.`);return}const added={symbol,peak,share_price:optionalNumber($('#new-share-price')),quantity:optionalNumber($('#new-quantity'))};if(await saveSymbolList([added,...state.watchlist])){$('#new-symbol').value='';$('#new-share-price').value='';$('#new-quantity').value='';renderSymbolList()}}
+async function saveEditedSymbol(row){const oldSymbol=row.dataset.symbol;const symbol=row.querySelector('.symbol-edit-ticker').value.trim().toUpperCase();const peak=row.querySelector('.symbol-edit-peak').value;if(!validTicker(symbol)){setSymbolError('Enter a valid ticker (letters, numbers, dots, or dashes).');return}if(state.watchlist.some(r=>r.symbol===symbol&&r.symbol!==oldSymbol)){setSymbolError(`${symbol} is already on the list.`);return}const share_price=optionalNumber(row.querySelector('.symbol-edit-price'));const quantity=optionalNumber(row.querySelector('.symbol-edit-quantity'));const updated=state.watchlist.map(r=>r.symbol===oldSymbol?{symbol,peak,share_price,quantity}:r);if(await saveSymbolList(updated)){state.editingSymbol=null;renderSymbolList()}}
+window.showSettings=()=>$('#settings-modal').classList.add('open');window.hideSettings=()=>$('#settings-modal').classList.remove('open');window.hideDetail=()=>$('#detail-modal').classList.remove('open');window.hideSymbols=()=>$('#symbols-modal').classList.remove('open');window.hideSymbolAnalysis=()=>{stopAnalysisSpeech();$('#symbol-analysis-modal').classList.remove('open')};window.viewChain=viewChain;window.analyzeSymbol=analyzeSymbol;
+$('#manage-symbols').addEventListener('click',openSymbols);$('#add-symbol').addEventListener('click',addSymbol);$('#new-symbol').addEventListener('keydown',e=>{if(e.key==='Enter')addSymbol()});$('#symbol-filter').addEventListener('input',renderSymbolList);$('#symbol-peak-filter').addEventListener('change',renderSymbolList);$('#import-browser-list').addEventListener('click',()=>{if(state.legacyWatchlist)saveSymbolList(state.legacyWatchlist)});
+$('#symbol-list').addEventListener('click',async e=>{const button=e.target.closest('button[data-action]');if(!button)return;const row=button.closest('.symbol-entry');if(!row)return;const action=button.dataset.action;setSymbolError();if(action==='edit'){state.editingSymbol=row.dataset.symbol;renderSymbolList()}else if(action==='cancel'){state.editingSymbol=null;renderSymbolList()}else if(action==='save'){saveEditedSymbol(row)}else if(action==='delete'){const updated=state.watchlist.filter(r=>r.symbol!==row.dataset.symbol);if(await saveSymbolList(updated)){state.editingSymbol=null;renderSymbolList()}}});
+$('#theme-toggle').addEventListener('click',()=>setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark'));
+$('#sidebar-toggle').addEventListener('click',()=>setSidebarCollapsed(!$('.sidebar').classList.contains('collapsed')));
+$('#chain-prev').addEventListener('click',()=>pageChain(-1));$('#chain-next').addEventListener('click',()=>pageChain(1));
+$('#main-prev').addEventListener('click',()=>pageMain(-1));$('#main-next').addEventListener('click',()=>pageMain(1));$('#main-prev').disabled=true;
+document.querySelectorAll('.peak-item').forEach(el=>el.addEventListener('click',()=>{const holdings=el.dataset.peak==='Holdings';state.costOnly=holdings;state.peak=holdings?'All Peaks':el.dataset.peak;state.mode='overview';state.selectedOnly=false;document.querySelectorAll('.peak-item').forEach(n=>n.classList.toggle('selected',n===el));setMode('overview');loadRows({ai:false,snapshot:false})}));
+document.querySelectorAll('.nav-item').forEach(el=>el.addEventListener('click',()=>{const wasCostOnly=state.costOnly;state.costOnly=false;setMode(el.dataset.filter||'overview');if(wasCostOnly)loadRows({ai:false,snapshot:false})}));
+$('#scan-news').addEventListener('click',scanNews);$('#news-peak').addEventListener('change',()=>loadNews());let newsSearchTimer;$('#news-search').addEventListener('input',()=>{clearTimeout(newsSearchTimer);newsSearchTimer=setTimeout(()=>loadNews({quiet:true}),220)});
+$('#analysis-read-btn').addEventListener('click',toggleAnalysisSpeech);$('#analysis-stop-btn').addEventListener('click',()=>stopAnalysisSpeech());
+$('#analysis-mp3-btn').addEventListener('click',createAnalysisPodcast);$('#analysis-copy-transcript').addEventListener('click',copyAnalysisPodcastTranscript);
+$('#news-items').addEventListener('click',event=>{const button=event.target.closest('[data-news-action]');if(!button)return;const card=button.closest('.news-item');if(!card)return;if(button.dataset.newsAction==='read')toggleNewsSpeech(card);else if(button.dataset.newsAction==='stop')stopNewsSpeech();else if(button.dataset.newsAction==='analyze')analyzeNewsStory(card,button)});
+$('#refresh').addEventListener('click',()=>loadRows({ai:true,snapshot:true}));$('#review-limit').addEventListener('change',e=>{state.scanLimit=Number(e.target.value);loadRows({ai:false,snapshot:false})});$('#max-last').addEventListener('change',()=>loadRows({ai:false,snapshot:false}));$('#sort').addEventListener('change',e=>{state.sort=e.target.value;loadRows({ai:false,snapshot:false})});let searchTimer;$('#search').addEventListener('input',e=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.query=e.target.value.trim();loadRows({ai:false,snapshot:false})},220)});
+$('#market-clock').textContent=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date())+' ET';
+initializeWatchlist();
+loadNews({quiet:true});
+$('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/options/auth/logout',{method:'POST',credentials:'same-origin'})}finally{location.replace('/options/login')}});
+):kind==='marketcap'?'
+function companyPublicHistory(ipo){
+  if(!ipo)return 'Finnhub IPO date is unavailable.';
+  const date=new Date(String(ipo)+'T00:00:00Z');
+  if(!Number.isFinite(date.getTime()))return 'Finnhub IPO date is unavailable.';
+  const now=new Date();
+  let years=now.getUTCFullYear()-date.getUTCFullYear();
+  const beforeAnniversary=now.getUTCMonth()<date.getUTCMonth()||(now.getUTCMonth()===date.getUTCMonth()&&now.getUTCDate()<date.getUTCDate());
+  if(beforeAnniversary)years--;
+  const since=date.toLocaleDateString('en-US',{month:'short',year:'numeric',timeZone:'UTC'});
+  return years>0?'Public since '+since+' · '+years+' '+(years===1?'year':'years')+' listed':'Public since '+since;
+}
+function renderCompanyOverview(profile,symbol,quoteName){
+  const info=profile&&typeof profile==='object'?profile:{};
+  const name=info.name||quoteName||symbol;
+  const summary=info.description||(
+    info.industry
+      ? 'Finnhub classifies this company in the '+info.industry+' industry. A fuller business description is unavailable in the profile returned for this ticker.'
+      : 'Finnhub did not return a business description for this ticker.'
+  );
+  const countryNames={US:'United States',GB:'United Kingdom',CA:'Canada',DE:'Germany',FR:'France',JP:'Japan',CN:'China',AU:'Australia',IL:'Israel',IN:'India',IE:'Ireland',NL:'Netherlands',CH:'Switzerland',KR:'South Korea',TW:'Taiwan'};
+  const country=info.country?(countryNames[info.country.toUpperCase()]||info.country):'';
+  const headquarters=[info.city,info.state,country].filter(Boolean).join(', ')||'Not available in Finnhub profile';
+  const website=typeof info.website==='string'&&(info.website.startsWith('https://')||info.website.startsWith('http://'))?'<a href="'+safe(info.website)+'" target="_blank" rel="noopener noreferrer">Company website ↗</a>':'';
+  return '<section class="company-overview"><div class="company-overview-heading"><h3>About '+safe(name)+'</h3>'+website+'</div><p>'+safe(summary)+'</p><div class="company-overview-facts"><div><small>Industry</small><b>'+safe(info.industry||'Not available')+'</b></div><div><small>Headquarters</small><b>'+safe(headquarters)+'</b></div><div><small>Public-market history</small><b>'+safe(companyPublicHistory(info.ipo))+'</b></div></div><small class="company-overview-note">IPO date shows time as a public company; the business may be older.</small></section>';
+}
+async function viewChain(symbol){
+  const modal=$('#detail-modal'),quoteBox=$('#detail-quote-content'),detail=$('#detail-content');
+  $('#detail-title').textContent=symbol+' stock quote and covered-call screen';
+  $('#detail-subtitle').textContent='Loading stock quote and listed call candidates…';
+  $('#detail-description').hidden=true;
+  $('#detail-company-overview').innerHTML='<div class="loading">Loading company overview…</div>';
+  $('#detail-option-source').innerHTML='';
+  quoteBox.innerHTML='<div class="loading">Retrieving stock quote…</div>';
+  detail.innerHTML='<div class="loading">Retrieving covered-call data…</div>';
+  modal.classList.add('open');
+  try{
+    const responses=await Promise.all([
+      fetch('/options/api/quote/'+encodeURIComponent(symbol)),
+      fetch('/options/api/chain/'+encodeURIComponent(symbol))
+    ]);
+    const quote=await responses[0].json(),chainData=await responses[1].json();
+    if(!responses[0].ok)throw Error(quote.detail||'Stock quote unavailable.');
+    const sourceLabel=quote.source==='demo'?'Illustrative demo values · Not live market data':quote.source==='tradier_sandbox'?'Tradier sandbox quote · May be delayed':'Tradier stock quote';
+    $('#detail-title').textContent=quote.description?symbol+' · '+quote.description:symbol+' stock quote and covered-call screen';
+    $('#detail-subtitle').textContent=sourceLabel;
+    $('#detail-company-overview').innerHTML=renderCompanyOverview(quote.company_profile,symbol,quote.description);
+    const rawTime=quote.quote_time;
+    const quoteTime=rawTime&&Number.isFinite(Number(rawTime))&&Number(rawTime)>0?new Date(Number(rawTime)).toLocaleString():rawTime?String(rawTime):'Quote timestamp unavailable';
+    quoteBox.innerHTML='<div class="detail-quote-stats">'+[
+      quoteCell('Last',quote.price),
+      quoteCell('Change',quote.change,'change'),
+      quoteCell('Change %',quote.change_pct,'percent'),
+      quoteCell('Bid',quote.bid),
+      quoteCell('Ask',quote.ask),
+      quoteCell('Open',quote.open),
+      quoteCell('Day high',quote.high),
+      quoteCell('Day low',quote.low),
+      quoteCell('Volume',quote.volume,'volume'),
+      quoteCell('52-H',quote.week_52_high),
+      quoteCell('52-L',quote.week_52_low),
+      quoteCell('Average volume',quote.average_volume,'volume'),
+      quoteCell('Previous close',quote.previous_close),
+      quoteCell('Market cap',quote.market_cap,'marketcap'),
+      quoteCell('P/E ratio',quote.price_earnings_ratio,'ratio'),
+      quoteCell('Earnings / share (TTM)',quote.earnings_per_share,'money'),
+      quoteCell('Net margin (TTM)',quote.profit_margin,'margin'),
+      quoteCell('Revenue (TTM)',quote.revenue,'money')
+    ].join('')+'</div>';
+    $('#detail-option-source').innerHTML='<p class="detail-quote-source">'+sourceLabel+' · Quote time: '+safe(quoteTime)+'</p>';
+    if(!responses[1].ok){
+      detail.innerHTML='<p class="detail-quote-error">'+safe(chainData.detail||'Covered-call data unavailable.')+'</p>';
+      return;
+    }
+    state.chainRows=chainData.rows||[];
+    state.chainSource=chainData.source||'demo';
+    state.chainDescription=chainData.description||quote.description||'';
+    state.chainIndex=0;
+    if(!state.chainRows.length)detail.innerHTML='<div class="empty">No covered-call rows were returned for this symbol.</div>';
+    else renderChainPage();
+    const description=$('#detail-description');
+    description.textContent=state.chainDescription;
+    const titleText=$('#detail-title').textContent.trim().toLocaleLowerCase();
+    const descriptionText=String(state.chainDescription||'').trim().toLocaleLowerCase();
+    description.hidden=!descriptionText||titleText.includes(descriptionText);
+  }catch(error){
+    quoteBox.innerHTML='<p class="detail-quote-error">'+safe(error.message)+'</p>';
+    $('#detail-subtitle').textContent='Quote details may be incomplete.';
+    toast(symbol+': '+error.message);
+  }
+}
+async function analyzeSymbol(symbol){
+  const modal=$('#symbol-analysis-modal'),body=$('#symbol-analysis-body'),sources=$('#symbol-analysis-sources'),status=$('#symbol-analysis-status');
+  const row=state.rows.find(item=>item.symbol===symbol)||{};
+  $('#symbol-analysis-title').textContent=`${symbol} · Deep analysis`;
+  $('#symbol-analysis-subtitle').textContent=`${peakName(row.peak||'Other')} · Current-source research with citations`;
+  stopNewsSpeech(false);resetAnalysisPodcast();$('#analysis-read-btn').hidden=true;$('#analysis-mp3-btn').disabled=true;body.textContent='Searching current sources and preparing the analysis…';sources.innerHTML='';status.textContent='';modal.classList.add('open');
+  const screen=Object.fromEntries(['price','change','change_pct','strike','expiry','dte','bid','ask','premium_yield','delta','iv','open_interest','volume','bid_size','ask_size','quote_time','source'].filter(key=>row[key]!==undefined).map(key=>[key,row[key]]));
+  screen.contract=contractLabel(row);
+  screen.quantity=quantityForPrice(row.price);
+  screen.estimated_income=incomeForRow(row);
+  screen.ask_yield=Number(row.price)>0&&Number(row.ask)>0?Number(row.ask)/Number(row.price)*100:null;
+  try{
+    const response=await fetch('/options/api/symbol-analysis',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol,screen})});
+    const data=await response.json();
+    if(!response.ok)throw Error(data.detail||'Analysis request failed.');
+    body.innerHTML=renderAnalysis(data.analysis||'No analysis was returned.');
+    sources.innerHTML=(data.citations||[]).map((citation,index)=>`<li><a href="${safe(citation.url)}" target="_blank" rel="noopener noreferrer">${safe(citation.title||citation.url)}</a></li>`).join('');
+    status.textContent=data.mode==='screen_fallback'?'Quote-based verdict · Current-source research did not finish':`Generated by ChatGPT${data.citations?.length?` · ${data.citations.length} cited sources`:''}`;
+    updateAnalysisSpeechControls();
+    $('#analysis-mp3-btn').disabled=false;
+  }catch(error){body.textContent=error.message.includes('OPENAI_API_KEY')?'ChatGPT analysis is not enabled on the server yet. Add OPENAI_API_KEY to Railway Variables, then redeploy.':error.message;status.textContent='Analysis unavailable';}
+}
+function pageChain(delta){const next=state.chainIndex+delta;if(next<0||next>=state.chainRows.length)return;state.chainIndex=next;renderChainPage()}
+function newsDate(value){if(!value)return 'Date unavailable';const d=new Date(value);return Number.isNaN(d.getTime())?value:new Intl.DateTimeFormat('en-US',{month:'short',day:'numeric',year:'numeric'}).format(d)}
+function newsPeakChip(peak){const cls=peak==='AI/I'?'ai':peak==='EFM/I'?'efm':peak==='DS/I'?'defense':peak==='Cross-Peak'?'other':'other';return `<span class="peak-chip ${cls}"><i class="mini-dot"></i>${safe(peak||'Other')}</span>`}
+let activeNewsSpeech=null,activeAnalysisSpeech=null;
+let analysisPodcastAudioUrl=null,analysisPodcastTextUrl=null;
+
+function resetAnalysisPodcast(){if(analysisPodcastAudioUrl)URL.revokeObjectURL(analysisPodcastAudioUrl);if(analysisPodcastTextUrl)URL.revokeObjectURL(analysisPodcastTextUrl);analysisPodcastAudioUrl=null;analysisPodcastTextUrl=null;$('#analysis-podcast-result').hidden=true;$('#analysis-podcast-transcript').value='';$('#analysis-podcast-audio').removeAttribute('src');$('#analysis-podcast-audio').load();$('#analysis-download-mp3').hidden=true;$('#analysis-download-transcript').removeAttribute('href');$('#analysis-download-mp3').removeAttribute('href');$('#analysis-podcast-status').textContent='Uses OpenAI API credits to make a Spotify-ready transcript and narrated MP3.'}
+function podcastFileSlug(value){return String(value||'analysis').normalize('NFKD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,72)||'analysis'}
+async function readApiError(response,fallback){try{const data=await response.json();return data.detail||fallback}catch(error){return fallback}}
+async function createAnalysisPodcast(){const button=$('#analysis-mp3-btn'),status=$('#analysis-podcast-status'),title=$('#symbol-analysis-title').textContent.trim(),subtitle=$('#symbol-analysis-subtitle').textContent.trim(),analysis=$('#symbol-analysis-body').innerText.trim();if(!analysis){status.textContent='Wait for the analysis to finish, then try again.';return}resetAnalysisPodcast();button.disabled=true;button.textContent='Creating Spotify transcript + MP3…';status.textContent='Writing a Spotify-ready spoken transcript…';try{const scriptResponse=await fetch('/options/api/analysis-podcast/transcript',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,subtitle,analysis})});if(!scriptResponse.ok)throw Error(await readApiError(scriptResponse,'Transcript generation failed.'));const scriptData=await scriptResponse.json();const transcript=String(scriptData.transcript||'').trim();if(!transcript)throw Error('OpenAI returned an empty transcript.');$('#analysis-podcast-transcript').value=transcript;analysisPodcastTextUrl=URL.createObjectURL(new Blob([transcript],{type:'text/plain;charset=utf-8'}));const slug=podcastFileSlug(title),transcriptLink=$('#analysis-download-transcript');transcriptLink.href=analysisPodcastTextUrl;transcriptLink.download='RHTC_'+slug+'_Spotify_Transcript.txt';$('#analysis-podcast-result').hidden=false;status.textContent='Transcript ready ('+transcript.length.toLocaleString()+' characters). Creating the MP3…';const audioResponse=await fetch('/options/api/analysis-podcast/audio',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,transcript})});if(!audioResponse.ok)throw Error(await readApiError(audioResponse,'MP3 generation failed.'));const mp3=await audioResponse.blob();if(!mp3.size)throw Error('The MP3 file was empty. Try again.');analysisPodcastAudioUrl=URL.createObjectURL(mp3);$('#analysis-podcast-audio').src=analysisPodcastAudioUrl;const mp3Link=$('#analysis-download-mp3');mp3Link.href=analysisPodcastAudioUrl;mp3Link.download='RHTC_'+slug+'_Spotify.mp3';mp3Link.hidden=false;status.textContent='Ready to review or publish. Download the transcript and MP3 below.'}catch(error){status.textContent=error.message||'Could not create the Spotify assets. Try again.'}finally{button.disabled=false;button.textContent='🎙 Create Spotify Transcript + MP3'}}
+async function copyAnalysisPodcastTranscript(){const text=$('#analysis-podcast-transcript').value;if(!text)return;try{await navigator.clipboard.writeText(text);toast('Spotify transcript copied.')}catch(error){const field=$('#analysis-podcast-transcript');field.focus();field.select();toast('Select and copy the transcript.')}}
+
+function updateAnalysisSpeechControls(){const read=$('#analysis-read-btn'),stop=$('#analysis-stop-btn'),supported='speechSynthesis'in window&&'SpeechSynthesisUtterance'in window;if(!read||!stop)return;read.hidden=!supported;read.disabled=!supported;read.textContent=activeAnalysisSpeech?(activeAnalysisSpeech.paused?'▶ Resume':'Ⅱ Pause'):'🔊 Read analysis';stop.hidden=!activeAnalysisSpeech}
+function stopAnalysisSpeech(refresh=true){const current=activeAnalysisSpeech;activeAnalysisSpeech=null;if(current&&'speechSynthesis'in window)window.speechSynthesis.cancel();if(refresh)updateAnalysisSpeechControls();return current}
+function toggleAnalysisSpeech(){if(!('speechSynthesis'in window)||!('SpeechSynthesisUtterance'in window)){toast('Read aloud is not available in this browser.');return}if(activeAnalysisSpeech){if(activeAnalysisSpeech.paused){window.speechSynthesis.resume();activeAnalysisSpeech.paused=false}else{window.speechSynthesis.pause();activeAnalysisSpeech.paused=true}updateAnalysisSpeechControls();return}stopNewsSpeech(false);const text=[$('#symbol-analysis-title').textContent,$('#symbol-analysis-subtitle').textContent,$('#symbol-analysis-body').innerText].filter(Boolean).join('. ');if(!text.trim())return;const utterance=new SpeechSynthesisUtterance(text),speech={utterance,paused:false};activeAnalysisSpeech=speech;const finish=()=>{if(activeAnalysisSpeech===speech){activeAnalysisSpeech=null;updateAnalysisSpeechControls()}};utterance.onend=finish;utterance.onerror=finish;try{window.speechSynthesis.speak(utterance);updateAnalysisSpeechControls();updateNewsSpeechControls()}catch(error){finish();toast('Could not read this analysis aloud.')}}
+function stopNewsSpeech(refresh=true){const current=activeNewsSpeech;activeNewsSpeech=null;if(activeAnalysisSpeech){activeAnalysisSpeech=null;updateAnalysisSpeechControls()}if('speechSynthesis'in window)window.speechSynthesis.cancel();if(refresh){updateNewsSpeechControls();updateAnalysisSpeechControls()}return current}
+function updateNewsSpeechControls(){const supported='speechSynthesis'in window&&'SpeechSynthesisUtterance'in window;document.querySelectorAll('.news-item').forEach(card=>{const read=card.querySelector('[data-news-action="read"]'),stop=card.querySelector('[data-news-action="stop"]');if(!read||!stop)return;const current=activeNewsSpeech&&activeNewsSpeech.url===card.dataset.newsUrl;read.disabled=!supported;read.textContent=current?(activeNewsSpeech.paused?'▶ Resume':'Ⅱ Pause'):'🔊 Read excerpt';read.setAttribute('aria-label',current?`${activeNewsSpeech.paused?'Resume':'Pause'} reading ${card.querySelector('h3 a')?.textContent||'this story'}`:`Read title and excerpt aloud: ${card.querySelector('h3 a')?.textContent||'story'}`);stop.hidden=!current})}
+function toggleNewsSpeech(card){if(!('speechSynthesis'in window)||!('SpeechSynthesisUtterance'in window)){toast('Read aloud is not available in this browser.');return}if(activeNewsSpeech&&activeNewsSpeech.url===card.dataset.newsUrl){if(activeNewsSpeech.paused){window.speechSynthesis.resume();activeNewsSpeech.paused=false}else{window.speechSynthesis.pause();activeNewsSpeech.paused=true}updateNewsSpeechControls();return}stopAnalysisSpeech(false);stopNewsSpeech(false);const title=card.querySelector('h3 a')?.textContent||'';const source=card.querySelector('.news-source')?.textContent||'';const excerpt=card.querySelector('.news-excerpt')?.textContent||'';const utterance=new SpeechSynthesisUtterance([title,source?`Source: ${source}`:'',excerpt].filter(Boolean).join('. '));const speech={url:card.dataset.newsUrl,utterance,paused:false};activeNewsSpeech=speech;const finish=()=>{if(activeNewsSpeech===speech){activeNewsSpeech=null;updateNewsSpeechControls()}};utterance.onend=finish;utterance.onerror=finish;try{window.speechSynthesis.speak(utterance);updateNewsSpeechControls();updateAnalysisSpeechControls()}catch(error){finish();toast('Could not read this excerpt aloud.')}}
+async function analyzeNewsStory(card,button){
+  const modal=$('#symbol-analysis-modal'),body=$('#symbol-analysis-body'),sources=$('#symbol-analysis-sources'),status=$('#symbol-analysis-status');
+  const title=card.dataset.newsTitle||card.querySelector('h3 a')?.textContent||'News story';
+  $('#symbol-analysis-title').textContent='RHTC impact analysis';
+  stopNewsSpeech(false);resetAnalysisPodcast();$('#analysis-read-btn').hidden=true;$('#analysis-mp3-btn').disabled=true;$('#symbol-analysis-subtitle').textContent=`${title} · Watchlist companies, Three Peaks, and thesis`;body.textContent='Checking current sources and mapping potential impacts…';sources.innerHTML='';status.textContent='Uses OpenAI web search. Impacts are analytical assessments, not price targets.';modal.classList.add('open');button.disabled=true;
+  try{
+    const response=await fetch('/options/api/news/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,url:card.dataset.newsUrl||'',snippet:card.dataset.newsSnippet||'',published_at:card.dataset.newsPublishedAt||''})});
+    const data=await response.json();if(!response.ok)throw Error(data.detail||'News analysis request failed.');
+    body.innerHTML=renderAnalysis(data.analysis||'No analysis was returned.');
+    sources.innerHTML=(data.citations||[]).map(citation=>`<li><a href="${safe(citation.url)}" target="_blank" rel="noopener noreferrer">${safe(citation.title||citation.url)}</a></li>`).join('');
+    status.textContent=`Generated by ChatGPT${data.citations?.length?` · ${data.citations.length} cited sources`:''}`;
+    updateAnalysisSpeechControls();
+    $('#analysis-mp3-btn').disabled=false;
+  }catch(error){body.textContent=error.message.includes('OPENAI_API_KEY')?'News analysis is not enabled on the server yet. Add OPENAI_API_KEY to Railway Variables, then redeploy.':error.message;status.textContent='Analysis unavailable'}
+  finally{button.disabled=false}
+}
+function renderNews(items){if(activeNewsSpeech)stopNewsSpeech(false);const container=$('#news-items');$('#news-count').textContent=items.length?`${items.length} stories · last 14 days`:'No matching stories in the last 14 days.';$('#count-news').textContent=items.length?String(items.length):'0';if(!items.length){container.innerHTML='<p class="news-empty">No stories match these filters yet. The daily scan runs at 6:00 a.m. Pacific; use Scan for news to search now.</p>';return}container.innerHTML=items.map(item=>{const url=/^https?:\/\//i.test(item.url||'')?item.url:'#';return `<article class="news-item" data-news-url="${safe(url)}" data-news-title="${safe(item.title||'')}" data-news-snippet="${safe(item.snippet||'')}" data-news-published-at="${safe(item.published_at||item.first_seen_at||'')}"><div class="news-item-meta">${newsPeakChip(item.peak)}<span class="news-source">${safe(item.source||'Source')}</span><time>${safe(newsDate(item.published_at||item.first_seen_at))}</time></div><h3><a href="${safe(url)}" target="_blank" rel="noopener noreferrer">${safe(item.title)}</a></h3><p class="news-excerpt">${safe(item.snippet||'No source excerpt was returned.')}</p><div class="news-item-actions"><button class="news-read-btn" type="button" data-news-action="read">🔊 Read excerpt</button><button class="news-stop-btn" type="button" data-news-action="stop" aria-label="Stop reading this excerpt" hidden>Stop</button><button class="news-analyze-btn" type="button" data-news-action="analyze">✦ Analyze RHTC impact</button></div></article>`}).join('');updateNewsSpeechControls()}
+async function loadNews({quiet=false}={}){try{const params=new URLSearchParams({days:'14',peak:$('#news-peak').value,q:$('#news-search').value.trim()});const response=await fetch(`/options/api/news?${params}`);if(!response.ok)throw Error('News feed is unavailable.');const data=await response.json();renderNews(data.items||[]);const stamp=data.last_scan_at?new Intl.DateTimeFormat('en-US',{timeZone:'America/Los_Angeles',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}).format(new Date(data.last_scan_at))+' PT':'Not scanned yet';$('#news-last-scanned').textContent=data.configured?`LAST SCAN · ${stamp}`:'PERPLEXITY KEY NOT CONFIGURED';if(!data.configured)$('#news-count').textContent='Add PERPLEXITY_API_KEY in Railway Variables to enable scanning.'}catch(error){if(!quiet){$('#news-items').innerHTML=`<p class="news-empty">${safe(error.message)}</p>`;toast('Could not load the RHTC news feed.')}}}
+async function scanNews(){const button=$('#scan-news');button.disabled=true;button.querySelector('.refresh-icon').classList.add('spin');try{const response=await fetch('/options/api/news/scan',{method:'POST'});const data=await response.json();if(!response.ok)throw Error(data.detail||'News scan failed.');await loadNews({quiet:true});toast(data.status==='recent'?'The feed was scanned recently; showing saved stories.':`${data.added} stories refreshed.`)}catch(error){toast(error.message)}finally{button.disabled=false;button.querySelector('.refresh-icon').classList.remove('spin')}}
+function setMode(mode){state.mode=mode;const isNews=mode==='news';if(!isNews)stopNewsSpeech();$('#options-view').hidden=isNews;$('#news-view').hidden=!isNews;$('#main-pager').hidden=mode==='history';document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.filter===mode||(!n.dataset.filter&&mode==='overview')));if(isNews){loadNews()}else if(mode==='history'){renderRows();toast('Snapshots are saved in this browser.')}else if(mode==='holdings'){state.selectedOnly=true;state.peak='All Peaks';document.querySelectorAll('.peak-item').forEach(n=>n.classList.toggle('selected',n.dataset.peak==='All Peaks'));loadRows({ai:false,snapshot:false})}else{state.selectedOnly=false;renderRows()}}
+function pageMain(delta){const next=state.expirationSet+delta;if(next<1||next>4)return;state.expirationSet=next;$('#main-page').textContent=DTE_WINDOWS[next-1];$('#main-prev').disabled=next===1;$('#main-next').disabled=next===4;loadRows({ai:false,snapshot:false})}
+async function saveServerWatchlist(rows){if(!state.editingEnabled)throw Error('Shared editing is not enabled yet. Configure the Railway Volume and admin token shown above.');let token=sessionStorage.getItem('rhtc-watchlist-admin-token');if(!token){token=window.prompt('Enter the RHTC watchlist admin token configured in Railway.');if(!token)throw Error('No changes saved. Enter the admin token to continue.')}const response=await fetch('/options/api/watchlist',{method:'PUT',headers:{'Content-Type':'application/json','X-RHTC-Admin-Token':token},body:JSON.stringify({rows})});if(!response.ok){if(response.status===401)sessionStorage.removeItem('rhtc-watchlist-admin-token');let detail='Could not save the shared symbol list.';try{detail=(await response.json()).detail||detail}catch(e){}throw Error(detail)}sessionStorage.setItem('rhtc-watchlist-admin-token',token);return (await response.json()).rows}
+async function saveSymbolList(rows){setSymbolError('Saving to the shared RHTC list…');try{state.watchlist=await saveServerWatchlist(rows);state.migrationOpen=false;state.legacyWatchlist=null;localStorage.removeItem(WATCHLIST_KEY);updateWatchlistCounts();updateStorageNote();renderSymbolList();renderRows();setSymbolError('Saved for every browser.');loadRows({ai:false,snapshot:false});return true}catch(e){setSymbolError(e.message);return false}}
+function validTicker(symbol){return /^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol)}
+async function addSymbol(){const symbol=$('#new-symbol').value.trim().toUpperCase();const peak=$('#new-peak').value;if(!validTicker(symbol)){setSymbolError('Enter a valid ticker (letters, numbers, dots, or dashes).');return}if(state.watchlist.some(r=>r.symbol===symbol)){setSymbolError(`${symbol} is already on the list.`);return}const added={symbol,peak,share_price:optionalNumber($('#new-share-price')),quantity:optionalNumber($('#new-quantity'))};if(await saveSymbolList([added,...state.watchlist])){$('#new-symbol').value='';$('#new-share-price').value='';$('#new-quantity').value='';renderSymbolList()}}
+async function saveEditedSymbol(row){const oldSymbol=row.dataset.symbol;const symbol=row.querySelector('.symbol-edit-ticker').value.trim().toUpperCase();const peak=row.querySelector('.symbol-edit-peak').value;if(!validTicker(symbol)){setSymbolError('Enter a valid ticker (letters, numbers, dots, or dashes).');return}if(state.watchlist.some(r=>r.symbol===symbol&&r.symbol!==oldSymbol)){setSymbolError(`${symbol} is already on the list.`);return}const share_price=optionalNumber(row.querySelector('.symbol-edit-price'));const quantity=optionalNumber(row.querySelector('.symbol-edit-quantity'));const updated=state.watchlist.map(r=>r.symbol===oldSymbol?{symbol,peak,share_price,quantity}:r);if(await saveSymbolList(updated)){state.editingSymbol=null;renderSymbolList()}}
+window.showSettings=()=>$('#settings-modal').classList.add('open');window.hideSettings=()=>$('#settings-modal').classList.remove('open');window.hideDetail=()=>$('#detail-modal').classList.remove('open');window.hideSymbols=()=>$('#symbols-modal').classList.remove('open');window.hideSymbolAnalysis=()=>{stopAnalysisSpeech();$('#symbol-analysis-modal').classList.remove('open')};window.viewChain=viewChain;window.analyzeSymbol=analyzeSymbol;
+$('#manage-symbols').addEventListener('click',openSymbols);$('#add-symbol').addEventListener('click',addSymbol);$('#new-symbol').addEventListener('keydown',e=>{if(e.key==='Enter')addSymbol()});$('#symbol-filter').addEventListener('input',renderSymbolList);$('#symbol-peak-filter').addEventListener('change',renderSymbolList);$('#import-browser-list').addEventListener('click',()=>{if(state.legacyWatchlist)saveSymbolList(state.legacyWatchlist)});
+$('#symbol-list').addEventListener('click',async e=>{const button=e.target.closest('button[data-action]');if(!button)return;const row=button.closest('.symbol-entry');if(!row)return;const action=button.dataset.action;setSymbolError();if(action==='edit'){state.editingSymbol=row.dataset.symbol;renderSymbolList()}else if(action==='cancel'){state.editingSymbol=null;renderSymbolList()}else if(action==='save'){saveEditedSymbol(row)}else if(action==='delete'){const updated=state.watchlist.filter(r=>r.symbol!==row.dataset.symbol);if(await saveSymbolList(updated)){state.editingSymbol=null;renderSymbolList()}}});
+$('#theme-toggle').addEventListener('click',()=>setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark'));
+$('#sidebar-toggle').addEventListener('click',()=>setSidebarCollapsed(!$('.sidebar').classList.contains('collapsed')));
+$('#chain-prev').addEventListener('click',()=>pageChain(-1));$('#chain-next').addEventListener('click',()=>pageChain(1));
+$('#main-prev').addEventListener('click',()=>pageMain(-1));$('#main-next').addEventListener('click',()=>pageMain(1));$('#main-prev').disabled=true;
+document.querySelectorAll('.peak-item').forEach(el=>el.addEventListener('click',()=>{const holdings=el.dataset.peak==='Holdings';state.costOnly=holdings;state.peak=holdings?'All Peaks':el.dataset.peak;state.mode='overview';state.selectedOnly=false;document.querySelectorAll('.peak-item').forEach(n=>n.classList.toggle('selected',n===el));setMode('overview');loadRows({ai:false,snapshot:false})}));
+document.querySelectorAll('.nav-item').forEach(el=>el.addEventListener('click',()=>{const wasCostOnly=state.costOnly;state.costOnly=false;setMode(el.dataset.filter||'overview');if(wasCostOnly)loadRows({ai:false,snapshot:false})}));
+$('#scan-news').addEventListener('click',scanNews);$('#news-peak').addEventListener('change',()=>loadNews());let newsSearchTimer;$('#news-search').addEventListener('input',()=>{clearTimeout(newsSearchTimer);newsSearchTimer=setTimeout(()=>loadNews({quiet:true}),220)});
+$('#analysis-read-btn').addEventListener('click',toggleAnalysisSpeech);$('#analysis-stop-btn').addEventListener('click',()=>stopAnalysisSpeech());
+$('#analysis-mp3-btn').addEventListener('click',createAnalysisPodcast);$('#analysis-copy-transcript').addEventListener('click',copyAnalysisPodcastTranscript);
+$('#news-items').addEventListener('click',event=>{const button=event.target.closest('[data-news-action]');if(!button)return;const card=button.closest('.news-item');if(!card)return;if(button.dataset.newsAction==='read')toggleNewsSpeech(card);else if(button.dataset.newsAction==='stop')stopNewsSpeech();else if(button.dataset.newsAction==='analyze')analyzeNewsStory(card,button)});
+$('#refresh').addEventListener('click',()=>loadRows({ai:true,snapshot:true}));$('#review-limit').addEventListener('change',e=>{state.scanLimit=Number(e.target.value);loadRows({ai:false,snapshot:false})});$('#max-last').addEventListener('change',()=>loadRows({ai:false,snapshot:false}));$('#sort').addEventListener('change',e=>{state.sort=e.target.value;loadRows({ai:false,snapshot:false})});let searchTimer;$('#search').addEventListener('input',e=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.query=e.target.value.trim();loadRows({ai:false,snapshot:false})},220)});
+$('#market-clock').textContent=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date())+' ET';
+initializeWatchlist();
+loadNews({quiet:true});
+$('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/options/auth/logout',{method:'POST',credentials:'same-origin'})}finally{location.replace('/options/login')}});
++(abs>=1e12?fmt(abs/1e12,2)+'T':abs>=1e9?fmt(abs/1e9,2)+'B':abs>=1e6?fmt(abs/1e6,2)+'M':fmt(n,0)):kind==='money'?(n<0?'−':'')+'
+function companyPublicHistory(ipo){
+  if(!ipo)return 'Finnhub IPO date is unavailable.';
+  const date=new Date(String(ipo)+'T00:00:00Z');
+  if(!Number.isFinite(date.getTime()))return 'Finnhub IPO date is unavailable.';
+  const now=new Date();
+  let years=now.getUTCFullYear()-date.getUTCFullYear();
+  const beforeAnniversary=now.getUTCMonth()<date.getUTCMonth()||(now.getUTCMonth()===date.getUTCMonth()&&now.getUTCDate()<date.getUTCDate());
+  if(beforeAnniversary)years--;
+  const since=date.toLocaleDateString('en-US',{month:'short',year:'numeric',timeZone:'UTC'});
+  return years>0?'Public since '+since+' · '+years+' '+(years===1?'year':'years')+' listed':'Public since '+since;
+}
+function renderCompanyOverview(profile,symbol,quoteName){
+  const info=profile&&typeof profile==='object'?profile:{};
+  const name=info.name||quoteName||symbol;
+  const summary=info.description||(
+    info.industry
+      ? 'Finnhub classifies this company in the '+info.industry+' industry. A fuller business description is unavailable in the profile returned for this ticker.'
+      : 'Finnhub did not return a business description for this ticker.'
+  );
+  const countryNames={US:'United States',GB:'United Kingdom',CA:'Canada',DE:'Germany',FR:'France',JP:'Japan',CN:'China',AU:'Australia',IL:'Israel',IN:'India',IE:'Ireland',NL:'Netherlands',CH:'Switzerland',KR:'South Korea',TW:'Taiwan'};
+  const country=info.country?(countryNames[info.country.toUpperCase()]||info.country):'';
+  const headquarters=[info.city,info.state,country].filter(Boolean).join(', ')||'Not available in Finnhub profile';
+  const website=typeof info.website==='string'&&(info.website.startsWith('https://')||info.website.startsWith('http://'))?'<a href="'+safe(info.website)+'" target="_blank" rel="noopener noreferrer">Company website ↗</a>':'';
+  return '<section class="company-overview"><div class="company-overview-heading"><h3>About '+safe(name)+'</h3>'+website+'</div><p>'+safe(summary)+'</p><div class="company-overview-facts"><div><small>Industry</small><b>'+safe(info.industry||'Not available')+'</b></div><div><small>Headquarters</small><b>'+safe(headquarters)+'</b></div><div><small>Public-market history</small><b>'+safe(companyPublicHistory(info.ipo))+'</b></div></div><small class="company-overview-note">IPO date shows time as a public company; the business may be older.</small></section>';
+}
+async function viewChain(symbol){
+  const modal=$('#detail-modal'),quoteBox=$('#detail-quote-content'),detail=$('#detail-content');
+  $('#detail-title').textContent=symbol+' stock quote and covered-call screen';
+  $('#detail-subtitle').textContent='Loading stock quote and listed call candidates…';
+  $('#detail-description').hidden=true;
+  $('#detail-company-overview').innerHTML='<div class="loading">Loading company overview…</div>';
+  $('#detail-option-source').innerHTML='';
+  quoteBox.innerHTML='<div class="loading">Retrieving stock quote…</div>';
+  detail.innerHTML='<div class="loading">Retrieving covered-call data…</div>';
+  modal.classList.add('open');
+  try{
+    const responses=await Promise.all([
+      fetch('/options/api/quote/'+encodeURIComponent(symbol)),
+      fetch('/options/api/chain/'+encodeURIComponent(symbol))
+    ]);
+    const quote=await responses[0].json(),chainData=await responses[1].json();
+    if(!responses[0].ok)throw Error(quote.detail||'Stock quote unavailable.');
+    const sourceLabel=quote.source==='demo'?'Illustrative demo values · Not live market data':quote.source==='tradier_sandbox'?'Tradier sandbox quote · May be delayed':'Tradier stock quote';
+    $('#detail-title').textContent=quote.description?symbol+' · '+quote.description:symbol+' stock quote and covered-call screen';
+    $('#detail-subtitle').textContent=sourceLabel;
+    $('#detail-company-overview').innerHTML=renderCompanyOverview(quote.company_profile,symbol,quote.description);
+    const rawTime=quote.quote_time;
+    const quoteTime=rawTime&&Number.isFinite(Number(rawTime))&&Number(rawTime)>0?new Date(Number(rawTime)).toLocaleString():rawTime?String(rawTime):'Quote timestamp unavailable';
+    quoteBox.innerHTML='<div class="detail-quote-stats">'+[
+      quoteCell('Last',quote.price),
+      quoteCell('Change',quote.change,'change'),
+      quoteCell('Change %',quote.change_pct,'percent'),
+      quoteCell('Bid',quote.bid),
+      quoteCell('Ask',quote.ask),
+      quoteCell('Open',quote.open),
+      quoteCell('Day high',quote.high),
+      quoteCell('Day low',quote.low),
+      quoteCell('Volume',quote.volume,'volume'),
+      quoteCell('52-H',quote.week_52_high),
+      quoteCell('52-L',quote.week_52_low),
+      quoteCell('Average volume',quote.average_volume,'volume'),
+      quoteCell('Previous close',quote.previous_close),
+      quoteCell('Market cap',quote.market_cap,'marketcap'),
+      quoteCell('P/E ratio',quote.price_earnings_ratio,'ratio'),
+      quoteCell('Earnings / share (TTM)',quote.earnings_per_share,'money'),
+      quoteCell('Net margin (TTM)',quote.profit_margin,'margin'),
+      quoteCell('Revenue (TTM)',quote.revenue,'money')
+    ].join('')+'</div>';
+    $('#detail-option-source').innerHTML='<p class="detail-quote-source">'+sourceLabel+' · Quote time: '+safe(quoteTime)+'</p>';
+    if(!responses[1].ok){
+      detail.innerHTML='<p class="detail-quote-error">'+safe(chainData.detail||'Covered-call data unavailable.')+'</p>';
+      return;
+    }
+    state.chainRows=chainData.rows||[];
+    state.chainSource=chainData.source||'demo';
+    state.chainDescription=chainData.description||quote.description||'';
+    state.chainIndex=0;
+    if(!state.chainRows.length)detail.innerHTML='<div class="empty">No covered-call rows were returned for this symbol.</div>';
+    else renderChainPage();
+    const description=$('#detail-description');
+    description.textContent=state.chainDescription;
+    const titleText=$('#detail-title').textContent.trim().toLocaleLowerCase();
+    const descriptionText=String(state.chainDescription||'').trim().toLocaleLowerCase();
+    description.hidden=!descriptionText||titleText.includes(descriptionText);
+  }catch(error){
+    quoteBox.innerHTML='<p class="detail-quote-error">'+safe(error.message)+'</p>';
+    $('#detail-subtitle').textContent='Quote details may be incomplete.';
+    toast(symbol+': '+error.message);
+  }
+}
+async function analyzeSymbol(symbol){
+  const modal=$('#symbol-analysis-modal'),body=$('#symbol-analysis-body'),sources=$('#symbol-analysis-sources'),status=$('#symbol-analysis-status');
+  const row=state.rows.find(item=>item.symbol===symbol)||{};
+  $('#symbol-analysis-title').textContent=`${symbol} · Deep analysis`;
+  $('#symbol-analysis-subtitle').textContent=`${peakName(row.peak||'Other')} · Current-source research with citations`;
+  stopNewsSpeech(false);resetAnalysisPodcast();$('#analysis-read-btn').hidden=true;$('#analysis-mp3-btn').disabled=true;body.textContent='Searching current sources and preparing the analysis…';sources.innerHTML='';status.textContent='';modal.classList.add('open');
+  const screen=Object.fromEntries(['price','change','change_pct','strike','expiry','dte','bid','ask','premium_yield','delta','iv','open_interest','volume','bid_size','ask_size','quote_time','source'].filter(key=>row[key]!==undefined).map(key=>[key,row[key]]));
+  screen.contract=contractLabel(row);
+  screen.quantity=quantityForPrice(row.price);
+  screen.estimated_income=incomeForRow(row);
+  screen.ask_yield=Number(row.price)>0&&Number(row.ask)>0?Number(row.ask)/Number(row.price)*100:null;
+  try{
+    const response=await fetch('/options/api/symbol-analysis',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol,screen})});
+    const data=await response.json();
+    if(!response.ok)throw Error(data.detail||'Analysis request failed.');
+    body.innerHTML=renderAnalysis(data.analysis||'No analysis was returned.');
+    sources.innerHTML=(data.citations||[]).map((citation,index)=>`<li><a href="${safe(citation.url)}" target="_blank" rel="noopener noreferrer">${safe(citation.title||citation.url)}</a></li>`).join('');
+    status.textContent=data.mode==='screen_fallback'?'Quote-based verdict · Current-source research did not finish':`Generated by ChatGPT${data.citations?.length?` · ${data.citations.length} cited sources`:''}`;
+    updateAnalysisSpeechControls();
+    $('#analysis-mp3-btn').disabled=false;
+  }catch(error){body.textContent=error.message.includes('OPENAI_API_KEY')?'ChatGPT analysis is not enabled on the server yet. Add OPENAI_API_KEY to Railway Variables, then redeploy.':error.message;status.textContent='Analysis unavailable';}
+}
+function pageChain(delta){const next=state.chainIndex+delta;if(next<0||next>=state.chainRows.length)return;state.chainIndex=next;renderChainPage()}
+function newsDate(value){if(!value)return 'Date unavailable';const d=new Date(value);return Number.isNaN(d.getTime())?value:new Intl.DateTimeFormat('en-US',{month:'short',day:'numeric',year:'numeric'}).format(d)}
+function newsPeakChip(peak){const cls=peak==='AI/I'?'ai':peak==='EFM/I'?'efm':peak==='DS/I'?'defense':peak==='Cross-Peak'?'other':'other';return `<span class="peak-chip ${cls}"><i class="mini-dot"></i>${safe(peak||'Other')}</span>`}
+let activeNewsSpeech=null,activeAnalysisSpeech=null;
+let analysisPodcastAudioUrl=null,analysisPodcastTextUrl=null;
+
+function resetAnalysisPodcast(){if(analysisPodcastAudioUrl)URL.revokeObjectURL(analysisPodcastAudioUrl);if(analysisPodcastTextUrl)URL.revokeObjectURL(analysisPodcastTextUrl);analysisPodcastAudioUrl=null;analysisPodcastTextUrl=null;$('#analysis-podcast-result').hidden=true;$('#analysis-podcast-transcript').value='';$('#analysis-podcast-audio').removeAttribute('src');$('#analysis-podcast-audio').load();$('#analysis-download-mp3').hidden=true;$('#analysis-download-transcript').removeAttribute('href');$('#analysis-download-mp3').removeAttribute('href');$('#analysis-podcast-status').textContent='Uses OpenAI API credits to make a Spotify-ready transcript and narrated MP3.'}
+function podcastFileSlug(value){return String(value||'analysis').normalize('NFKD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,72)||'analysis'}
+async function readApiError(response,fallback){try{const data=await response.json();return data.detail||fallback}catch(error){return fallback}}
+async function createAnalysisPodcast(){const button=$('#analysis-mp3-btn'),status=$('#analysis-podcast-status'),title=$('#symbol-analysis-title').textContent.trim(),subtitle=$('#symbol-analysis-subtitle').textContent.trim(),analysis=$('#symbol-analysis-body').innerText.trim();if(!analysis){status.textContent='Wait for the analysis to finish, then try again.';return}resetAnalysisPodcast();button.disabled=true;button.textContent='Creating Spotify transcript + MP3…';status.textContent='Writing a Spotify-ready spoken transcript…';try{const scriptResponse=await fetch('/options/api/analysis-podcast/transcript',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,subtitle,analysis})});if(!scriptResponse.ok)throw Error(await readApiError(scriptResponse,'Transcript generation failed.'));const scriptData=await scriptResponse.json();const transcript=String(scriptData.transcript||'').trim();if(!transcript)throw Error('OpenAI returned an empty transcript.');$('#analysis-podcast-transcript').value=transcript;analysisPodcastTextUrl=URL.createObjectURL(new Blob([transcript],{type:'text/plain;charset=utf-8'}));const slug=podcastFileSlug(title),transcriptLink=$('#analysis-download-transcript');transcriptLink.href=analysisPodcastTextUrl;transcriptLink.download='RHTC_'+slug+'_Spotify_Transcript.txt';$('#analysis-podcast-result').hidden=false;status.textContent='Transcript ready ('+transcript.length.toLocaleString()+' characters). Creating the MP3…';const audioResponse=await fetch('/options/api/analysis-podcast/audio',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,transcript})});if(!audioResponse.ok)throw Error(await readApiError(audioResponse,'MP3 generation failed.'));const mp3=await audioResponse.blob();if(!mp3.size)throw Error('The MP3 file was empty. Try again.');analysisPodcastAudioUrl=URL.createObjectURL(mp3);$('#analysis-podcast-audio').src=analysisPodcastAudioUrl;const mp3Link=$('#analysis-download-mp3');mp3Link.href=analysisPodcastAudioUrl;mp3Link.download='RHTC_'+slug+'_Spotify.mp3';mp3Link.hidden=false;status.textContent='Ready to review or publish. Download the transcript and MP3 below.'}catch(error){status.textContent=error.message||'Could not create the Spotify assets. Try again.'}finally{button.disabled=false;button.textContent='🎙 Create Spotify Transcript + MP3'}}
+async function copyAnalysisPodcastTranscript(){const text=$('#analysis-podcast-transcript').value;if(!text)return;try{await navigator.clipboard.writeText(text);toast('Spotify transcript copied.')}catch(error){const field=$('#analysis-podcast-transcript');field.focus();field.select();toast('Select and copy the transcript.')}}
+
+function updateAnalysisSpeechControls(){const read=$('#analysis-read-btn'),stop=$('#analysis-stop-btn'),supported='speechSynthesis'in window&&'SpeechSynthesisUtterance'in window;if(!read||!stop)return;read.hidden=!supported;read.disabled=!supported;read.textContent=activeAnalysisSpeech?(activeAnalysisSpeech.paused?'▶ Resume':'Ⅱ Pause'):'🔊 Read analysis';stop.hidden=!activeAnalysisSpeech}
+function stopAnalysisSpeech(refresh=true){const current=activeAnalysisSpeech;activeAnalysisSpeech=null;if(current&&'speechSynthesis'in window)window.speechSynthesis.cancel();if(refresh)updateAnalysisSpeechControls();return current}
+function toggleAnalysisSpeech(){if(!('speechSynthesis'in window)||!('SpeechSynthesisUtterance'in window)){toast('Read aloud is not available in this browser.');return}if(activeAnalysisSpeech){if(activeAnalysisSpeech.paused){window.speechSynthesis.resume();activeAnalysisSpeech.paused=false}else{window.speechSynthesis.pause();activeAnalysisSpeech.paused=true}updateAnalysisSpeechControls();return}stopNewsSpeech(false);const text=[$('#symbol-analysis-title').textContent,$('#symbol-analysis-subtitle').textContent,$('#symbol-analysis-body').innerText].filter(Boolean).join('. ');if(!text.trim())return;const utterance=new SpeechSynthesisUtterance(text),speech={utterance,paused:false};activeAnalysisSpeech=speech;const finish=()=>{if(activeAnalysisSpeech===speech){activeAnalysisSpeech=null;updateAnalysisSpeechControls()}};utterance.onend=finish;utterance.onerror=finish;try{window.speechSynthesis.speak(utterance);updateAnalysisSpeechControls();updateNewsSpeechControls()}catch(error){finish();toast('Could not read this analysis aloud.')}}
+function stopNewsSpeech(refresh=true){const current=activeNewsSpeech;activeNewsSpeech=null;if(activeAnalysisSpeech){activeAnalysisSpeech=null;updateAnalysisSpeechControls()}if('speechSynthesis'in window)window.speechSynthesis.cancel();if(refresh){updateNewsSpeechControls();updateAnalysisSpeechControls()}return current}
+function updateNewsSpeechControls(){const supported='speechSynthesis'in window&&'SpeechSynthesisUtterance'in window;document.querySelectorAll('.news-item').forEach(card=>{const read=card.querySelector('[data-news-action="read"]'),stop=card.querySelector('[data-news-action="stop"]');if(!read||!stop)return;const current=activeNewsSpeech&&activeNewsSpeech.url===card.dataset.newsUrl;read.disabled=!supported;read.textContent=current?(activeNewsSpeech.paused?'▶ Resume':'Ⅱ Pause'):'🔊 Read excerpt';read.setAttribute('aria-label',current?`${activeNewsSpeech.paused?'Resume':'Pause'} reading ${card.querySelector('h3 a')?.textContent||'this story'}`:`Read title and excerpt aloud: ${card.querySelector('h3 a')?.textContent||'story'}`);stop.hidden=!current})}
+function toggleNewsSpeech(card){if(!('speechSynthesis'in window)||!('SpeechSynthesisUtterance'in window)){toast('Read aloud is not available in this browser.');return}if(activeNewsSpeech&&activeNewsSpeech.url===card.dataset.newsUrl){if(activeNewsSpeech.paused){window.speechSynthesis.resume();activeNewsSpeech.paused=false}else{window.speechSynthesis.pause();activeNewsSpeech.paused=true}updateNewsSpeechControls();return}stopAnalysisSpeech(false);stopNewsSpeech(false);const title=card.querySelector('h3 a')?.textContent||'';const source=card.querySelector('.news-source')?.textContent||'';const excerpt=card.querySelector('.news-excerpt')?.textContent||'';const utterance=new SpeechSynthesisUtterance([title,source?`Source: ${source}`:'',excerpt].filter(Boolean).join('. '));const speech={url:card.dataset.newsUrl,utterance,paused:false};activeNewsSpeech=speech;const finish=()=>{if(activeNewsSpeech===speech){activeNewsSpeech=null;updateNewsSpeechControls()}};utterance.onend=finish;utterance.onerror=finish;try{window.speechSynthesis.speak(utterance);updateNewsSpeechControls();updateAnalysisSpeechControls()}catch(error){finish();toast('Could not read this excerpt aloud.')}}
+async function analyzeNewsStory(card,button){
+  const modal=$('#symbol-analysis-modal'),body=$('#symbol-analysis-body'),sources=$('#symbol-analysis-sources'),status=$('#symbol-analysis-status');
+  const title=card.dataset.newsTitle||card.querySelector('h3 a')?.textContent||'News story';
+  $('#symbol-analysis-title').textContent='RHTC impact analysis';
+  stopNewsSpeech(false);resetAnalysisPodcast();$('#analysis-read-btn').hidden=true;$('#analysis-mp3-btn').disabled=true;$('#symbol-analysis-subtitle').textContent=`${title} · Watchlist companies, Three Peaks, and thesis`;body.textContent='Checking current sources and mapping potential impacts…';sources.innerHTML='';status.textContent='Uses OpenAI web search. Impacts are analytical assessments, not price targets.';modal.classList.add('open');button.disabled=true;
+  try{
+    const response=await fetch('/options/api/news/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,url:card.dataset.newsUrl||'',snippet:card.dataset.newsSnippet||'',published_at:card.dataset.newsPublishedAt||''})});
+    const data=await response.json();if(!response.ok)throw Error(data.detail||'News analysis request failed.');
+    body.innerHTML=renderAnalysis(data.analysis||'No analysis was returned.');
+    sources.innerHTML=(data.citations||[]).map(citation=>`<li><a href="${safe(citation.url)}" target="_blank" rel="noopener noreferrer">${safe(citation.title||citation.url)}</a></li>`).join('');
+    status.textContent=`Generated by ChatGPT${data.citations?.length?` · ${data.citations.length} cited sources`:''}`;
+    updateAnalysisSpeechControls();
+    $('#analysis-mp3-btn').disabled=false;
+  }catch(error){body.textContent=error.message.includes('OPENAI_API_KEY')?'News analysis is not enabled on the server yet. Add OPENAI_API_KEY to Railway Variables, then redeploy.':error.message;status.textContent='Analysis unavailable'}
+  finally{button.disabled=false}
+}
+function renderNews(items){if(activeNewsSpeech)stopNewsSpeech(false);const container=$('#news-items');$('#news-count').textContent=items.length?`${items.length} stories · last 14 days`:'No matching stories in the last 14 days.';$('#count-news').textContent=items.length?String(items.length):'0';if(!items.length){container.innerHTML='<p class="news-empty">No stories match these filters yet. The daily scan runs at 6:00 a.m. Pacific; use Scan for news to search now.</p>';return}container.innerHTML=items.map(item=>{const url=/^https?:\/\//i.test(item.url||'')?item.url:'#';return `<article class="news-item" data-news-url="${safe(url)}" data-news-title="${safe(item.title||'')}" data-news-snippet="${safe(item.snippet||'')}" data-news-published-at="${safe(item.published_at||item.first_seen_at||'')}"><div class="news-item-meta">${newsPeakChip(item.peak)}<span class="news-source">${safe(item.source||'Source')}</span><time>${safe(newsDate(item.published_at||item.first_seen_at))}</time></div><h3><a href="${safe(url)}" target="_blank" rel="noopener noreferrer">${safe(item.title)}</a></h3><p class="news-excerpt">${safe(item.snippet||'No source excerpt was returned.')}</p><div class="news-item-actions"><button class="news-read-btn" type="button" data-news-action="read">🔊 Read excerpt</button><button class="news-stop-btn" type="button" data-news-action="stop" aria-label="Stop reading this excerpt" hidden>Stop</button><button class="news-analyze-btn" type="button" data-news-action="analyze">✦ Analyze RHTC impact</button></div></article>`}).join('');updateNewsSpeechControls()}
+async function loadNews({quiet=false}={}){try{const params=new URLSearchParams({days:'14',peak:$('#news-peak').value,q:$('#news-search').value.trim()});const response=await fetch(`/options/api/news?${params}`);if(!response.ok)throw Error('News feed is unavailable.');const data=await response.json();renderNews(data.items||[]);const stamp=data.last_scan_at?new Intl.DateTimeFormat('en-US',{timeZone:'America/Los_Angeles',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}).format(new Date(data.last_scan_at))+' PT':'Not scanned yet';$('#news-last-scanned').textContent=data.configured?`LAST SCAN · ${stamp}`:'PERPLEXITY KEY NOT CONFIGURED';if(!data.configured)$('#news-count').textContent='Add PERPLEXITY_API_KEY in Railway Variables to enable scanning.'}catch(error){if(!quiet){$('#news-items').innerHTML=`<p class="news-empty">${safe(error.message)}</p>`;toast('Could not load the RHTC news feed.')}}}
+async function scanNews(){const button=$('#scan-news');button.disabled=true;button.querySelector('.refresh-icon').classList.add('spin');try{const response=await fetch('/options/api/news/scan',{method:'POST'});const data=await response.json();if(!response.ok)throw Error(data.detail||'News scan failed.');await loadNews({quiet:true});toast(data.status==='recent'?'The feed was scanned recently; showing saved stories.':`${data.added} stories refreshed.`)}catch(error){toast(error.message)}finally{button.disabled=false;button.querySelector('.refresh-icon').classList.remove('spin')}}
+function setMode(mode){state.mode=mode;const isNews=mode==='news';if(!isNews)stopNewsSpeech();$('#options-view').hidden=isNews;$('#news-view').hidden=!isNews;$('#main-pager').hidden=mode==='history';document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.filter===mode||(!n.dataset.filter&&mode==='overview')));if(isNews){loadNews()}else if(mode==='history'){renderRows();toast('Snapshots are saved in this browser.')}else if(mode==='holdings'){state.selectedOnly=true;state.peak='All Peaks';document.querySelectorAll('.peak-item').forEach(n=>n.classList.toggle('selected',n.dataset.peak==='All Peaks'));loadRows({ai:false,snapshot:false})}else{state.selectedOnly=false;renderRows()}}
+function pageMain(delta){const next=state.expirationSet+delta;if(next<1||next>4)return;state.expirationSet=next;$('#main-page').textContent=DTE_WINDOWS[next-1];$('#main-prev').disabled=next===1;$('#main-next').disabled=next===4;loadRows({ai:false,snapshot:false})}
+async function saveServerWatchlist(rows){if(!state.editingEnabled)throw Error('Shared editing is not enabled yet. Configure the Railway Volume and admin token shown above.');let token=sessionStorage.getItem('rhtc-watchlist-admin-token');if(!token){token=window.prompt('Enter the RHTC watchlist admin token configured in Railway.');if(!token)throw Error('No changes saved. Enter the admin token to continue.')}const response=await fetch('/options/api/watchlist',{method:'PUT',headers:{'Content-Type':'application/json','X-RHTC-Admin-Token':token},body:JSON.stringify({rows})});if(!response.ok){if(response.status===401)sessionStorage.removeItem('rhtc-watchlist-admin-token');let detail='Could not save the shared symbol list.';try{detail=(await response.json()).detail||detail}catch(e){}throw Error(detail)}sessionStorage.setItem('rhtc-watchlist-admin-token',token);return (await response.json()).rows}
+async function saveSymbolList(rows){setSymbolError('Saving to the shared RHTC list…');try{state.watchlist=await saveServerWatchlist(rows);state.migrationOpen=false;state.legacyWatchlist=null;localStorage.removeItem(WATCHLIST_KEY);updateWatchlistCounts();updateStorageNote();renderSymbolList();renderRows();setSymbolError('Saved for every browser.');loadRows({ai:false,snapshot:false});return true}catch(e){setSymbolError(e.message);return false}}
+function validTicker(symbol){return /^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol)}
+async function addSymbol(){const symbol=$('#new-symbol').value.trim().toUpperCase();const peak=$('#new-peak').value;if(!validTicker(symbol)){setSymbolError('Enter a valid ticker (letters, numbers, dots, or dashes).');return}if(state.watchlist.some(r=>r.symbol===symbol)){setSymbolError(`${symbol} is already on the list.`);return}const added={symbol,peak,share_price:optionalNumber($('#new-share-price')),quantity:optionalNumber($('#new-quantity'))};if(await saveSymbolList([added,...state.watchlist])){$('#new-symbol').value='';$('#new-share-price').value='';$('#new-quantity').value='';renderSymbolList()}}
+async function saveEditedSymbol(row){const oldSymbol=row.dataset.symbol;const symbol=row.querySelector('.symbol-edit-ticker').value.trim().toUpperCase();const peak=row.querySelector('.symbol-edit-peak').value;if(!validTicker(symbol)){setSymbolError('Enter a valid ticker (letters, numbers, dots, or dashes).');return}if(state.watchlist.some(r=>r.symbol===symbol&&r.symbol!==oldSymbol)){setSymbolError(`${symbol} is already on the list.`);return}const share_price=optionalNumber(row.querySelector('.symbol-edit-price'));const quantity=optionalNumber(row.querySelector('.symbol-edit-quantity'));const updated=state.watchlist.map(r=>r.symbol===oldSymbol?{symbol,peak,share_price,quantity}:r);if(await saveSymbolList(updated)){state.editingSymbol=null;renderSymbolList()}}
+window.showSettings=()=>$('#settings-modal').classList.add('open');window.hideSettings=()=>$('#settings-modal').classList.remove('open');window.hideDetail=()=>$('#detail-modal').classList.remove('open');window.hideSymbols=()=>$('#symbols-modal').classList.remove('open');window.hideSymbolAnalysis=()=>{stopAnalysisSpeech();$('#symbol-analysis-modal').classList.remove('open')};window.viewChain=viewChain;window.analyzeSymbol=analyzeSymbol;
+$('#manage-symbols').addEventListener('click',openSymbols);$('#add-symbol').addEventListener('click',addSymbol);$('#new-symbol').addEventListener('keydown',e=>{if(e.key==='Enter')addSymbol()});$('#symbol-filter').addEventListener('input',renderSymbolList);$('#symbol-peak-filter').addEventListener('change',renderSymbolList);$('#import-browser-list').addEventListener('click',()=>{if(state.legacyWatchlist)saveSymbolList(state.legacyWatchlist)});
+$('#symbol-list').addEventListener('click',async e=>{const button=e.target.closest('button[data-action]');if(!button)return;const row=button.closest('.symbol-entry');if(!row)return;const action=button.dataset.action;setSymbolError();if(action==='edit'){state.editingSymbol=row.dataset.symbol;renderSymbolList()}else if(action==='cancel'){state.editingSymbol=null;renderSymbolList()}else if(action==='save'){saveEditedSymbol(row)}else if(action==='delete'){const updated=state.watchlist.filter(r=>r.symbol!==row.dataset.symbol);if(await saveSymbolList(updated)){state.editingSymbol=null;renderSymbolList()}}});
+$('#theme-toggle').addEventListener('click',()=>setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark'));
+$('#sidebar-toggle').addEventListener('click',()=>setSidebarCollapsed(!$('.sidebar').classList.contains('collapsed')));
+$('#chain-prev').addEventListener('click',()=>pageChain(-1));$('#chain-next').addEventListener('click',()=>pageChain(1));
+$('#main-prev').addEventListener('click',()=>pageMain(-1));$('#main-next').addEventListener('click',()=>pageMain(1));$('#main-prev').disabled=true;
+document.querySelectorAll('.peak-item').forEach(el=>el.addEventListener('click',()=>{const holdings=el.dataset.peak==='Holdings';state.costOnly=holdings;state.peak=holdings?'All Peaks':el.dataset.peak;state.mode='overview';state.selectedOnly=false;document.querySelectorAll('.peak-item').forEach(n=>n.classList.toggle('selected',n===el));setMode('overview');loadRows({ai:false,snapshot:false})}));
+document.querySelectorAll('.nav-item').forEach(el=>el.addEventListener('click',()=>{const wasCostOnly=state.costOnly;state.costOnly=false;setMode(el.dataset.filter||'overview');if(wasCostOnly)loadRows({ai:false,snapshot:false})}));
+$('#scan-news').addEventListener('click',scanNews);$('#news-peak').addEventListener('change',()=>loadNews());let newsSearchTimer;$('#news-search').addEventListener('input',()=>{clearTimeout(newsSearchTimer);newsSearchTimer=setTimeout(()=>loadNews({quiet:true}),220)});
+$('#analysis-read-btn').addEventListener('click',toggleAnalysisSpeech);$('#analysis-stop-btn').addEventListener('click',()=>stopAnalysisSpeech());
+$('#analysis-mp3-btn').addEventListener('click',createAnalysisPodcast);$('#analysis-copy-transcript').addEventListener('click',copyAnalysisPodcastTranscript);
+$('#news-items').addEventListener('click',event=>{const button=event.target.closest('[data-news-action]');if(!button)return;const card=button.closest('.news-item');if(!card)return;if(button.dataset.newsAction==='read')toggleNewsSpeech(card);else if(button.dataset.newsAction==='stop')stopNewsSpeech();else if(button.dataset.newsAction==='analyze')analyzeNewsStory(card,button)});
+$('#refresh').addEventListener('click',()=>loadRows({ai:true,snapshot:true}));$('#review-limit').addEventListener('change',e=>{state.scanLimit=Number(e.target.value);loadRows({ai:false,snapshot:false})});$('#max-last').addEventListener('change',()=>loadRows({ai:false,snapshot:false}));$('#sort').addEventListener('change',e=>{state.sort=e.target.value;loadRows({ai:false,snapshot:false})});let searchTimer;$('#search').addEventListener('input',e=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.query=e.target.value.trim();loadRows({ai:false,snapshot:false})},220)});
+$('#market-clock').textContent=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date())+' ET';
+initializeWatchlist();
+loadNews({quiet:true});
+$('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/options/auth/logout',{method:'POST',credentials:'same-origin'})}finally{location.replace('/options/login')}});
++compact:kind==='margin'?fmt(n,2)+'%':kind==='ratio'?fmt(n,2)+'x':Math.round(n).toLocaleString('en-US');
   }
   const cls=kind==='change'||kind==='percent'?changeClass(value):'';
-  return '<div class="detail-quote-stat"><span>'+label+'</span><b class="'+cls+'">'+shown+'</b></div>';
+  const title=hint?' title="'+safe(hint)+'"':'';
+  return '<div class="detail-quote-stat"'+title+'><span>'+label+'</span><b class="'+cls+'">'+shown+'</b></div>';
 }
 function companyPublicHistory(ipo){
   if(!ipo)return 'Finnhub IPO date is unavailable.';
