@@ -137,7 +137,7 @@ async function viewChain(symbol){
       quoteCell('Average volume',quote.average_volume,'volume'),
       quoteCell('Previous close',quote.previous_close),
       quoteCell('Market cap',quote.market_cap,'marketcap'),
-      quoteCell('P/E',quote.price_earnings_ratio,'ratio')
+      quoteCell('P/E ratio',quote.price_earnings_ratio,'ratio')
     ].join('')+'</div><p class="detail-quote-source">'+sourceLabel+' · Quote time: '+safe(quoteTime)+'</p>';
     if(!responses[1].ok){
       detail.innerHTML='<p class="detail-quote-error">'+safe(chainData.detail||'Covered-call data unavailable.')+'</p>';
