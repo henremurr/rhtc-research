@@ -587,7 +587,7 @@ async def stock_quote(symbol: str):
             "symbol": symbol, "description": None, "price": row["price"],
             "change": row["change"], "change_pct": row["change_pct"],
             "bid": None, "ask": None, "volume": None, "average_volume": None,
-            "open": None, "high": None, "low": None, "previous_close": None,
+            "open": None, "high": None, "low": None, "week_52_high": None, "week_52_low": None, "previous_close": None,
             "quote_time": "DEMO DATA", "source": "demo",
         }
     provider = Tradier(token)
@@ -612,6 +612,8 @@ async def stock_quote(symbol: str):
             "open": parse_number(quote.get("open")) if quote.get("open") is not None else None,
             "high": parse_number(quote.get("high")) if quote.get("high") is not None else None,
             "low": parse_number(quote.get("low")) if quote.get("low") is not None else None,
+            "week_52_high": parse_number(quote.get("week_52_high")) if quote.get("week_52_high") is not None else None,
+            "week_52_low": parse_number(quote.get("week_52_low")) if quote.get("week_52_low") is not None else None,
             "previous_close": parse_number(quote.get("prevclose")) if quote.get("prevclose") is not None else None,
             "quote_time": quote.get("trade_date") or quote.get("ask_date") or quote.get("bid_date"),
             "source": data_source(),
