@@ -98,7 +98,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('app.css?v=rhtc-analysis-podcast-1', page.text)
         self.assertIn('app.js?v=rhtc-analysis-readaloud-4', page.text)
         self.assertIn('app.css?v=rhtc-dark-popup-3', page.text)
-        self.assertIn('app.js?v=rhtc-call-details-3', page.text)
+        self.assertIn('app.js?v=rhtc-call-details-4', page.text)
         self.assertIn('id="analysis-mp3-btn"', page.text)
         self.assertIn('id="analysis-podcast-transcript"', page.text)
         self.assertIn('data-filter="news"', page.text)
@@ -143,7 +143,7 @@ class OptionsRoutesTest(unittest.TestCase):
             "quoteCell('Average volume',quote.average_volume,'volume')",
             "quoteCell('Previous close',quote.previous_close)",
             "quoteCell('Market cap',quote.market_cap,'marketcap')",
-            "quoteCell('P/E',quote.price_earnings_ratio,'ratio')",
+            "quoteCell('P/E ratio',quote.price_earnings_ratio,'ratio')",
         ]
         self.assertEqual(sorted(quote_order, key=script.index), quote_order)
         self.assertIn('detail-call-block', script)
@@ -510,6 +510,8 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual(reloaded.json()["count"], 0)
 
     def test_stock_quote_returns_tradier_fields_and_demo_fallback(self):
+        self.assertEqual(fundamental_metric({"company": [{"market_cap": 148000000000}]}, {"market_cap"}), 148000000000.0)
+        self.assertEqual(fundamental_metric({"ratios": [{"price_earnings_ratio": 17.25}]}, {"price_earnings_ratio"}), 17.25)
         async def provider_get(provider, path, params):
             self.assertEqual(params, {"symbols": "MU"})
             self.assertEqual(path, "/markets/quotes")
