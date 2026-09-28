@@ -345,18 +345,43 @@ _FINNHUB_METRICS_TTL = 6 * 60 * 60
 
 
 def parse_finnhub_metrics(profile: dict[str, Any], financials: dict[str, Any]) -> dict[str, float | None]:
-    market_cap_millions = parse_number(profile.get("marketCapitalization"))
     metric = financials.get("metric", {}) if isinstance(financials, dict) else {}
     metric = metric if isinstance(metric, dict) else {}
-    pe = next((
-        parse_number(metric.get(key))
-        for key in ("peTTM", "peBasicExclExtraTTM", "peInclExtraTTM", "peAnnual")
-        if parse_number(metric.get(key)) is not None
-    ), None)
+
+    def optional_number(value: Any) -> float | None:
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        return number if math.isfinite(number) else None
+
+    def first_number(keys: tuple[str, ...]) -> float | None:
+        return next((value for key in keys if (value := optional_number(metric.get(key))) is not None), None)
+
+    market_cap_millions = optional_number(profile.get("marketCapitalization"))
+    shares_outstanding_millions = optional_number(profile.get("shareOutstanding"))
+
+    pe = first_number(("peTTM", "peBasicExclExtraTTM", "peInclExtraTTM", "peAnnual"))
+    earnings_per_share = first_number(("epsTTM", "epsInclExtraItemsTTM", "epsExclExtraItemsTTM", "netIncomePerShareTTM"))
+    margin_raw = first_number(("netMarginTTM", "netProfitMarginTTM", "netMargin", "netProfitMargin"))
+    profit_margin = margin_raw * 100 if margin_raw is not None and abs(margin_raw) <= 1 else margin_raw
+    revenue_per_share = first_number(("revenuePerShareTTM",))
+    revenue = (
+        revenue_per_share * shares_outstanding_millions * 1_000_000
+        if revenue_per_share is not None and shares_outstanding_millions is not None
+        else None
+    )
+
     return {
         "market_cap": market_cap_millions * 1_000_000 if market_cap_millions is not None else None,
         "price_earnings_ratio": pe,
+        "earnings_per_share": earnings_per_share,
+        "profit_margin": profit_margin,
+        "revenue": revenue,
     }
+
 
 
 def parse_finnhub_company_overview(basic: dict[str, Any], full: dict[str, Any]) -> dict[str, str | None]:
@@ -685,7 +710,7 @@ async def stock_quote(symbol: str):
             "change": row["change"], "change_pct": row["change_pct"],
             "bid": None, "ask": None, "volume": None, "average_volume": None,
             "open": None, "high": None, "low": None, "week_52_high": None, "week_52_low": None, "previous_close": None,
-            "market_cap": None, "price_earnings_ratio": None, "company_profile": None,
+            "market_cap": None, "price_earnings_ratio": None, "earnings_per_share": None, "profit_margin": None, "revenue": None, "company_profile": None,
             "quote_time": "DEMO DATA", "source": "demo",
         }
     provider = Tradier(token)

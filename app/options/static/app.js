@@ -96,8 +96,9 @@ function renderChainPage(){
 function quoteCell(label,value,kind='price'){
   let shown='—';
   if(value!==null&&value!==undefined&&value!==''&&Number.isFinite(Number(value))){
-    const n=Number(value);
-    shown=kind==='price'?'$'+fmt(n):kind==='percent'?changeText(n,'%'):kind==='change'?changeText(n,'$'):kind==='marketcap'?'$'+(Math.abs(n)>=1e12?fmt(n/1e12,2)+'T':Math.abs(n)>=1e9?fmt(n/1e9,2)+'B':Math.abs(n)>=1e6?fmt(n/1e6,2)+'M':fmt(n,0)):kind==='ratio'?fmt(n,2)+'x':Math.round(n).toLocaleString('en-US');
+    const n=Number(value),abs=Math.abs(n);
+    const compact=abs>=1e12?fmt(abs/1e12,2)+'T':abs>=1e9?fmt(abs/1e9,2)+'B':abs>=1e6?fmt(abs/1e6,2)+'M':fmt(abs,2);
+    shown=kind==='price'?'$'+fmt(n):kind==='percent'?changeText(n,'%'):kind==='change'?changeText(n,'$'):kind==='marketcap'?'$'+(abs>=1e12?fmt(abs/1e12,2)+'T':abs>=1e9?fmt(abs/1e9,2)+'B':abs>=1e6?fmt(abs/1e6,2)+'M':fmt(n,0)):kind==='money'?(n<0?'−':'')+'$'+compact:kind==='margin'?fmt(n,2)+'%':kind==='ratio'?fmt(n,2)+'x':Math.round(n).toLocaleString('en-US');
   }
   const cls=kind==='change'||kind==='percent'?changeClass(value):'';
   return '<div class="detail-quote-stat"><span>'+label+'</span><b class="'+cls+'">'+shown+'</b></div>';
@@ -164,7 +165,10 @@ async function viewChain(symbol){
       quoteCell('Average volume',quote.average_volume,'volume'),
       quoteCell('Previous close',quote.previous_close),
       quoteCell('Market cap',quote.market_cap,'marketcap'),
-      quoteCell('P/E ratio',quote.price_earnings_ratio,'ratio')
+      quoteCell('P/E ratio',quote.price_earnings_ratio,'ratio'),
+      quoteCell('Earnings / share (TTM)',quote.earnings_per_share,'money'),
+      quoteCell('Net margin (TTM)',quote.profit_margin,'margin'),
+      quoteCell('Revenue (TTM)',quote.revenue,'money')
     ].join('')+'</div><p class="detail-quote-source">'+sourceLabel+' · Quote time: '+safe(quoteTime)+'</p>';
     if(!responses[1].ok){
       detail.innerHTML='<p class="detail-quote-error">'+safe(chainData.detail||'Covered-call data unavailable.')+'</p>';
