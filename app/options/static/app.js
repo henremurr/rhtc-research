@@ -131,6 +131,8 @@ async function viewChain(symbol){
       quoteCell('Open',quote.open),
       quoteCell('Day high',quote.high),
       quoteCell('Day low',quote.low),
+      quoteCell('52-H',quote.week_52_high),
+      quoteCell('52-L',quote.week_52_low),
       quoteCell('Previous close',quote.previous_close),
       quoteCell('Volume',quote.volume,'volume'),
       quoteCell('Average volume',quote.average_volume,'volume')

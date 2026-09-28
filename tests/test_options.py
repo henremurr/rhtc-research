@@ -98,8 +98,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('app.css?v=rhtc-analysis-podcast-1', page.text)
         self.assertIn('app.js?v=rhtc-analysis-readaloud-4', page.text)
         self.assertIn('app.css?v=rhtc-dark-popup-3', page.text)
-        self.assertIn('app.js?v=rhtc-call-details-1', page.text)
-        self.assertIn('app.js?v=rhtc-stock-quote-1', page.text)
+        self.assertIn('app.js?v=rhtc-call-details-2', page.text)
         self.assertIn('id="analysis-mp3-btn"', page.text)
         self.assertIn('id="analysis-podcast-transcript"', page.text)
         self.assertIn('data-filter="news"', page.text)
@@ -133,6 +132,8 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('width:44px;height:44px', css)
         self.assertIn('-webkit-overflow-scrolling:touch', css)
         self.assertIn("fetch('/options/api/quote/'+encodeURIComponent(symbol))", script)
+        self.assertIn("quoteCell('52-H',quote.week_52_high)", script)
+        self.assertIn("quoteCell('52-L',quote.week_52_low)", script)
         self.assertIn('detail-call-block', script)
         self.assertIn('Expiration date', script)
         self.assertIn('Days to expiration', script)
@@ -504,7 +505,8 @@ class OptionsRoutesTest(unittest.TestCase):
                 "symbol": "MU", "description": "Micron Technology, Inc.", "last": 128.5,
                 "change": 1.25, "change_percentage": 0.98, "bid": 128.4, "ask": 128.6,
                 "volume": 123456, "average_volume": 200000, "open": 127.0, "high": 130.0,
-                "low": 126.5, "prevclose": 127.25, "trade_date": 1780000000000,
+                "low": 126.5, "week_52_high": 165.0, "week_52_low": 84.5,
+                "prevclose": 127.25, "trade_date": 1780000000000,
             }}}
         with patch.dict(os.environ, {"TRADIER_API_TOKEN": "test-token"}, clear=True), patch.object(Tradier, "get", provider_get):
             response = self.request("GET", "/options/api/quote/MU")
@@ -514,6 +516,8 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual(data["price"], 128.5)
         self.assertEqual(data["change_pct"], 0.98)
         self.assertEqual(data["previous_close"], 127.25)
+        self.assertEqual(data["week_52_high"], 165.0)
+        self.assertEqual(data["week_52_low"], 84.5)
         self.assertEqual(data["source"], "tradier_sandbox")
         with patch.dict(os.environ, {}, clear=True):
             demo = self.request("GET", "/options/api/quote/MU")
