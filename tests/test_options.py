@@ -98,9 +98,14 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('app.css?v=rhtc-analysis-podcast-1', page.text)
         self.assertIn('app.js?v=rhtc-analysis-readaloud-4', page.text)
         self.assertIn('app.css?v=rhtc-stock-quote-2', page.text)
-        self.assertIn('app.js?v=rhtc-call-details-1', page.text)
+        self.assertIn('app.js?v=rhtc-podcast-copy-1', page.text)
+        self.assertIn('app.css?v=rhtc-podcast-copy-1', page.text)
         self.assertIn('app.js?v=rhtc-stock-quote-1', page.text)
         self.assertIn('id="analysis-mp3-btn"', page.text)
+        self.assertIn('id="analysis-podcast-title"', page.text)
+        self.assertIn('id="analysis-podcast-description"', page.text)
+        self.assertIn('id="analysis-copy-title"', page.text)
+        self.assertIn('id="analysis-copy-description"', page.text)
         self.assertIn('id="analysis-podcast-transcript"', page.text)
         self.assertIn('data-filter="news"', page.text)
         self.assertIn('id="news-view"', page.text)
@@ -143,6 +148,8 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn("$('#analysis-mp3-btn').addEventListener('click',createAnalysisPodcast)", script)
         self.assertIn("/options/api/analysis-podcast/transcript", script)
         self.assertIn("/options/api/analysis-podcast/audio", script)
+        self.assertIn("copyAnalysisPodcastTitle", script)
+        self.assertIn("copyAnalysisPodcastDescription", script)
         self.assertIn("window.hideSymbolAnalysis=()=>{stopAnalysisSpeech();", script)
         self.assertIn("description.textContent=state.chainDescription", script)
         self.assertNotIn('title="View chain"', script)
@@ -299,7 +306,7 @@ class OptionsRoutesTest(unittest.TestCase):
         class FakeResponses:
             async def create(self, **kwargs):
                 self.kwargs = kwargs
-                return types.SimpleNamespace(output_text="Welcome to RHTC Policy & Power. This episode reviews the supplied analysis.")
+                return types.SimpleNamespace(output_text='{"episode_title":"Micron Supply Risks","episode_description":"A look at the supplied analysis and its industry implications.","transcript":"Welcome to RHTC Policy & Power. This episode reviews the supplied analysis."}')
 
         responses = FakeResponses()
         fake_openai = types.SimpleNamespace(AsyncOpenAI=lambda **kwargs: types.SimpleNamespace(responses=responses))
@@ -309,11 +316,15 @@ class OptionsRoutesTest(unittest.TestCase):
                     "title": "MU · Deep analysis", "subtitle": "AI / Infrastructure", "analysis": "Source analysis has this verified fact."
                 })
         self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json()["episode_title"], "Micron Supply Risks")
+        self.assertEqual(result.json()["episode_description"], "A look at the supplied analysis and its industry implications.")
         self.assertEqual(result.json()["character_count"], len(result.json()["transcript"]))
         self.assertLessEqual(result.json()["character_count"], 11500)
         self.assertEqual(responses.kwargs["model"], "test-script-model")
         self.assertIn("Source analysis has this verified fact.", responses.kwargs["input"])
         self.assertIn("under 11,500 characters", responses.kwargs["instructions"])
+        self.assertIn("episode_description", responses.kwargs["instructions"])
+        self.assertEqual(responses.kwargs["text"], {"format": {"type": "json_object"}})
 
     def test_analysis_podcast_audio_splits_text_and_returns_mp3(self):
         calls = []
