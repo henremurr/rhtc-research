@@ -376,6 +376,8 @@ def parse_finnhub_metrics(profile: dict[str, Any], financials: dict[str, Any], o
     )
 
     debt_to_capital_raw = first_number((
+        "totalDebt/totalCapitalQuarterly",
+        "totalDebt/totalCapitalAnnual",
         "totalDebtToTotalCapitalQuarterly",
         "totalDebtToTotalCapitalAnnual",
         "totalDebtToTotalCapital",
