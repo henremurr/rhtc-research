@@ -97,7 +97,7 @@ function quoteCell(label,value,kind='price'){
   let shown='—';
   if(value!==null&&value!==undefined&&value!==''&&Number.isFinite(Number(value))){
     const n=Number(value);
-    shown=kind==='price'?'$'+fmt(n):kind==='percent'?changeText(n,'%'):kind==='change'?changeText(n,'$'):Math.round(n).toLocaleString('en-US');
+    shown=kind==='price'?'$'+fmt(n):kind==='percent'?changeText(n,'%'):kind==='change'?changeText(n,'$'):kind==='marketcap'?'$'+(Math.abs(n)>=1e12?fmt(n/1e12,2)+'T':Math.abs(n)>=1e9?fmt(n/1e9,2)+'B':Math.abs(n)>=1e6?fmt(n/1e6,2)+'M':fmt(n,0)):kind==='ratio'?fmt(n,2)+'x':Math.round(n).toLocaleString('en-US');
   }
   const cls=kind==='change'||kind==='percent'?changeClass(value):'';
   return '<div class="detail-quote-stat"><span>'+label+'</span><b class="'+cls+'">'+shown+'</b></div>';
@@ -135,7 +135,9 @@ async function viewChain(symbol){
       quoteCell('52-H',quote.week_52_high),
       quoteCell('52-L',quote.week_52_low),
       quoteCell('Average volume',quote.average_volume,'volume'),
-      quoteCell('Previous close',quote.previous_close)
+      quoteCell('Previous close',quote.previous_close),
+      quoteCell('Market cap',quote.market_cap,'marketcap'),
+      quoteCell('P/E',quote.price_earnings_ratio,'ratio')
     ].join('')+'</div><p class="detail-quote-source">'+sourceLabel+' · Quote time: '+safe(quoteTime)+'</p>';
     if(!responses[1].ok){
       detail.innerHTML='<p class="detail-quote-error">'+safe(chainData.detail||'Covered-call data unavailable.')+'</p>';
