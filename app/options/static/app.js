@@ -66,11 +66,11 @@ function renderChainPage(){
   $('#chain-prev').disabled=state.chainIndex===0;
   $('#chain-next').disabled=state.chainIndex===state.chainRows.length-1;
   if(x.error){
-    $('#detail-subtitle').textContent=x.dte_window||DTE_WINDOWS[state.chainIndex];
+    $('#detail-subtitle').textContent='';
     $('#detail-content').innerHTML='<p class="error-text">'+safe(x.error)+'</p>';
     return;
   }
-  $('#detail-subtitle').textContent='Selected call candidate · '+(x.dte_window||DTE_WINDOWS[state.chainIndex]||'');
+  $('#detail-subtitle').textContent='';
   const note=state.chainSource==='demo'
     ?'Illustrative preview values; not live market data.'
     :state.chainSource==='tradier_sandbox'
