@@ -11,7 +11,7 @@ from unittest.mock import patch
 import httpx
 
 from main import app
-from app.options.api import Tradier, WATCHLIST, format_option_contract, openai_error_message, split_speech_chunks, strip_mp3_metadata
+from app.options.api import Tradier, WATCHLIST, parse_finnhub_metrics, format_option_contract, openai_error_message, split_speech_chunks, strip_mp3_metadata
 from app.options import news
 
 
@@ -510,8 +510,8 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual(reloaded.json()["count"], 0)
 
     def test_stock_quote_returns_tradier_fields_and_demo_fallback(self):
-        self.assertEqual(fundamental_metric({"company": [{"market_cap": 148000000000}]}, {"market_cap"}), 148000000000.0)
-        self.assertEqual(fundamental_metric({"ratios": [{"price_earnings_ratio": 17.25}]}, {"price_earnings_ratio"}), 17.25)
+        self.assertEqual(parse_finnhub_metrics({"marketCapitalization": 148000}, {"metric": {"peTTM": 17.25}}), {"market_cap": 148000000000.0, "price_earnings_ratio": 17.25})
+        self.assertEqual(parse_finnhub_metrics({}, {"metric": {}}), {"market_cap": None, "price_earnings_ratio": None})
         async def provider_get(provider, path, params):
             self.assertEqual(params, {"symbols": "MU"})
             self.assertEqual(path, "/markets/quotes")

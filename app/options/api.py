@@ -340,6 +340,25 @@ def fundamental_metric(data: Any, aliases: set[str]) -> float | None:
     return find(data)
 
 
+_FINNHUB_METRICS_CACHE: dict[str, tuple[float, dict[str, float | None]]] = {}
+_FINNHUB_METRICS_TTL = 6 * 60 * 60
+
+
+def parse_finnhub_metrics(profile: dict[str, Any], financials: dict[str, Any]) -> dict[str, float | None]:
+    market_cap_millions = parse_number(profile.get("marketCapitalization"))
+    metric = financials.get("metric", {}) if isinstance(financials, dict) else {}
+    metric = metric if isinstance(metric, dict) else {}
+    pe = next((
+        parse_number(metric.get(key))
+        for key in ("peTTM", "peBasicExclExtraTTM", "peInclExtraTTM", "peAnnual")
+        if parse_number(metric.get(key)) is not None
+    ), None)
+    return {
+        "market_cap": market_cap_millions * 1_000_000 if market_cap_millions is not None else None,
+        "price_earnings_ratio": pe,
+    }
+
+
 class Tradier:
     DTE_WINDOWS = ((0, 7), (8, 14), (15, 21), (22, None))
 
@@ -356,37 +375,37 @@ class Tradier:
         return response.json()
 
     async def company_metrics(self, symbol: str) -> dict[str, float | None]:
-        base_url = os.getenv("TRADIER_BASE_URL", "https://sandbox.tradier.com/v1").rstrip("/")
-        beta_base_url = re.sub(r"/v1$", "/beta", base_url)
-        async with httpx.AsyncClient(
-            base_url=beta_base_url,
-            headers=self.client.headers,
-            timeout=10,
-        ) as beta_client:
-            async def request(path: str) -> dict[str, Any]:
-                response = await beta_client.get(path, params={"symbols": symbol})
-                response.raise_for_status()
-                return response.json()
+        api_key = os.getenv("FINNHUB_API_KEY")
+        if not api_key:
+            return {"market_cap": None, "price_earnings_ratio": None}
 
-            company, ratios = await asyncio.gather(
-                request("/markets/fundamentals/company"),
-                request("/markets/fundamentals/ratios"),
+        cache_key = symbol.upper()
+        cached = _FINNHUB_METRICS_CACHE.get(cache_key)
+        if cached and time.monotonic() - cached[0] < _FINNHUB_METRICS_TTL:
+            return cached[1].copy()
+
+        async with httpx.AsyncClient(
+            base_url="https://finnhub.io/api/v1",
+            headers={"X-Finnhub-Token": api_key},
+            timeout=10,
+        ) as client:
+            async def request(path: str) -> dict[str, Any]:
+                response = await client.get(path, params={"symbol": cache_key, **({"metric": "all"} if path.endswith("/metric") else {})})
+                response.raise_for_status()
+                payload = response.json()
+                return payload if isinstance(payload, dict) else {}
+
+            profile, financials = await asyncio.gather(
+                request("/stock/profile2"),
+                request("/stock/metric"),
                 return_exceptions=True,
             )
-        if isinstance(company, BaseException):
-            company = {}
-        if isinstance(ratios, BaseException):
-            ratios = {}
-        return {
-            "market_cap": fundamental_metric(company, {
-                "market_cap", "market_capitalization", "market_capitalisation",
-            }),
-            "price_earnings_ratio": fundamental_metric(ratios, {
-                "pe_ratio", "pe_ttm", "trailing_pe", "trailing_pe_ratio",
-                "price_earnings", "price_earnings_ratio", "price_to_earnings",
-            }),
-        }
-
+        metrics = parse_finnhub_metrics(
+            {} if isinstance(profile, BaseException) else profile,
+            {} if isinstance(financials, BaseException) else financials,
+        )
+        _FINNHUB_METRICS_CACHE[cache_key] = (time.monotonic(), metrics.copy())
+        return metrics
     async def option_sets(self, symbol: str, peak: str, count: int = 4, only_set: int | None = None) -> list[dict[str, Any]]:
         qdata = await self.get("/markets/quotes", {"symbols": symbol})
         quote = qdata.get("quotes", {}).get("quote", {})
