@@ -131,11 +131,11 @@ async function viewChain(symbol){
       quoteCell('Open',quote.open),
       quoteCell('Day high',quote.high),
       quoteCell('Day low',quote.low),
+      quoteCell('Volume',quote.volume,'volume'),
       quoteCell('52-H',quote.week_52_high),
       quoteCell('52-L',quote.week_52_low),
-      quoteCell('Previous close',quote.previous_close),
-      quoteCell('Volume',quote.volume,'volume'),
-      quoteCell('Average volume',quote.average_volume,'volume')
+      quoteCell('Average volume',quote.average_volume,'volume'),
+      quoteCell('Previous close',quote.previous_close)
     ].join('')+'</div><p class="detail-quote-source">'+sourceLabel+' · Quote time: '+safe(quoteTime)+'</p>';
     if(!responses[1].ok){
       detail.innerHTML='<p class="detail-quote-error">'+safe(chainData.detail||'Covered-call data unavailable.')+'</p>';
