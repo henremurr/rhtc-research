@@ -510,8 +510,20 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual(reloaded.json()["count"], 0)
 
     def test_stock_quote_returns_tradier_fields_and_demo_fallback(self):
-        self.assertEqual(parse_finnhub_metrics({"marketCapitalization": 148000, "shareOutstanding": 500}, {"metric": {"peTTM": 17.25, "epsTTM": 3.5, "netMarginTTM": 0.2, "revenuePerShareTTM": 40}}), {"market_cap": 148000000000.0, "price_earnings_ratio": 17.25, "earnings_per_share": 3.5, "profit_margin": 20.0, "revenue": 20000000000.0})
-        self.assertEqual(parse_finnhub_metrics({}, {"metric": {}}), {"market_cap": None, "price_earnings_ratio": None, "earnings_per_share": None, "profit_margin": None, "revenue": None})
+        self.assertEqual(parse_finnhub_metrics({"marketCapitalization": 148000, "shareOutstanding": 500}, {"metric": {"peTTM": 17.25, "epsTTM": 3.5, "netMarginTTM": 0.2, "revenuePerShareTTM": 40}}), {"market_cap": 148000000000.0, "price_earnings_ratio": 17.25, "earnings_per_share": 3.5, "profit_margin": 20.0, "revenue": 20000000000.0, "shares_outstanding": 500000000.0, "total_debt_to_capital": None, "institutional_ownership": None})
+        self.assertEqual(parse_finnhub_metrics({}, {"metric": {}}), {"market_cap": None, "price_earnings_ratio": None, "earnings_per_share": None, "profit_margin": None, "revenue": None, "shares_outstanding": None, "total_debt_to_capital": None, "institutional_ownership": None})
+        metrics = parse_finnhub_metrics(
+            {"shareOutstanding": 500},
+            {"metric": {"totalDebt/totalCapitalQuarterly": 0.42}},
+            {"ownership": [
+                {"name": "Fund A", "filingDate": "2025-12-31", "share": 100000000},
+                {"name": "Fund A", "filingDate": "2024-12-31", "share": 90000000},
+                {"name": "Fund B", "filingDate": "2025-09-30", "share": 50000000},
+            ]},
+        )
+        self.assertEqual(metrics["shares_outstanding"], 500000000)
+        self.assertEqual(metrics["total_debt_to_capital"], 42)
+        self.assertEqual(metrics["institutional_ownership"], 30)
         profile = parse_finnhub_company_overview({"name": "Cloudflare Inc", "country": "US", "finnhubIndustry": "Technology", "ipo": "2019-09-13", "weburl": "https://www.cloudflare.com"}, {"description": "Cloudflare helps build a better Internet.", "city": "San Francisco", "state": "California"})
         self.assertEqual(profile["description"], "Cloudflare helps build a better Internet.")
         self.assertEqual(profile["industry"], "Technology")
@@ -531,7 +543,7 @@ class OptionsRoutesTest(unittest.TestCase):
             }}}
         async def provider_metrics(provider, symbol):
             self.assertEqual(symbol, "MU")
-            return {"market_cap": 148000000000.0, "price_earnings_ratio": 17.25, "earnings_per_share": 3.5, "profit_margin": 20.0, "revenue": 20000000000.0}
+            return {"market_cap": 148000000000.0, "price_earnings_ratio": 17.25, "earnings_per_share": 3.5, "profit_margin": 20.0, "revenue": 20000000000.0, "shares_outstanding": 500000000.0, "total_debt_to_capital": 42.0, "institutional_ownership": 30.0}
 
         with patch.dict(os.environ, {"TRADIER_API_TOKEN": "test-token"}, clear=True), patch.object(Tradier, "get", provider_get), patch.object(Tradier, "company_metrics", provider_metrics):
             response = self.request("GET", "/options/api/quote/MU")
@@ -548,6 +560,9 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual(data["earnings_per_share"], 3.5)
         self.assertEqual(data["profit_margin"], 20.0)
         self.assertEqual(data["revenue"], 20000000000.0)
+        self.assertEqual(data["shares_outstanding"], 500000000.0)
+        self.assertEqual(data["total_debt_to_capital"], 42.0)
+        self.assertEqual(data["institutional_ownership"], 30.0)
         self.assertEqual(data["source"], "tradier_sandbox")
         with patch.dict(os.environ, {}, clear=True):
             demo = self.request("GET", "/options/api/quote/MU")
@@ -559,6 +574,9 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIsNone(demo.json()["earnings_per_share"])
         self.assertIsNone(demo.json()["profit_margin"])
         self.assertIsNone(demo.json()["revenue"])
+        self.assertIsNone(demo.json()["shares_outstanding"])
+        self.assertIsNone(demo.json()["total_debt_to_capital"])
+        self.assertIsNone(demo.json()["institutional_ownership"])
         self.assertEqual(self.request("GET", "/options/api/quote/bad!").status_code, 404)
 
     def test_tradier_selection_and_error_rows(self):
