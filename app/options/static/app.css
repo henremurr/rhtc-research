@@ -151,3 +151,8 @@ th,td{white-space:normal;overflow-wrap:anywhere}
 .detail-modal>#detail-company-overview{grid-column:1;min-width:0}
 .detail-modal>.modal-close{position:sticky;grid-column:1/-1;top:0;justify-self:end;z-index:6;display:grid;place-items:center;width:40px;height:40px;margin-bottom:-40px;background:#fff;border:1px solid #e2e6ea;border-radius:50%}
 :root[data-theme="dark"] .detail-modal>.modal-close{background:#202a35;border-color:#465260;color:#e0e6ed}
+
+/* Keep stock quote and company overview together in the left popup pane. */
+.detail-modal>#detail-stock-pane{grid-column:1;min-width:0}
+.detail-modal>#detail-options-pane{grid-column:2;min-width:0}
+@media(max-width:759px){.detail-modal>#detail-stock-pane,.detail-modal>#detail-options-pane{width:100%}}
