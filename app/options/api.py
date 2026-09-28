@@ -344,7 +344,7 @@ _FINNHUB_METRICS_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _FINNHUB_METRICS_TTL = 6 * 60 * 60
 
 
-def parse_finnhub_metrics(profile: dict[str, Any], financials: dict[str, Any]) -> dict[str, float | None]:
+def parse_finnhub_metrics(profile: dict[str, Any], financials: dict[str, Any], ownership: dict[str, Any] | None = None) -> dict[str, float | None]:
     metric = financials.get("metric", {}) if isinstance(financials, dict) else {}
     metric = metric if isinstance(metric, dict) else {}
 
@@ -362,6 +362,7 @@ def parse_finnhub_metrics(profile: dict[str, Any], financials: dict[str, Any]) -
 
     market_cap_millions = optional_number(profile.get("marketCapitalization"))
     shares_outstanding_millions = optional_number(profile.get("shareOutstanding"))
+    shares_outstanding = shares_outstanding_millions * 1_000_000 if shares_outstanding_millions is not None else None
 
     pe = first_number(("peTTM", "peBasicExclExtraTTM", "peInclExtraTTM", "peAnnual"))
     earnings_per_share = first_number(("epsTTM", "epsInclExtraItemsTTM", "epsExclExtraItemsTTM", "netIncomePerShareTTM"))
@@ -374,12 +375,54 @@ def parse_finnhub_metrics(profile: dict[str, Any], financials: dict[str, Any]) -
         else None
     )
 
+    debt_to_capital_raw = first_number((
+        "totalDebtToTotalCapitalQuarterly",
+        "totalDebtToTotalCapitalAnnual",
+        "totalDebtToTotalCapital",
+    ))
+    if debt_to_capital_raw is None:
+        series = financials.get("series", {}) if isinstance(financials, dict) else {}
+        for period_name in ("quarterly", "annual"):
+            period_metrics = series.get(period_name, {}) if isinstance(series, dict) else {}
+            observations = period_metrics.get("totalDebtToTotalCapital", []) if isinstance(period_metrics, dict) else []
+            if isinstance(observations, list):
+                valid_observations = [
+                    (str(item.get("period") or ""), optional_number(item.get("v")))
+                    for item in observations if isinstance(item, dict)
+                ]
+                valid_observations = [(period, value) for period, value in valid_observations if value is not None]
+                if valid_observations:
+                    debt_to_capital_raw = max(valid_observations, key=lambda item: item[0])[1]
+                    break
+    debt_to_capital = debt_to_capital_raw * 100 if debt_to_capital_raw is not None and abs(debt_to_capital_raw) <= 1 else debt_to_capital_raw
+
+    reported_ownership_pct = None
+    ownership_rows = ownership.get("ownership", []) if isinstance(ownership, dict) else []
+    if isinstance(ownership_rows, list) and shares_outstanding and shares_outstanding > 0:
+        latest_by_investor: dict[str, tuple[str, float]] = {}
+        for item in ownership_rows:
+            if not isinstance(item, dict):
+                continue
+            share_count = optional_number(item.get("share"))
+            investor = str(item.get("name") or item.get("cik") or "").strip()
+            if share_count is None or share_count < 0 or not investor:
+                continue
+            report_date = str(item.get("filingDate") or item.get("reportDate") or "")
+            prior = latest_by_investor.get(investor)
+            if prior is None or report_date >= prior[0]:
+                latest_by_investor[investor] = (report_date, share_count)
+        if latest_by_investor:
+            reported_ownership_pct = sum(value for _, value in latest_by_investor.values()) / shares_outstanding * 100
+
     return {
         "market_cap": market_cap_millions * 1_000_000 if market_cap_millions is not None else None,
         "price_earnings_ratio": pe,
         "earnings_per_share": earnings_per_share,
         "profit_margin": profit_margin,
         "revenue": revenue,
+        "shares_outstanding": shares_outstanding,
+        "total_debt_to_capital": debt_to_capital,
+        "institutional_ownership": reported_ownership_pct,
     }
 
 
@@ -417,7 +460,7 @@ class Tradier:
     async def company_metrics(self, symbol: str) -> dict[str, Any]:
         api_key = os.getenv("FINNHUB_API_KEY")
         if not api_key:
-            return {"market_cap": None, "price_earnings_ratio": None, "company_profile": None}
+            return {"market_cap": None, "price_earnings_ratio": None, "earnings_per_share": None, "profit_margin": None, "revenue": None, "shares_outstanding": None, "total_debt_to_capital": None, "institutional_ownership": None, "company_profile": None}
 
         cache_key = symbol.upper()
         cached = _FINNHUB_METRICS_CACHE.get(cache_key)
@@ -435,16 +478,18 @@ class Tradier:
                 payload = response.json()
                 return payload if isinstance(payload, dict) else {}
 
-            basic_profile, financials, full_profile = await asyncio.gather(
+            basic_profile, financials, full_profile, ownership = await asyncio.gather(
                 request("/stock/profile2"),
                 request("/stock/metric", {"metric": "all"}),
                 request("/stock/profile"),
+                request("/stock/ownership", {"limit": "100"}),
                 return_exceptions=True,
             )
         basic_profile = {} if isinstance(basic_profile, BaseException) else basic_profile
         financials = {} if isinstance(financials, BaseException) else financials
         full_profile = {} if isinstance(full_profile, BaseException) else full_profile
-        result: dict[str, Any] = parse_finnhub_metrics(basic_profile, financials)
+        ownership = {} if isinstance(ownership, BaseException) else ownership
+        result: dict[str, Any] = parse_finnhub_metrics(basic_profile, financials, ownership)
         result["company_profile"] = parse_finnhub_company_overview(basic_profile, full_profile)
         _FINNHUB_METRICS_CACHE[cache_key] = (time.monotonic(), result.copy())
         return result
