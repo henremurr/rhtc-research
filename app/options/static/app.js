@@ -80,7 +80,7 @@ function renderChainPage(){
       '<div><small>Bid yield</small><b>'+fmt(x.premium_yield)+'%</b></div>'+
     '</div>'+
     '<div class="detail-grid">'+
-      '<div><small>Underlying</small><b>$'+fmt(x.price)+'</b></div>'+
+
       '<div><small>Delta / IV</small><b>'+fmt(x.delta,2)+' / '+fmt(x.iv,1)+'%</b></div>'+
       '<div><small>Bid / ask size</small><b>'+Number(x.bid_size||0).toLocaleString()+' / '+Number(x.ask_size||0).toLocaleString()+'</b></div>'+
       '<div><small>Open interest / volume</small><b>'+Number(x.open_interest||0).toLocaleString()+' / '+Number(x.volume||0).toLocaleString()+'</b></div>'+
