@@ -71,11 +71,6 @@ function renderChainPage(){
     return;
   }
   $('#detail-subtitle').textContent='';
-  const note=state.chainSource==='demo'
-    ?'Illustrative preview values; not live market data.'
-    :state.chainSource==='tradier_sandbox'
-      ?'Tradier sandbox data may be delayed. Check quote time and liquidity before relying on it.'
-      :'Quote from Tradier. Check quote time and liquidity before acting.';
   $('#detail-content').innerHTML=
     '<div class="detail-call-block">'+
       '<div><small>Call strike</small><b>$'+fmt(x.strike)+'</b></div>'+
@@ -90,8 +85,7 @@ function renderChainPage(){
       '<div><small>Bid / ask size</small><b>'+Number(x.bid_size||0).toLocaleString()+' / '+Number(x.ask_size||0).toLocaleString()+'</b></div>'+
       '<div><small>Open interest / volume</small><b>'+Number(x.open_interest||0).toLocaleString()+' / '+Number(x.volume||0).toLocaleString()+'</b></div>'+
       '<div><small>Quote timestamp</small><b>'+safe(x.quote_time||'Unavailable')+'</b></div>'+
-    '</div>'+
-    '<p class="detail-note">'+note+' This is the closest call strike above the share price for this expiration.</p>';
+    '</div>';
 }
 function quoteCell(label,value,kind='price'){
   let shown='—';
@@ -134,6 +128,7 @@ async function viewChain(symbol){
   $('#detail-subtitle').textContent='Loading stock quote and listed call candidates…';
   $('#detail-description').hidden=true;
   $('#detail-company-overview').innerHTML='<div class="loading">Loading company overview…</div>';
+  $('#detail-option-source').innerHTML='';
   quoteBox.innerHTML='<div class="loading">Retrieving stock quote…</div>';
   detail.innerHTML='<div class="loading">Retrieving covered-call data…</div>';
   modal.classList.add('open');
@@ -169,7 +164,8 @@ async function viewChain(symbol){
       quoteCell('Earnings / share (TTM)',quote.earnings_per_share,'money'),
       quoteCell('Net margin (TTM)',quote.profit_margin,'margin'),
       quoteCell('Revenue (TTM)',quote.revenue,'money')
-    ].join('')+'</div><p class="detail-quote-source">'+sourceLabel+' · Quote time: '+safe(quoteTime)+'</p>';
+    ].join('')+'</div>';
+    $('#detail-option-source').innerHTML='<p class="detail-quote-source">'+sourceLabel+' · Quote time: '+safe(quoteTime)+'</p>';
     if(!responses[1].ok){
       detail.innerHTML='<p class="detail-quote-error">'+safe(chainData.detail||'Covered-call data unavailable.')+'</p>';
       return;
