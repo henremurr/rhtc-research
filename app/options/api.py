@@ -367,10 +367,12 @@ def parse_finnhub_metrics(profile: dict[str, Any], financials: dict[str, Any]) -
     earnings_per_share = first_number(("epsTTM", "epsInclExtraItemsTTM", "epsExclExtraItemsTTM", "netIncomePerShareTTM"))
     margin_raw = first_number(("netMarginTTM", "netProfitMarginTTM", "netMargin", "netProfitMargin"))
     profit_margin = margin_raw * 100 if margin_raw is not None and abs(margin_raw) <= 1 else margin_raw
-    revenue = first_number(("revenueTTM",))
     revenue_per_share = first_number(("revenuePerShareTTM",))
-    if revenue is None and revenue_per_share is not None and shares_outstanding_millions is not None:
-        revenue = revenue_per_share * shares_outstanding_millions * 1_000_000
+    revenue = (
+        revenue_per_share * shares_outstanding_millions * 1_000_000
+        if revenue_per_share is not None and shares_outstanding_millions is not None
+        else None
+    )
 
     return {
         "market_cap": market_cap_millions * 1_000_000 if market_cap_millions is not None else None,
