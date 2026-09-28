@@ -140,3 +140,6 @@ th,td{white-space:normal;overflow-wrap:anywhere}
 @media(max-width:600px){.analysis-modal-backdrop{align-items:flex-start}.analysis-modal{box-sizing:border-box;width:calc(100vw - 20px);max-height:calc(100vh - 16px);max-height:calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px);margin:0 auto;display:block;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:12px 14px 18px}.analysis-modal>.modal-close{position:sticky;top:0;z-index:10;display:grid;place-items:center;width:44px;height:44px;margin:0 0 8px auto;padding:0;border:1px solid #e2e6ea;border-radius:50%;background:#fff;color:#596575;font-size:24px;line-height:1;touch-action:manipulation;box-shadow:0 1px 5px #1823331a}.analysis-modal>.modal-close:focus-visible{outline:2px solid #9f844c;outline-offset:2px}.analysis-modal .analysis-body{max-height:none;overflow:visible;font-size:11px}.analysis-modal .analysis-sources{max-height:none;overflow:visible}:root[data-theme="dark"] .analysis-modal>.modal-close{border-color:#465260;background:#202a35;color:#e0e6ed}}
 
 @media(max-width:600px){#analysis-podcast-transcript{height:22vh;min-height:130px;max-height:180px}.analysis-podcast-result{gap:8px;padding:9px}}
+
+/* Keep dark-theme modal surfaces slightly deeper than dashboard cards. */
+:root[data-theme="dark"] .modal{background:#151d27}
