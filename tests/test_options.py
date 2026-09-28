@@ -510,8 +510,8 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual(reloaded.json()["count"], 0)
 
     def test_stock_quote_returns_tradier_fields_and_demo_fallback(self):
-        self.assertEqual(parse_finnhub_metrics({"marketCapitalization": 148000}, {"metric": {"peTTM": 17.25}}), {"market_cap": 148000000000.0, "price_earnings_ratio": 17.25})
-        self.assertEqual(parse_finnhub_metrics({}, {"metric": {}}), {"market_cap": None, "price_earnings_ratio": None})
+        self.assertEqual(parse_finnhub_metrics({"marketCapitalization": 148000, "shareOutstanding": 500}, {"metric": {"peTTM": 17.25, "epsTTM": 3.5, "netMarginTTM": 0.2, "revenuePerShareTTM": 40}}), {"market_cap": 148000000000.0, "price_earnings_ratio": 17.25, "earnings_per_share": 3.5, "profit_margin": 20.0, "revenue": 20000000000.0})
+        self.assertEqual(parse_finnhub_metrics({}, {"metric": {}}), {"market_cap": None, "price_earnings_ratio": None, "earnings_per_share": None, "profit_margin": None, "revenue": None})
         profile = parse_finnhub_company_overview({"name": "Cloudflare Inc", "country": "US", "finnhubIndustry": "Technology", "ipo": "2019-09-13", "weburl": "https://www.cloudflare.com"}, {"description": "Cloudflare helps build a better Internet.", "city": "San Francisco", "state": "California"})
         self.assertEqual(profile["description"], "Cloudflare helps build a better Internet.")
         self.assertEqual(profile["industry"], "Technology")
