@@ -182,7 +182,9 @@ async function viewChain(symbol){
     else renderChainPage();
     const description=$('#detail-description');
     description.textContent=state.chainDescription;
-    description.hidden=!state.chainDescription;
+    const titleText=$('#detail-title').textContent.trim().toLocaleLowerCase();
+    const descriptionText=String(state.chainDescription||'').trim().toLocaleLowerCase();
+    description.hidden=!descriptionText||titleText.includes(descriptionText);
   }catch(error){
     quoteBox.innerHTML='<p class="detail-quote-error">'+safe(error.message)+'</p>';
     $('#detail-subtitle').textContent='Quote details may be incomplete.';
