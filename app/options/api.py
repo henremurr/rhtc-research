@@ -487,11 +487,13 @@ class Tradier:
                 payload = response.json()
                 return payload if isinstance(payload, dict) else {}
 
+            sentiment_to = date.today()
+            sentiment_from = sentiment_to - timedelta(days=365)
             basic_profile, financials, full_profile, insider_sentiment = await asyncio.gather(
                 request("/stock/profile2"),
                 request("/stock/metric", {"metric": "all"}),
                 request("/stock/profile"),
-                request("/stock/insider-sentiment"),
+                request("/stock/insider-sentiment", {"from": sentiment_from.isoformat(), "to": sentiment_to.isoformat()}),
                 return_exceptions=True,
             )
         basic_profile = {} if isinstance(basic_profile, BaseException) else basic_profile
