@@ -8,7 +8,7 @@ from contextlib import closing
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -45,6 +45,32 @@ PEAK_TERMS = {
 }
 
 
+TRACKING_QUERY_KEYS = {
+    "fbclid", "gclid", "mc_cid", "mc_eid", "ref", "ref_src", "source", "src",
+    "igshid", "campaign", "cmpid",
+}
+
+def canonical_news_url(value: str) -> str:
+    """Normalize common link variants so repeat scans identify the same story."""
+    parsed = urlparse(value.strip())
+    hostname = (parsed.hostname or "").lower().removeprefix("www.")
+    scheme = parsed.scheme.lower()
+    if scheme not in {"http", "https"} or not hostname:
+        return ""
+    port = parsed.port
+    netloc = hostname
+    if port and not ((scheme == "http" and port == 80) or (scheme == "https" and port == 443)):
+        netloc = f"{hostname}:{port}"
+    path = parsed.path or "/"
+    if path != "/":
+        path = path.rstrip('/')
+    query = urlencode([
+        (key, item) for key, item in parse_qsl(parsed.query, keep_blank_values=True)
+        if not (key.lower().startswith("utm_") or key.lower() in TRACKING_QUERY_KEYS)
+    ])
+    return urlunparse((scheme, netloc, path, "", query, ""))
+
+
 def db_path() -> Path:
     data_dir = Path(os.getenv("RHTC_DATA_DIR", str(Path(__file__).parent.parent.parent / "data")))
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -68,6 +94,31 @@ def connect_db() -> sqlite3.Connection:
         )"""
     )
     connection.execute("CREATE TABLE IF NOT EXISTS news_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    version = connection.execute("SELECT value FROM news_meta WHERE key='url_normalization_version'").fetchone()
+    if not version or version["value"] != "1":
+        rows = [dict(row) for row in connection.execute("SELECT * FROM news_items ORDER BY first_seen_at, last_seen_at")]
+        merged: dict[str, dict[str, str]] = {}
+        for row in rows:
+            canonical_url = canonical_news_url(row["url"]) or row["url"]
+            row["url"] = canonical_url[:2000]
+            existing = merged.get(row["url"])
+            if existing is None:
+                merged[row["url"]] = row
+                continue
+            first_seen = min(existing["first_seen_at"], row["first_seen_at"])
+            last_seen = max(existing["last_seen_at"], row["last_seen_at"])
+            if row["last_seen_at"] >= existing["last_seen_at"]:
+                for key in ("title", "source", "published_at", "snippet", "peak"):
+                    existing[key] = row[key]
+            existing["first_seen_at"] = first_seen
+            existing["last_seen_at"] = last_seen
+        connection.execute("DELETE FROM news_items")
+        connection.executemany(
+            "INSERT INTO news_items(url,title,source,published_at,snippet,peak,first_seen_at,last_seen_at) "
+            "VALUES(:url,:title,:source,:published_at,:snippet,:peak,:first_seen_at,:last_seen_at)",
+            list(merged.values()),
+        )
+        connection.execute("INSERT OR REPLACE INTO news_meta(key,value) VALUES('url_normalization_version','1')")
     connection.commit()
     return connection
 
@@ -88,12 +139,13 @@ def clean_result(item: dict[str, Any], seen_at: str) -> dict[str, str] | None:
     title = str(item.get("title") or "").strip()[:500]
     url = str(item.get("url") or "").strip()
     parsed = urlparse(url)
-    if not title or parsed.scheme not in {"http", "https"} or not parsed.netloc:
+    canonical_url = canonical_news_url(url)
+    if not title or not canonical_url or not parsed.netloc:
         return None
     source = (parsed.hostname or "").removeprefix("www.")[:200]
     snippet = str(item.get("snippet") or "").strip()[:3000]
     return {
-        "url": url[:2000],
+        "url": canonical_url[:2000],
         "title": title,
         "source": source,
         "published_at": str(item.get("date") or item.get("last_updated") or "")[:40],
@@ -169,6 +221,12 @@ async def scan_news(*, scheduled: bool = False) -> dict[str, Any]:
                         break
 
         with closing(connect_db()) as connection:
+            existing_urls: set[str] = set()
+            if clean_items:
+                placeholders = ",".join("?" for _ in clean_items)
+                query_existing = "SELECT url FROM news_items WHERE url IN (" + placeholders + ")"
+                existing_urls = {row["url"] for row in connection.execute(query_existing, list(clean_items))}
+            added = sum(url not in existing_urls for url in clean_items)
             connection.executemany(
                 """INSERT INTO news_items(url,title,source,published_at,snippet,peak,first_seen_at,last_seen_at)
                    VALUES(:url,:title,:source,:published_at,:snippet,:peak,:seen_at,:seen_at)
@@ -183,7 +241,7 @@ async def scan_news(*, scheduled: bool = False) -> dict[str, Any]:
             connection.commit()
             total = connection.execute("SELECT COUNT(*) AS n FROM news_items").fetchone()["n"]
 
-        return {"status": "complete", "last_scan_at": seen_at, "added": len(clean_items), "total": total}
+        return {"status": "complete", "last_scan_at": seen_at, "added": added, "total": total}
 
 
 @router.get("")
