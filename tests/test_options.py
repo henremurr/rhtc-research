@@ -248,6 +248,71 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual(len(payloads[0]["query"]), 5)
         self.assertEqual(result["added"], 25)
 
+    def test_news_scan_deduplicates_tracking_and_url_variants_across_scans(self):
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"results": [
+                    {"title": "A story", "url": "https://www.example.com/story/?utm_source=feed#top"},
+                    {"title": "A story", "url": "https://example.com/story"},
+                ]}
+
+        class FakeClient:
+            def __init__(self, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def post(self, url, *, headers, json):
+                return FakeResponse()
+
+        async def run_scan():
+            env = {"RHTC_DATA_DIR": self.data_dir.name, "PERPLEXITY_API_KEY": "test-key"}
+            with patch.dict(os.environ, env, clear=False):
+                with patch.object(news.httpx, "AsyncClient", FakeClient):
+                    first = await news.scan_news(scheduled=True)
+                    second = await news.scan_news(scheduled=True)
+                    return first, second
+
+        first, second = asyncio.run(run_scan())
+        self.assertEqual(first["added"], 1)
+        self.assertEqual(second["added"], 0)
+        self.assertEqual(second["total"], 1)
+        with patch.dict(os.environ, {"RHTC_DATA_DIR": self.data_dir.name}, clear=False):
+            connection = news.connect_db()
+            rows = connection.execute("SELECT url FROM news_items").fetchall()
+            connection.close()
+        self.assertEqual([row["url"] for row in rows], ["https://example.com/story"])
+    def test_news_db_migration_merges_existing_url_variants(self):
+        path = os.path.join(self.data_dir.name, "rhtc_symbols.sqlite3")
+        connection = sqlite3.connect(path)
+        connection.execute("CREATE TABLE news_items (url TEXT PRIMARY KEY, title TEXT NOT NULL, source TEXT NOT NULL, published_at TEXT NOT NULL, snippet TEXT NOT NULL, peak TEXT NOT NULL, first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL)")
+        connection.execute("CREATE TABLE news_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        connection.executemany(
+            "INSERT INTO news_items VALUES(?,?,?,?,?,?,?,?)",
+            [
+                ("https://www.example.com/story/?utm_source=old", "Old title", "example.com", "", "", "Other", "2026-09-28T10:00:00-07:00", "2026-09-28T10:00:00-07:00"),
+                ("https://example.com/story", "Latest title", "example.com", "", "", "Other", "2026-09-28T11:00:00-07:00", "2026-09-28T12:00:00-07:00"),
+            ],
+        )
+        connection.commit()
+        connection.close()
+
+        with patch.dict(os.environ, {"RHTC_DATA_DIR": self.data_dir.name}, clear=False):
+            connection = news.connect_db()
+            rows = connection.execute("SELECT url,title,first_seen_at,last_seen_at FROM news_items").fetchall()
+            connection.close()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["url"], "https://example.com/story")
+        self.assertEqual(rows[0]["title"], "Latest title")
+        self.assertEqual(rows[0]["first_seen_at"], "2026-09-28T10:00:00-07:00")
+        self.assertEqual(rows[0]["last_seen_at"], "2026-09-28T12:00:00-07:00")
     def test_news_analysis_is_authenticated_and_maps_story_to_watchlist_and_thesis(self):
         payload = {
             "title": "New grid equipment contract",
