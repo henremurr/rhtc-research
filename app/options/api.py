@@ -18,7 +18,7 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -240,16 +240,11 @@ def replace_watchlist(rows: list[dict[str, Any]]) -> None:
         connection.commit()
 
 
-def require_watchlist_admin(token: str | None) -> None:
-    expected = os.getenv("RHTC_WATCHLIST_ADMIN_TOKEN")
-    if not expected:
-        raise HTTPException(503, "Set RHTC_WATCHLIST_ADMIN_TOKEN in Railway Variables before editing the shared list.")
+def require_watchlist_storage() -> None:
     if not os.getenv("RHTC_DATA_DIR"):
         raise HTTPException(503, "Attach a Railway Volume at /data and set RHTC_DATA_DIR=/data before editing the shared list.")
     if not watchlist_storage_ready():
         raise HTTPException(503, "Railway does not report a Volume mounted at RHTC_DATA_DIR. Attach the Volume at /data and redeploy.")
-    if not token or not hmac.compare_digest(token, expected):
-        raise HTTPException(401, "The RHTC watchlist admin token is missing or incorrect.")
 
 # Illustrative prices and option values are generated for UI testing only.
 # They are never labeled as live; set TRADIER_API_TOKEN to fetch provider data.
@@ -683,13 +678,13 @@ async def get_watchlist(peak: str | None = None, q: str | None = None):
         "rows": rows,
         "count": len(rows),
         "migration_open": bool(state and state["value"] == "1"),
-        "editing_enabled": bool(os.getenv("RHTC_WATCHLIST_ADMIN_TOKEN") and watchlist_storage_ready()),
+        "editing_enabled": watchlist_storage_ready(),
     }
 
 
 @app.put("/api/watchlist")
-async def update_watchlist(data: WatchlistUpdate, x_rhtc_admin_token: str | None = Header(default=None)):
-    require_watchlist_admin(x_rhtc_admin_token)
+async def update_watchlist(data: WatchlistUpdate):
+    require_watchlist_storage()
     rows = validate_watchlist(data.rows)
     replace_watchlist(rows)
     return {"rows": rows, "count": len(rows)}
