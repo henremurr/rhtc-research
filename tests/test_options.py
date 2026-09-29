@@ -163,6 +163,8 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('rhtc-call-score-3', page.text)
         self.assertIn('Total score: ${totalScore} out of 5', script)
         self.assertIn('async function analyzeSymbol(symbol)', script)
+        self.assertIn('contractParts.push(`${fmt(strike)} Call`)', script)
+        self.assertIn("month:'short',day:'numeric',year:'numeric'", script)
         self.assertIn('function toggleAnalysisSpeech()', script)
         self.assertIn('read.hidden=!supported', script)
         self.assertIn("$('#analysis-read-btn').addEventListener('click',toggleAnalysisSpeech)", script)
