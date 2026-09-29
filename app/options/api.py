@@ -160,12 +160,16 @@ def connect_watchlist_db() -> sqlite3.Connection:
     connection = sqlite3.connect(watchlist_db_path(), timeout=15)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA journal_mode=WAL")
-    connection.execute("CREATE TABLE IF NOT EXISTS symbols (position INTEGER PRIMARY KEY, symbol TEXT NOT NULL UNIQUE, peak TEXT NOT NULL, share_price REAL, quantity REAL)")
+    connection.execute("CREATE TABLE IF NOT EXISTS symbols (position INTEGER PRIMARY KEY, symbol TEXT NOT NULL UNIQUE, peak TEXT NOT NULL, share_price REAL, quantity REAL, average_total_score REAL, analysis_count INTEGER NOT NULL DEFAULT 0)")
     columns = {row["name"] for row in connection.execute("PRAGMA table_info(symbols)")}
     if "share_price" not in columns:
         connection.execute("ALTER TABLE symbols ADD COLUMN share_price REAL")
     if "quantity" not in columns:
         connection.execute("ALTER TABLE symbols ADD COLUMN quantity REAL")
+    if "average_total_score" not in columns:
+        connection.execute("ALTER TABLE symbols ADD COLUMN average_total_score REAL")
+    if "analysis_count" not in columns:
+        connection.execute("ALTER TABLE symbols ADD COLUMN analysis_count INTEGER NOT NULL DEFAULT 0")
     connection.execute("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
     connection.execute("INSERT OR IGNORE INTO app_state(key, value) VALUES ('watchlist_seeded', '0')")
     seeded = connection.execute("SELECT value FROM app_state WHERE key = 'watchlist_seeded'").fetchone()
@@ -179,7 +183,44 @@ def connect_watchlist_db() -> sqlite3.Connection:
 
 def read_watchlist() -> list[dict[str, Any]]:
     with closing(connect_watchlist_db()) as connection:
-        return [dict(row) for row in connection.execute("SELECT symbol, peak, share_price, quantity FROM symbols ORDER BY position")]
+        return [dict(row) for row in connection.execute("SELECT symbol, peak, share_price, quantity, average_total_score, analysis_count FROM symbols ORDER BY position")]
+
+
+def extract_analysis_total_score(analysis: str) -> int | None:
+    scorecard = next((line for line in analysis.splitlines() if re.match(r"^\s*\**Scorecard\b", line, re.IGNORECASE)), None)
+    if not scorecard:
+        return None
+    pattern = re.compile(r"\b(Income|Upside cushion|Event risk|Liquidity)\s*:\s*([1-5])\s*/\s*5\b", re.IGNORECASE)
+    scores = {label.lower(): int(value) for label, value in pattern.findall(scorecard)}
+    if set(scores) != {"income", "upside cushion", "event risk", "liquidity"}:
+        return None
+    return math.floor(sum(scores.values()) / len(scores) + 0.5)
+
+
+def record_analysis_total_score(symbol: str, analysis: str) -> tuple[int | None, float | None, int]:
+    total_score = extract_analysis_total_score(analysis)
+    if total_score is None:
+        return None, None, 0
+    with closing(connect_watchlist_db()) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        row = connection.execute(
+            "SELECT average_total_score, analysis_count FROM symbols WHERE symbol = ?",
+            (symbol,),
+        ).fetchone()
+        if not row:
+            connection.commit()
+            return total_score, None, 0
+        count = int(row["analysis_count"] or 0)
+        previous_average = row["average_total_score"]
+        running_total = (float(previous_average or 0) * count) + total_score
+        count += 1
+        average = running_total / count
+        connection.execute(
+            "UPDATE symbols SET average_total_score = ?, analysis_count = ? WHERE symbol = ?",
+            (average, count, symbol),
+        )
+        connection.commit()
+        return total_score, average, count
 
 
 def optional_nonnegative_number(item: dict[str, Any], field: str) -> int | float | None:
@@ -231,10 +272,20 @@ def watchlist_storage_ready() -> bool:
 
 def replace_watchlist(rows: list[dict[str, Any]]) -> None:
     with closing(connect_watchlist_db()) as connection:
+        scores = {
+            row["symbol"]: (row["average_total_score"], row["analysis_count"])
+            for row in connection.execute("SELECT symbol, average_total_score, analysis_count FROM symbols")
+        }
         connection.execute("DELETE FROM symbols")
         connection.executemany(
-            "INSERT INTO symbols(position, symbol, peak, share_price, quantity) VALUES (?, ?, ?, ?, ?)",
-            [(i, row["symbol"], row["peak"], row["share_price"], row["quantity"]) for i, row in enumerate(rows)],
+            "INSERT INTO symbols(position, symbol, peak, share_price, quantity, average_total_score, analysis_count) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    i, row["symbol"], row["peak"], row["share_price"], row["quantity"],
+                    *scores.get(row["symbol"], (None, 0)),
+                )
+                for i, row in enumerate(rows)
+            ],
         )
         connection.execute("INSERT OR REPLACE INTO app_state(key, value) VALUES ('legacy_import_open', '0')")
         connection.commit()
@@ -687,7 +738,8 @@ async def update_watchlist(data: WatchlistUpdate):
     require_watchlist_storage()
     rows = validate_watchlist(data.rows)
     replace_watchlist(rows)
-    return {"rows": rows, "count": len(rows)}
+    saved_rows = read_watchlist()
+    return {"rows": saved_rows, "count": len(saved_rows)}
 
 
 @app.get("/api/opportunities")
@@ -729,6 +781,7 @@ async def opportunities(
         holding = next((item for item in selected if item["symbol"] == row.get("symbol")), {})
         row["share_price"] = holding.get("share_price")
         row["quantity"] = holding.get("quantity")
+        row["average_total_score"] = holding.get("average_total_score")
         row["coverage_status"] = "Needs review" if row.get("open_interest", 0) < 25 else "Liquid enough to review"
     if max_last is not None:
         rows = [
@@ -1051,8 +1104,17 @@ async def analyze_symbol(data: SymbolAnalysisInput):
                     seen_urls.add(url)
     analysis = (getattr(response, "output_text", "") or "").strip()
     if not analysis:
-        return {"symbol": symbol, "peak": peak, "analysis": screen_only_analysis(symbol, screen), "citations": [], "mode": "screen_fallback"}
-    return {"symbol": symbol, "peak": peak, "analysis": analysis, "citations": citations, "mode": "openai"}
+        analysis = screen_only_analysis(symbol, screen)
+        total_score, average_score, analysis_count = record_analysis_total_score(symbol, analysis)
+        return {
+            "symbol": symbol, "peak": peak, "analysis": analysis, "citations": [], "mode": "screen_fallback",
+            "total_score": total_score, "average_total_score": average_score, "analysis_count": analysis_count,
+        }
+    total_score, average_score, analysis_count = record_analysis_total_score(symbol, analysis)
+    return {
+        "symbol": symbol, "peak": peak, "analysis": analysis, "citations": citations, "mode": "openai",
+        "total_score": total_score, "average_total_score": average_score, "analysis_count": analysis_count,
+    }
 
 
 MAX_SPOTIFY_TRANSCRIPT_CHARS = 11500
