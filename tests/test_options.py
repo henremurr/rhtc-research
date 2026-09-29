@@ -43,6 +43,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual(self.request("GET", "/options/login", authenticated=False).status_code, 200)
         self.assertEqual(self.request("GET", "/options/api/watchlist", authenticated=False).status_code, 401)
         self.assertEqual(self.request("POST", "/options/api/symbol-analysis", json={"symbol": "BW"}, authenticated=False).status_code, 401)
+        self.assertEqual(self.request("PUT", "/options/api/watchlist", json={"rows": []}, authenticated=False).status_code, 401)
 
     def test_dashboard_sign_in_and_sign_out(self):
         async def run():
@@ -96,9 +97,9 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('<span>Order by</span><select id="sort">', page.text)
         self.assertLess(page.text.index('Max Last'), page.text.index('<span>Order by</span>'))
         self.assertIn('app.css?v=rhtc-analysis-podcast-1', page.text)
-        self.assertIn('app.js?v=rhtc-analysis-readaloud-4', page.text)
+        self.assertIn('app.js?v=rhtc-watchlist-session-1', page.text)
         self.assertIn('app.css?v=rhtc-dark-popup-3', page.text)
-        self.assertIn('app.js?v=rhtc-call-details-4', page.text)
+        self.assertIn('app.js?v=rhtc-watchlist-session-1', page.text)
         self.assertIn('id="analysis-mp3-btn"', page.text)
         self.assertIn('id="analysis-podcast-transcript"', page.text)
         self.assertIn('data-filter="news"', page.text)
@@ -518,8 +519,8 @@ class OptionsRoutesTest(unittest.TestCase):
             {"symbol": "NEWCO", "peak": "Other", "share_price": None, "quantity": 4},
             {"symbol": "MU", "peak": "AI/I", "share_price": 128.5, "quantity": 100},
         ]
-        with patch.dict(os.environ, {"RHTC_WATCHLIST_ADMIN_TOKEN": "test-admin"}, clear=False):
-            saved = self.request("PUT", "/options/api/watchlist", headers={"X-RHTC-Admin-Token": "test-admin"}, json={"rows": symbols})
+        with patch.dict(os.environ, {"RHTC_WATCHLIST_ADMIN_TOKEN": ""}, clear=False):
+            saved = self.request("PUT", "/options/api/watchlist", json={"rows": symbols})
             response = self.request("GET", "/options/api/opportunities?limit=200")
             holdings = self.request("GET", "/options/api/opportunities?holdings_only=true&limit=1")
             chain = self.request("GET", "/options/api/chain/NEWCO")
@@ -536,6 +537,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual(holdings.json()["rows"][0]["symbol"], "MU")
         self.assertEqual(reloaded.json()["rows"], symbols)
         self.assertFalse(reloaded.json()["migration_open"])
+        self.assertTrue(reloaded.json()["editing_enabled"])
         self.assertEqual(chain.status_code, 200)
         self.assertEqual(chain.json()["symbol"], "NEWCO")
 
@@ -549,8 +551,8 @@ class OptionsRoutesTest(unittest.TestCase):
             connection.execute("INSERT INTO app_state VALUES ('legacy_import_open', '0')")
         old_rows = self.request("GET", "/options/api/watchlist").json()["rows"]
         self.assertEqual(old_rows, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None}])
-        with patch.dict(os.environ, {"RHTC_WATCHLIST_ADMIN_TOKEN": "test-admin"}, clear=False):
-            saved = self.request("PUT", "/options/api/watchlist", headers={"X-RHTC-Admin-Token": "test-admin"}, json={"rows": [{"symbol": "MU", "peak": "AI/I", "share_price": "", "quantity": ""}]})
+        with patch.dict(os.environ, {"RHTC_WATCHLIST_ADMIN_TOKEN": ""}, clear=False):
+            saved = self.request("PUT", "/options/api/watchlist", json={"rows": [{"symbol": "MU", "peak": "AI/I", "share_price": "", "quantity": ""}]})
             reloaded = self.request("GET", "/options/api/watchlist").json()["rows"]
         self.assertEqual(saved.status_code, 200)
         self.assertEqual(reloaded, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None}])
@@ -559,16 +561,16 @@ class OptionsRoutesTest(unittest.TestCase):
         duplicate = [{"symbol": "MU", "peak": "AI/I"}, {"symbol": "MU", "peak": "Other"}]
         invalid_peak = [{"symbol": "MU", "peak": "Unknown"}]
         negative_quantity = [{"symbol": "MU", "peak": "AI/I", "quantity": -1}]
-        with patch.dict(os.environ, {"RHTC_WATCHLIST_ADMIN_TOKEN": "test-admin"}, clear=False):
+        with patch.dict(os.environ, {"RHTC_WATCHLIST_ADMIN_TOKEN": ""}, clear=False):
             for symbols in (duplicate, invalid_peak, negative_quantity):
-                response = self.request("PUT", "/options/api/watchlist", headers={"X-RHTC-Admin-Token": "test-admin"}, json={"rows": symbols})
+                response = self.request("PUT", "/options/api/watchlist", json={"rows": symbols})
                 self.assertEqual(response.status_code, 400)
             unauthorized = self.request("PUT", "/options/api/watchlist", json={"rows": []})
             self.assertEqual(unauthorized.status_code, 401)
 
     def test_empty_shared_watchlist_stays_empty(self):
-        with patch.dict(os.environ, {"RHTC_WATCHLIST_ADMIN_TOKEN": "test-admin"}, clear=False):
-            response = self.request("PUT", "/options/api/watchlist", headers={"X-RHTC-Admin-Token": "test-admin"}, json={"rows": []})
+        with patch.dict(os.environ, {"RHTC_WATCHLIST_ADMIN_TOKEN": ""}, clear=False):
+            response = self.request("PUT", "/options/api/watchlist", json={"rows": []})
             reloaded = self.request("GET", "/options/api/watchlist")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(reloaded.json()["rows"], [])
