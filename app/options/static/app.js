@@ -196,7 +196,11 @@ async function viewChain(symbol){
 async function analyzeSymbol(symbol){
   const modal=$('#symbol-analysis-modal'),body=$('#symbol-analysis-body'),sources=$('#symbol-analysis-sources'),status=$('#symbol-analysis-status');
   const row=state.rows.find(item=>item.symbol===symbol)||{};
-  $('#symbol-analysis-title').textContent=`${symbol} · Deep analysis`;
+  const strike=Number(row.strike),expiry=String(row.expiry||'').trim(),contractParts=[];
+  if(Number.isFinite(strike)&&strike>0)contractParts.push(`${fmt(strike)} Call`);
+  if(/^\d{4}-\d{2}-\d{2}$/.test(expiry)){const [year,month,day]=expiry.split('-').map(Number);contractParts.push(new Date(Date.UTC(year,month-1,day)).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',timeZone:'UTC'}))}
+  else if(expiry)contractParts.push(expiry);
+  $('#symbol-analysis-title').textContent=contractParts.length?`${symbol} · ${contractParts.join(' · ')}`:`${symbol} · Deep analysis`;
   $('#symbol-analysis-subtitle').textContent=`${peakName(row.peak||'Other')} · Current-source research with citations`;
   stopNewsSpeech(false);resetAnalysisPodcast();$('#analysis-read-btn').hidden=true;$('#analysis-mp3-btn').disabled=true;body.textContent='Searching current sources and preparing the analysis…';sources.innerHTML='';status.textContent='';modal.classList.add('open');
   const screen=Object.fromEntries(['price','change','change_pct','strike','expiry','dte','bid','ask','premium_yield','delta','iv','open_interest','volume','bid_size','ask_size','quote_time','source'].filter(key=>row[key]!==undefined).map(key=>[key,row[key]]));
