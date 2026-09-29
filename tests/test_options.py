@@ -119,7 +119,7 @@ class OptionsRoutesTest(unittest.TestCase):
 
         self.assertIn('<th>CHG $</th><th>CHG %</th>', page.text)
         self.assertIn('title="Share price saved in Manage symbols">COST</th>', page.text)
-        self.assertIn('colspan="12"', page.text)
+        self.assertIn('colspan="13"', page.text)
         self.assertLess(page.text.index('>CALL CONTRACT</th>'), page.text.index('<th>QTY</th>'))
         self.assertLess(page.text.index('<th>QTY</th>'), page.text.index('>BID / ASK</th>'))
         self.assertNotIn('<th></th>', page.text)
@@ -175,7 +175,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn("window.hideSymbolAnalysis=()=>{stopAnalysisSpeech();", script)
         self.assertIn("description.textContent=state.chainDescription", script)
         self.assertNotIn('title="View chain"', script)
-        for label in ('Ticker', 'Peak', 'Avg score / 5', 'Last', 'Change , 'Change %', 'Cost', 'Call contract', 'Qty', 'Bid / ask', 'Bid / ask yield', 'Income', 'OI / Vol'):
+        for label in ('Ticker', 'Peak', 'Avg score / 5', 'Last', 'Change $', 'Change %', 'Cost', 'Call contract', 'Qty', 'Bid / ask', 'Bid / ask yield', 'Income', 'OI / Vol'):
             self.assertIn(f'data-label="{label}"', script)
         self.assertIn('function quantityForPrice(price)', script)
         self.assertIn('Math.trunc(ceiling/last)', script)
