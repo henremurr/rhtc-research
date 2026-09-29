@@ -985,7 +985,7 @@ async def analyze_symbol(data: SymbolAnalysisInput):
         "Start with the decision, using exactly these Markdown sections:\n"
         "## Covered-call verdict\n"
         "Give a Strong / Mixed / Weak fit label and a one-sentence reason. Then show a compact scorecard with "
-        "Income, Upside cushion, Event risk, and Liquidity each scored 1-5. Interpret only the supplied snapshot. "
+        "Income, Upside cushion, Event risk, and Liquidity each scored 1-5. Print them on one line in this exact format: `Scorecard — Income: N/5 · Upside cushion: N/5 · Event risk: N/5 · Liquidity: N/5`, using integer scores from 1 to 5 and the supplied snapshot only. "
         "For every score, 5 must mean most favorable to a covered-call seller (so Event risk 5 means low event risk). "
         "Apply strict verdict guardrails: Strong requires Income at least 4, Upside cushion at least 3, Liquidity at "
         "least 3, and no known binary event before expiration. If the bid/ask spread exceeds 25% of the midpoint or "
