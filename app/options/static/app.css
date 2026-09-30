@@ -170,3 +170,7 @@ th,td{white-space:normal;overflow-wrap:anywhere}
 
 /* Keep popup expand and close controls together at the top-right in both modal layouts. */
 .detail-modal-controls{position:sticky;top:0;z-index:20;align-self:flex-end;justify-self:end;display:flex;width:max-content;max-width:100%;margin-left:auto;margin-right:0;justify-content:flex-end}
+
+/* Reserve room for sticky analysis-popup controls so they cannot cover the contract expiry title. */
+.analysis-modal .analysis-modal-controls{height:44px;margin-bottom:12px}
+@media(max-width:600px){.analysis-modal.is-fullscreen .analysis-modal-controls{align-self:flex-end;justify-self:end;width:max-content;margin:-6px -5px 12px auto}}
