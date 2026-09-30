@@ -90,7 +90,7 @@ def render_dashboard_login_page(base_path: str, configured: bool) -> str:
 <title>Sign in · RHTC Options</title><style>
 :root{{color-scheme:light dark;--bg:#f5f4f1;--card:#fffffff0;--ink:#233044;--muted:#748091;--gold:#927744;--line:#dce0e4;--veil:#f5f4f14d}}
 @media(prefers-color-scheme:dark){{:root{{--bg:#171c23;--card:#18202aeb;--ink:#e7ecf2;--muted:#b1bac6;--line:#526071;--veil:#08101a99}}}}
-*{{box-sizing:border-box}}body{{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg) url("{base_path}/static/rhtc-signin-background.jpeg") center/cover no-repeat;color:var(--ink);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:24px;position:relative;isolation:isolate}}
+*{{box-sizing:border-box}}body{{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg) url("{base_path}/static/rhtc-signin-background.jpeg?v=1") center/cover no-repeat;color:var(--ink);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:24px;position:relative;isolation:isolate}}
 body::before{{content:"";position:fixed;inset:0;background:var(--veil);z-index:-1}}
 .card{{width:min(420px,100%);padding:32px;border:1px solid var(--line);border-radius:14px;background:var(--card);box-shadow:0 20px 58px #00000038;backdrop-filter:blur(12px) saturate(120%);-webkit-backdrop-filter:blur(12px) saturate(120%)}}
 .brand{{color:var(--gold);font-size:12px;font-weight:700;letter-spacing:1.5px}}h1{{font-size:26px;margin:10px 0 6px}}p{{color:var(--muted);font-size:14px;line-height:1.5;margin:0 0 22px}}
