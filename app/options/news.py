@@ -20,8 +20,10 @@ router = APIRouter(prefix="/api/news", tags=["news"])
 SEARCH_URL = "https://api.perplexity.ai/search"
 PACIFIC = ZoneInfo("America/Los_Angeles")
 SCAN_LOCK = asyncio.Lock()
-MAX_ARTICLES_PER_SCAN = 25
+NEWS_WINDOW_DAYS = 14
+MAX_ARTICLES_PER_SCAN = 150
 MAX_RESULTS_PER_QUERY = 20
+MAX_QUERIES_PER_REQUEST = 5
 
 
 class NewsAnalysisInput(BaseModel):
@@ -31,11 +33,16 @@ class NewsAnalysisInput(BaseModel):
     published_at: str = Field(default="", max_length=40)
 
 SEARCH_QUERIES = [
-    "AI compute infrastructure, semiconductors, GPUs, memory, networking, hyperscalers and data center investment latest news",
-    "electric power, grid, generation, nuclear energy, uranium, natural gas, LNG, critical minerals and infrastructure latest news",
-    "US defense, Pentagon, military procurement, missiles, munitions, drones, electronic warfare and security latest news",
-    "space industry, launch, satellites, Space Force, NASA, commercial spaceflight and national security space latest news",
-    "new reports and analysis from CSIS, Hudson Institute, FDD, Heritage Foundation and other think tanks on AI, energy, defense and space",
+    "AI compute infrastructure, GPUs, accelerators and hyperscaler investment news",
+    "semiconductors, memory, networking, servers and data center supply chain news",
+    "electric power, grid, generation and utility infrastructure news",
+    "nuclear energy, uranium, natural gas, LNG, fuels and critical minerals news",
+    "US defense, Pentagon procurement, missiles and munitions news",
+    "military drones, autonomy, electronic warfare and defense technology news",
+    "space industry, launch vehicles and commercial spaceflight news",
+    "satellites, Space Force, NASA and national security space news",
+    "CSIS, Hudson Institute, FDD and Heritage Foundation reports on defense and security",
+    "think tank reports on AI infrastructure, energy security, minerals and space policy",
 ]
 
 PEAK_TERMS = {
@@ -178,23 +185,33 @@ async def scan_news(*, scheduled: bool = False) -> dict[str, Any]:
             except ValueError:
                 pass
 
-        payload = {
-            "query": SEARCH_QUERIES,
-            "max_results": MAX_RESULTS_PER_QUERY,
-            "search_type": "fast",
-            "search_recency_filter": "day",
-            "search_language_filter": ["en"],
-            "search_context_size": "low",
-        }
+        after_date = (now_pacific() - timedelta(days=NEWS_WINDOW_DAYS)).strftime("%m/%d/%Y")
+        query_batches = [
+            SEARCH_QUERIES[index:index + MAX_QUERIES_PER_REQUEST]
+            for index in range(0, len(SEARCH_QUERIES), MAX_QUERIES_PER_REQUEST)
+        ]
+        raw_results: list[Any] = []
         try:
             async with httpx.AsyncClient(timeout=45.0) as client:
-                response = await client.post(
-                    SEARCH_URL,
-                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                    json=payload,
-                )
-                response.raise_for_status()
-                data = response.json()
+                for queries in query_batches:
+                    response = await client.post(
+                        SEARCH_URL,
+                        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                        json={
+                            "query": queries,
+                            "max_results": MAX_RESULTS_PER_QUERY,
+                            "search_type": "fast",
+                            "search_after_date_filter": after_date,
+                            "search_language_filter": ["en"],
+                            "search_context_size": "low",
+                        },
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                    if not isinstance(data, dict) or not isinstance(data.get("results", []), list):
+                        logger.warning("RHTC news provider returned an unexpected response shape")
+                        raise HTTPException(502, "The news provider returned an unexpected response. Try again later.")
+                    raw_results.extend(data.get("results") or [])
         except httpx.TimeoutException as exc:
             logger.warning("RHTC news search timed out: %s", exc)
             raise HTTPException(502, "News search timed out. Try again later.") from exc
@@ -205,12 +222,7 @@ async def scan_news(*, scheduled: bool = False) -> dict[str, Any]:
             logger.warning("RHTC news search failed: %s", exc)
             raise HTTPException(502, "News search could not be completed. Try again later.") from exc
 
-        if not isinstance(data, dict) or not isinstance(data.get("results", []), list):
-            logger.warning("RHTC news provider returned an unexpected response shape")
-            raise HTTPException(502, "The news provider returned an unexpected response. Try again later.")
-
         seen_at = now_pacific().isoformat()
-        raw_results = data.get("results") or []
         clean_items: dict[str, dict[str, str]] = {}
         for raw in raw_results:
             if isinstance(raw, dict):
@@ -250,9 +262,13 @@ async def get_news(
     q: str | None = Query(default=None, max_length=120),
     days: int = Query(default=14, ge=1, le=90),
 ):
-    cutoff = (now_pacific() - timedelta(days=days)).isoformat()
-    query = "SELECT url,title,source,published_at,snippet,peak,first_seen_at FROM news_items WHERE first_seen_at >= ?"
-    params: list[Any] = [cutoff]
+    cutoff_time = now_pacific() - timedelta(days=days)
+    cutoff = cutoff_time.isoformat()
+    cutoff_date = cutoff_time.date().isoformat()
+    query = """SELECT url,title,source,published_at,snippet,peak,first_seen_at FROM news_items
+               WHERE ((published_at != '' AND substr(published_at,1,10) >= ?)
+                  OR (published_at = '' AND first_seen_at >= ?))"""
+    params: list[Any] = [cutoff_date, cutoff]
     if peak and peak not in {"All", "All Peaks"}:
         query += " AND peak = ?"
         params.append(peak)
@@ -270,6 +286,8 @@ async def get_news(
         "last_scan_at": meta.get("last_scan_at"),
         "last_scan_count": int(meta.get("last_scan_count", "0")),
         "configured": bool(os.getenv("PERPLEXITY_API_KEY")),
+        "days": days,
+        "limit": 150,
     }
 
 
