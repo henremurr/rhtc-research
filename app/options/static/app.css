@@ -170,3 +170,6 @@ th,td{white-space:normal;overflow-wrap:anywhere}
 
 /* Keep popup expand and close controls together at the top-right in both modal layouts. */
 .detail-modal-controls{position:sticky;top:0;z-index:20;align-self:flex-end;justify-self:end;display:flex;width:max-content;max-width:100%;margin-left:auto;margin-right:0;justify-content:flex-end}
+
+/* Keep long ticker, strike, and expiration titles clear of both phone controls. */
+@media(max-width:600px){.detail-modal>.eyebrow,.detail-modal>h2,.analysis-modal>.eyebrow,.analysis-modal>h2{box-sizing:border-box;max-width:100%;padding-right:112px}}
