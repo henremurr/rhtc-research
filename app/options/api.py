@@ -112,7 +112,7 @@ try{{const response=await fetch(base+'/auth/login',{{method:'POST',headers:{{'Co
 @app.middleware("http")
 async def require_dashboard_signin(request: Request, call_next):
     path = dashboard_local_path(request)
-    public_paths = {"/login", "/auth/login", "/auth/logout"}
+    public_paths = {"/login", "/auth/login", "/auth/logout", "/static/rhtc-signin-background.jpeg"}
     if path in public_paths:
         return await call_next(request)
 
