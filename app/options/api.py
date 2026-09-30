@@ -88,10 +88,11 @@ def render_dashboard_login_page(base_path: str, configured: bool) -> str:
     return f'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Sign in · RHTC Options</title><style>
-:root{{color-scheme:light dark;--bg:#f5f4f1;--card:#fff;--ink:#233044;--muted:#748091;--gold:#927744;--line:#dce0e4}}
-@media(prefers-color-scheme:dark){{:root{{--bg:#171c23;--card:#202833;--ink:#e7ecf2;--muted:#a4afbd;--line:#3b4654}}}}
-*{{box-sizing:border-box}}body{{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:24px}}
-.card{{width:min(420px,100%);padding:32px;border:1px solid var(--line);border-radius:14px;background:var(--card);box-shadow:0 18px 50px #00000012}}
+:root{{color-scheme:light dark;--bg:#f5f4f1;--card:#fffffff0;--ink:#233044;--muted:#748091;--gold:#927744;--line:#dce0e4;--veil:#f5f4f14d}}
+@media(prefers-color-scheme:dark){{:root{{--bg:#171c23;--card:#18202aeb;--ink:#e7ecf2;--muted:#b1bac6;--line:#526071;--veil:#08101a99}}}}
+*{{box-sizing:border-box}}body{{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg) url("{base_path}/static/rhtc-signin-background.jpeg") center/cover no-repeat;color:var(--ink);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:24px;position:relative;isolation:isolate}}
+body::before{{content:"";position:fixed;inset:0;background:var(--veil);z-index:-1}}
+.card{{width:min(420px,100%);padding:32px;border:1px solid var(--line);border-radius:14px;background:var(--card);box-shadow:0 20px 58px #00000038;backdrop-filter:blur(12px) saturate(120%);-webkit-backdrop-filter:blur(12px) saturate(120%)}}
 .brand{{color:var(--gold);font-size:12px;font-weight:700;letter-spacing:1.5px}}h1{{font-size:26px;margin:10px 0 6px}}p{{color:var(--muted);font-size:14px;line-height:1.5;margin:0 0 22px}}
 label{{display:block;font-size:13px;font-weight:600;margin-bottom:8px}}input{{width:100%;height:46px;padding:0 13px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}}
 button{{width:100%;height:46px;margin-top:14px;border:0;border-radius:8px;background:#cfb36b;color:#171717;font-weight:700;font-size:15px;cursor:pointer}}button:disabled{{opacity:.5;cursor:not-allowed}}
