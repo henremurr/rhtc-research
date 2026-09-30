@@ -174,3 +174,6 @@ th,td{white-space:normal;overflow-wrap:anywhere}
 /* Reserve room for sticky analysis-popup controls so they cannot cover the contract expiry title. */
 .analysis-modal .analysis-modal-controls{height:44px;margin-bottom:12px}
 @media(max-width:600px){.analysis-modal.is-fullscreen .analysis-modal-controls{align-self:flex-end;justify-self:end;width:max-content;margin:-6px -5px 12px auto}}
+
+/* Keep stock-quote popup controls above, not over, the ticker title. */
+.detail-modal .detail-modal-controls{height:44px;margin:0 0 12px auto}
