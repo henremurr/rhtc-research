@@ -96,14 +96,17 @@ body::before{{content:"";position:fixed;inset:0;background:var(--veil);z-index:-
 .brand{{color:var(--gold);font-size:12px;font-weight:700;letter-spacing:1.5px}}h1{{font-size:26px;margin:10px 0 6px}}p{{color:var(--muted);font-size:14px;line-height:1.5;margin:0 0 22px}}
 label{{display:block;font-size:13px;font-weight:600;margin-bottom:8px}}input{{width:100%;height:46px;padding:0 13px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}}
 button{{width:100%;height:46px;margin-top:14px;border:0;border-radius:8px;background:#cfb36b;color:#171717;font-weight:700;font-size:15px;cursor:pointer}}button:disabled{{opacity:.5;cursor:not-allowed}}
+.password-toggle{{display:flex;align-items:center;gap:10px;min-height:44px;margin:8px 0 0;cursor:pointer}}.password-toggle input{{width:20px;height:20px;margin:0;accent-color:var(--gold)}}
 #message{{min-height:22px;margin:12px 0 0;color:#b34343;font-size:13px}}.setup{{margin-top:10px;padding:11px 12px;border-radius:7px;background:#b3434312;color:#b34343;font-size:13px;line-height:1.45}}
 </style></head><body><main class="card"><div class="brand">ROCKING HORSE · TRADING CO.</div><h1>Sign in</h1><p>Sign in to open the covered-call screening dashboard.</p>
 <form id="login-form"><label for="password">Dashboard password</label><input id="password" name="password" type="password" autocomplete="current-password" required autofocus{disabled}>
+<label class="password-toggle" for="show-password"><input id="show-password" type="checkbox" aria-controls="password"{disabled}>Show password</label>
 <button id="submit" type="submit"{disabled}>Sign in</button><div id="message" role="status" aria-live="polite"></div></form>
 <div class="setup" id="setup-note">{setup_note}</div>
 </main><script>
 const base={base_path!r};const setupNote={json.dumps(bool(setup_note))};const form=document.getElementById('login-form');
 if(!setupNote)document.getElementById('setup-note').hidden=true;
+document.getElementById('show-password').addEventListener('change',event=>{{document.getElementById('password').type=event.target.checked?'text':'password'}});
 form.addEventListener('submit',async event=>{{event.preventDefault();const button=document.getElementById('submit');const message=document.getElementById('message');button.disabled=true;message.textContent='';
 try{{const response=await fetch(base+'/auth/login',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{password:document.getElementById('password').value}})}});const data=await response.json();if(!response.ok)throw Error(data.detail||'Sign-in failed.');const target=new URLSearchParams(location.search).get('next');const safeTarget=target&&target.startsWith(base+'/')&&!target.startsWith('//')?target:base+'/';location.replace(safeTarget)}}catch(error){{message.textContent=error.message;button.disabled=false;document.getElementById('password').select()}}}});
 </script></body></html>'''
