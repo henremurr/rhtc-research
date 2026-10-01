@@ -177,3 +177,22 @@ th,td{white-space:normal;overflow-wrap:anywhere}
 
 /* Keep stock-quote popup controls above, not over, the ticker title. */
 .detail-modal .detail-modal-controls{height:44px;margin:0 0 12px auto}
+
+/* Compact dashboard summary and controls into one horizontal strip. */
+.page-head{margin-bottom:12px}
+.summary-row{display:flex;align-items:stretch;gap:9px;margin:0 0 18px;min-width:0}
+.summary-row .metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;flex:1;min-width:0;margin:0}
+.summary-row .metric-card{min-width:0;min-height:70px;padding:8px 10px;display:flex;flex-direction:column;justify-content:center}
+.summary-row .metric-label{font-size:8px;letter-spacing:.45px;white-space:nowrap}
+.summary-row .metric-icon{display:none}
+.summary-row .metric-value{font-size:19px;margin:4px 0 1px;white-space:nowrap}
+.summary-row .metric-value.asof{font-size:15px;margin:4px 0 1px}
+.summary-row .metric-value small{font-size:10px}
+.summary-row .metric-foot{gap:4px;font-size:8px;white-space:nowrap;overflow:hidden}
+.summary-row .metric-foot>span{overflow:hidden;text-overflow:ellipsis}
+.summary-actions{display:flex;align-items:center;gap:7px;flex:none;white-space:nowrap}
+.summary-actions .source-pill{padding:6px 7px;font-size:8px;letter-spacing:.25px}
+.summary-actions .manage-symbols-btn,.summary-actions .refresh-btn{height:32px;padding:0 10px;font-size:10px;white-space:nowrap}
+.summary-actions .refresh-icon{font-size:14px}
+@media(max-width:1100px){.summary-row{flex-wrap:wrap}.summary-row .metric-grid{flex:1 1 100%}.summary-actions{margin-left:auto}}
+@media(max-width:600px){.summary-row .metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.summary-actions{width:100%;margin:0;flex-wrap:wrap}.summary-actions .source-pill{margin-right:auto}}
