@@ -644,7 +644,10 @@ class Tradier:
 
 @app.get("/")
 async def home():
-    return FileResponse(BASE / "templates" / "index.html")
+    return FileResponse(
+        BASE / "templates" / "index.html",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache", "Expires": "0"},
+    )
 
 
 class DashboardLoginInput(BaseModel):
