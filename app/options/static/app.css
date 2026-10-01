@@ -196,3 +196,10 @@ th,td{white-space:normal;overflow-wrap:anywhere}
 .summary-actions .refresh-icon{font-size:14px}
 @media(max-width:1100px){.summary-row{flex-wrap:wrap}.summary-row .metric-grid{flex:1 1 100%}.summary-actions{margin-left:auto}}
 @media(max-width:600px){.summary-row .metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.summary-actions{width:100%;margin:0;flex-wrap:wrap}.summary-actions .source-pill{margin-right:auto}}
+
+/* Optional quote auto-reload control; Off is the default. */
+.auto-reload-control{height:32px;display:flex;align-items:center;gap:6px;padding:0 7px;border:1px solid #e2e7eb;border-radius:4px;background:#fff;color:#687584;font:9px var(--mono);white-space:nowrap}
+.auto-reload-control select{height:24px;min-width:62px;padding:0 20px 0 6px;border:0;border-left:1px solid #e2e7eb;background:#fff;color:#405064;font:10px var(--sans);outline:none}
+.auto-reload-control:focus-within{border-color:#b9944a;box-shadow:0 0 0 2px #b9944a22}
+:root[data-theme="dark"] .auto-reload-control,:root[data-theme="dark"] .auto-reload-control select{background:#202b36;color:#d1dae4;border-color:#394654}
+@media(max-width:600px){.auto-reload-control{order:2}.summary-actions .refresh-btn{order:3}}
