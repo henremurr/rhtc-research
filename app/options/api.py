@@ -88,16 +88,15 @@ def render_dashboard_login_page(base_path: str, configured: bool) -> str:
     return f'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Sign in · RHTC Options</title><style>
-:root{{color-scheme:light dark;--bg:#f5f4f1;--card:#fffffff0;--ink:#233044;--muted:#748091;--gold:#927744;--line:#dce0e4;--veil:#f5f4f14d}}
-@media(prefers-color-scheme:dark){{:root{{--bg:#171c23;--card:#18202aeb;--ink:#e7ecf2;--muted:#b1bac6;--line:#526071;--veil:#08101a99}}}}
-*{{box-sizing:border-box}}body{{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg) url("{base_path}/static/rhtc-signin-background.jpeg?v=1") center/cover no-repeat;color:var(--ink);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:24px;position:relative;isolation:isolate}}
-body::before{{content:"";position:fixed;inset:0;background:var(--veil);z-index:-1}}
-.card{{width:min(420px,100%);padding:32px;border:1px solid var(--line);border-radius:14px;background:var(--card);box-shadow:0 20px 58px #00000038;backdrop-filter:blur(12px) saturate(120%);-webkit-backdrop-filter:blur(12px) saturate(120%)}}
+:root{{color-scheme:dark;--bg:#0c0e0f;--card:#0c0e0fee;--ink:#e7ecf2;--muted:#b1bac6;--gold:#d4b66b;--line:#526071}}
+*{{box-sizing:border-box}}body{{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:flex-start;background:#080909 url("{base_path}/static/rhtc-signin-background.jpeg?v=2") center/cover no-repeat;color:var(--ink);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:clamp(20px,7vw,120px)}}
+.card{{width:min(420px,100%);padding:32px;border:1px solid #92774499;border-radius:14px;background:var(--card);box-shadow:0 20px 58px #00000088;backdrop-filter:blur(10px) saturate(115%);-webkit-backdrop-filter:blur(10px) saturate(115%)}}
 .brand{{color:var(--gold);font-size:12px;font-weight:700;letter-spacing:1.5px}}h1{{font-size:26px;margin:10px 0 6px}}p{{color:var(--muted);font-size:14px;line-height:1.5;margin:0 0 22px}}
-label{{display:block;font-size:13px;font-weight:600;margin-bottom:8px}}input{{width:100%;height:46px;padding:0 13px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}}
+label{{display:block;font-size:13px;font-weight:600;margin-bottom:8px}}input{{width:100%;height:46px;padding:0 13px;border:1px solid var(--line);border-radius:8px;background:#171c21;color:var(--ink);font:inherit}}
 button{{width:100%;height:46px;margin-top:14px;border:0;border-radius:8px;background:#cfb36b;color:#171717;font-weight:700;font-size:15px;cursor:pointer}}button:disabled{{opacity:.5;cursor:not-allowed}}
 .password-toggle{{display:flex;align-items:center;gap:10px;min-height:44px;margin:8px 0 0;cursor:pointer}}.password-toggle input{{width:20px;height:20px;margin:0;accent-color:var(--gold)}}
-#message{{min-height:22px;margin:12px 0 0;color:#b34343;font-size:13px}}.setup{{margin-top:10px;padding:11px 12px;border-radius:7px;background:#b3434312;color:#b34343;font-size:13px;line-height:1.45}}
+#message{{min-height:22px;margin:12px 0 0;color:#ff9c91;font-size:13px}}.setup{{margin-top:10px;padding:11px 12px;border-radius:7px;background:#542b2b;color:#ffd0ca;font-size:13px;line-height:1.45}}
+@media(max-width:700px){{body{{justify-content:center;padding:18px;background-position:62% center}}.card{{padding:26px 22px}}}}
 </style></head><body><main class="card"><div class="brand">ROCKING HORSE · TRADING CO.</div><h1>Sign in</h1><p>Sign in to open the covered-call screening dashboard.</p>
 <form id="login-form"><label for="password">Dashboard password</label><input id="password" name="password" type="password" autocomplete="current-password" required autofocus{disabled}>
 <label class="password-toggle" for="show-password"><input id="show-password" type="checkbox" aria-controls="password"{disabled}>Show password</label>
