@@ -501,7 +501,7 @@ def parse_finnhub_company_overview(basic: dict[str, Any], full: dict[str, Any]) 
 
 
 class Tradier:
-    DTE_WINDOWS = ((0, 7), (8, 14), (15, 21), (22, None))
+    DTE_WINDOWS = ((0, 7), (8, 14), (15, 22), (22, 28), (29, 35), (36, 42), (37, 49), (48, 56), (57, 63), (64, 70), (70, None))
 
     def __init__(self, token: str):
         self.client = httpx.AsyncClient(
@@ -613,7 +613,7 @@ class Tradier:
         selected_windows = (
             [self.DTE_WINDOWS[only_set - 1]]
             if only_set is not None
-            else self.DTE_WINDOWS[:max(1, min(count, 4))]
+            else self.DTE_WINDOWS[:max(1, min(count, len(self.DTE_WINDOWS)))]
         )
         for minimum, maximum in selected_windows:
             label = f"{minimum}+ DTE" if maximum is None else f"{minimum}-{maximum} DTE"
@@ -752,7 +752,7 @@ async def update_watchlist(data: WatchlistUpdate):
 async def opportunities(
     peak: str = "All Peaks", q: str = "", sort: str = "income",
     limit: int = Query(default=25, ge=1, le=200),
-    expiration_set: int = Query(default=1, ge=1, le=4),
+    expiration_set: int = Query(default=1, ge=1, le=11),
     holdings_only: bool = False,
     max_last: float | None = Query(default=None, ge=0),
 ):
@@ -765,7 +765,7 @@ async def opportunities(
     ][:limit]
     token = os.getenv("TRADIER_API_TOKEN")
     if not token:
-        days = (7, 14, 21, 28)
+        days = (7, 14, 22, 28, 35, 42, 49, 56, 63, 70, 77)
         expiry = date.today() + timedelta(days=days[expiration_set - 1])
         rows = [demo_row(r["symbol"], r["peak"], expiry_override=expiry, seed_offset=expiration_set - 1) for r in selected]
         source = "demo"
@@ -879,7 +879,7 @@ async def chain(symbol: str):
         return {"symbol": symbol, "description": None, "source": "demo", "message": "Illustrative preview values; not live market data.", "rows": rows}
     provider = Tradier(token)
     try:
-        rows = await provider.option_sets(symbol, item["peak"], count=4)
+        rows = await provider.option_sets(symbol, item["peak"], count=11)
         description = next((r.get("description") for r in rows if r.get("description")), None)
         return {"symbol": symbol, "description": description, "source": data_source(), "rows": rows}
     except Exception as exc:
