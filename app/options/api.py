@@ -802,6 +802,10 @@ async def opportunities(
             key=lambda row: ((parse_number(row.get("bid")) + parse_number(row.get("ask"))) / 2) * 100,
             reverse=True,
         )
+    elif sort == "ticker_az":
+        rows.sort(key=lambda row: str(row.get("symbol") or "").upper())
+    elif sort == "ticker_za":
+        rows.sort(key=lambda row: str(row.get("symbol") or "").upper(), reverse=True)
     else:
         rows.sort(key=lambda row: parse_number(row.get(sort)), reverse=(sort != "dte"))
     return {"rows": rows, "count": len(rows), "total": len(universe), "source": source, "as_of": utc_now().isoformat()}
