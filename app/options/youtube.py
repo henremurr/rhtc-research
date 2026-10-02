@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -160,7 +161,18 @@ async def start_youtube_upload(client: httpx.AsyncClient, token: str, video_path
                 },
             )
             if response.status_code == 308:
-                offset = end + 1
+                accepted = response.headers.get("range", "")
+                if accepted:
+                    match = re.fullmatch(r"bytes=0-(\d+)", accepted)
+                    if not match:
+                        raise HTTPException(502, "YouTube returned an invalid resumable-upload range.")
+                    confirmed_offset = int(match.group(1)) + 1
+                    if confirmed_offset > end + 1:
+                        raise HTTPException(502, "YouTube acknowledged bytes beyond the current upload chunk.")
+                else:
+                    confirmed_offset = 0
+                video.seek(confirmed_offset)
+                offset = confirmed_offset
                 continue
             if response.status_code not in (200, 201):
                 try:
