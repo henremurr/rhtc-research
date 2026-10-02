@@ -275,3 +275,27 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 }
 
 .news-item-actions{flex-wrap:wrap}.news-translation{white-space:pre-wrap;margin-top:10px!important;padding:12px 14px;border-left:3px solid #c8b27c;border-radius:4px;background:#fbf9f4;color:#4e5b68!important;font-size:12px;line-height:1.7}:root[data-theme="dark"] .news-translation{background:#202a35;color:#d5dde6!important}
+
+.youtube-publish-section{display:grid;gap:10px;margin:4px 0 15px;padding:13px;border:1px solid #d8c9a7;border-radius:7px;background:#fbf9f4}
+.youtube-publish-section[hidden]{display:none}
+.youtube-publish-section h3{margin:0;color:#394657;font:700 14px var(--display)}
+.youtube-publish-fields{display:grid;grid-template-columns:2fr 1.3fr 1fr;gap:9px}
+.youtube-publish-fields label{display:grid;gap:5px;color:#718092;font:600 10px var(--sans)}
+.youtube-publish-fields input,.youtube-publish-fields select,.youtube-publish-fields textarea{box-sizing:border-box;width:100%;min-height:34px;padding:7px 9px;border:1px solid #d5dbe2;border-radius:5px;background:#fff;color:#27313c;font:11px/1.45 var(--sans)}
+.youtube-publish-fields textarea{resize:vertical;min-height:110px}
+.youtube-publish-fields .youtube-description-label{grid-column:1/-1}
+.youtube-review-label{display:flex;align-items:flex-start;gap:7px;color:#5d6978;font:11px/1.4 var(--sans)}
+.youtube-review-label input{margin:1px 0 0;accent-color:#9f844c}
+.youtube-publish-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.youtube-publish-actions button{min-height:35px;padding:7px 12px;border:1px solid #d0b779;border-radius:5px;background:#f4eedf;color:#5f4b27;font:700 11px var(--sans);cursor:pointer}
+.youtube-publish-actions button:hover{background:#eae0c8}
+.youtube-publish-actions button:disabled{opacity:.55;cursor:not-allowed}
+#youtube-publish-status{color:#748092;font:11px/1.45 var(--sans)}
+#youtube-publish-status a{color:#846b37}
+:root[data-theme="dark"] .youtube-publish-section{border-color:#655638;background:#28261f}
+:root[data-theme="dark"] .youtube-publish-section h3{color:#e0e6ed}
+:root[data-theme="dark"] .youtube-publish-fields label,:root[data-theme="dark"] .youtube-review-label{color:#aab5c2}
+:root[data-theme="dark"] .youtube-publish-fields input,:root[data-theme="dark"] .youtube-publish-fields select,:root[data-theme="dark"] .youtube-publish-fields textarea{border-color:#465260;background:#18212b;color:#e0e6ed}
+:root[data-theme="dark"] .youtube-publish-actions button{border-color:#655638;background:#302a20;color:#dfc77f}
+:root[data-theme="dark"] #youtube-publish-status{color:#aab5c2}
+@media(max-width:650px){.youtube-publish-fields{grid-template-columns:1fr}.youtube-publish-fields .youtube-description-label{grid-column:auto}}

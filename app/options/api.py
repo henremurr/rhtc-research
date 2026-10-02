@@ -23,11 +23,13 @@ from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from app.options.news import router as news_router
+from app.options.youtube import router as youtube_router
 
 BASE = Path(__file__).parent
 app = FastAPI(title="RHTC Options Dashboard", version="0.1.0")
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 app.include_router(news_router)
+app.include_router(youtube_router)
 
 DASHBOARD_PASSWORD_ENV = "RHTC_DASHBOARD_PASSWORD"
 DASHBOARD_SESSION_COOKIE = "rhtc_dashboard_session"

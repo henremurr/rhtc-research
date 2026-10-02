@@ -62,3 +62,14 @@ on your Railway domain to download the report.
 ## Security
 
 Never place API keys in GitHub. Keep them only in Railway Variables.
+
+
+## Direct YouTube publishing
+The RHTC news-analysis popup can turn its reviewed MP3 and selected series artwork into an MP4, then upload it through the YouTube Data API. The user must choose a visibility and confirm that the audio, title, description, and artwork have been reviewed. The default visibility is private.
+
+For Railway, add these secrets to the service Variables:
+- `YOUTUBE_CLIENT_ID`
+- `YOUTUBE_CLIENT_SECRET`
+- `YOUTUBE_REFRESH_TOKEN`
+
+The refresh token must be authorized for the YouTube upload scope and associated with the intended Rocking Horse Trading Company channel. The Google Cloud project must have YouTube Data API v3 enabled. New or unverified API projects may be restricted to private uploads until Google completes its compliance audit. The upload endpoint is protected by the existing dashboard sign-in. MP4 files are temporary and are deleted after the upload completes.
