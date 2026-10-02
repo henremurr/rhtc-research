@@ -249,6 +249,9 @@ th,td{white-space:normal;overflow-wrap:anywhere}
 @media(min-width:901px){
   .screener-table{table-layout:fixed}
   .screener-table th,.screener-table td{padding-left:7px;padding-right:7px;white-space:nowrap;overflow-wrap:normal}
+  .screener-table td{height:39px;padding-top:3px;padding-bottom:3px}
+  .screener-table .peak-chip{padding-top:3px;padding-bottom:3px}
+  .screener-table .yield-pill{padding-top:4px;padding-bottom:4px}
   .screener-table th{letter-spacing:.5px}
   .screener-table th:nth-child(1){width:7%}
   .screener-table th:nth-child(2){width:7%}
