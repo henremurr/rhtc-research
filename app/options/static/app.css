@@ -220,6 +220,9 @@ th,td{white-space:normal;overflow-wrap:anywhere}
 .view-icon-button:hover{border-color:#cdbb91;background:#f5f1e7;color:#80652e}
 .view-icon-button.active{border-color:#b9944a;background:#b9944a;color:#fff}
 .view-icon-button.active .nav-icon{color:inherit}
+.screener-logo-button{padding:2px;background:#101216}
+.screener-logo{display:block;width:25px;height:25px;object-fit:contain;border-radius:50%}
+.view-icon-button.screener-logo-button.active{background:#101216;border-color:#b9944a}
 .options-toolbar-filters{min-width:0;flex:1;justify-content:flex-end}
 :root[data-theme="dark"] .view-icon-button{border-color:#465260;background:#202a35;color:#cfd8e2}
 :root[data-theme="dark"] .view-icon-button:hover{border-color:#b89a57;background:#2b3743;color:#f0d78d}
