@@ -245,10 +245,13 @@ th,td{white-space:normal;overflow-wrap:anywhere}
 .brand-mark img{display:block;width:100%;height:100%;object-fit:contain;object-position:center;border-radius:50%}
 
 /* Use the full dashboard width and give dense screener data purpose-built columns. */
+.shell,.main{max-width:100%;overflow-x:hidden}
+html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 .content{max-width:none;padding-left:18px;padding-right:18px}
 @media(min-width:901px){
+  .table-wrap{overflow-x:hidden;overscroll-behavior-x:none;touch-action:pan-y}
   .screener-table{table-layout:fixed}
-  .screener-table th,.screener-table td{padding-left:7px;padding-right:7px;white-space:nowrap;overflow-wrap:normal}
+  .screener-table th,.screener-table td{min-width:0;padding-left:7px;padding-right:7px;white-space:nowrap;overflow:hidden;overflow-wrap:normal;text-overflow:clip}
   .screener-table td{height:39px;padding-top:3px;padding-bottom:3px}
   .screener-table .peak-chip{padding-top:3px;padding-bottom:3px}
   .screener-table .yield-pill{padding-top:4px;padding-bottom:4px}
