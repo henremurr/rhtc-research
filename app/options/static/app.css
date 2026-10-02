@@ -210,6 +210,7 @@ th,td{white-space:normal;overflow-wrap:anywhere}
 .topbar-metrics .metric-foot{gap:3px;font-size:7px;white-space:nowrap;overflow:hidden}
 .topbar-metrics .metric-foot>span{overflow:hidden;text-overflow:ellipsis}
 .summary-controls-row{justify-content:flex-end;margin-bottom:12px}
+.table-header>.table-controls{margin-left:auto}
 @media(max-width:1180px){.topbar{gap:9px;padding-left:14px;padding-right:14px}.topbar-metrics{gap:4px}.topbar-metrics .metric-card{padding-left:6px;padding-right:6px}.topbar-metrics .metric-foot{display:none}.topbar-metrics .metric-value{margin-bottom:0}}
 @media(max-width:760px){.topbar{height:auto;min-height:52px;flex-wrap:wrap;padding-top:8px;padding-bottom:8px}.topbar-metrics{order:3;flex-basis:100%;max-width:none}.topbar-metrics .metric-card{min-height:54px}.topbar>.top-actions{margin-left:auto}}
 
