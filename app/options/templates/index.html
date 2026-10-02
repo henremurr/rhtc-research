@@ -5,7 +5,7 @@
   <title>RHTC Options Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/options/static/app.css?v=rhtc-large-engine-title-1">
+  <link rel="stylesheet" href="/options/static/app.css?v=rhtc-compact-screener-columns-1">
 </head>
 <body>
 <div class="shell">
@@ -21,7 +21,7 @@
       
       <section class="content-card">
         <div class="chain-pager main-pager" id="main-pager"><button id="main-prev" type="button" aria-label="Previous expiration set">‹ Previous</button><span id="main-page" aria-live="polite">0–7 DTE</span><button id="main-next" type="button" aria-label="Next expiration set">Next ›</button></div>
-        <div class="table-wrap"><table><thead><tr><th>TICKER</th><th>PEAK</th><th>AVG SCORE / 5</th><th>LAST</th><th>CHG $</th><th>CHG %</th><th>CALL CONTRACT</th><th>QTY</th><th>BID / ASK</th><th>BID / ASK YIELD</th><th title="Estimated premium: bid/ask midpoint × 100 × quantity">INCOME</th><th>OI / VOL</th></tr></thead><tbody id="rows"><tr><td colspan="12" class="loading">Loading watchlist…</td></tr></table></div>
+        <div class="table-wrap"><table class="screener-table"><thead><tr><th>TICKER</th><th>PEAK</th><th>AVG SCORE / 5</th><th>LAST</th><th>CHG $</th><th>CHG %</th><th>CALL CONTRACT</th><th>QTY</th><th>BID / ASK</th><th>BID / ASK YIELD</th><th title="Estimated premium: bid/ask midpoint × 100 × quantity">INCOME</th><th>OI / VOL</th></tr></thead><tbody id="rows"><tr><td colspan="12" class="loading">Loading watchlist…</td></tr></table></div>
         <div class="table-footer"><span id="showing">—</span><span>Yield uses bid premium ÷ underlying share price. Review quote freshness and liquidity before acting.</span></div>
       </section>
       <section class="content-card summary-card"><div class="summary-heading"><h2>AI research note</h2><span class="summary-label" id="ai-summary-mode">SUMMARY</span></div><p class="summary-text" id="ai-summary-text">Waiting for the first refresh.</p></section>
