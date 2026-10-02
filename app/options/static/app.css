@@ -212,7 +212,7 @@ th,td{white-space:normal;overflow-wrap:anywhere}
 .topbar-metrics .metric-foot>span{overflow:hidden;text-overflow:ellipsis}
 .summary-controls-row{margin-bottom:12px}
 .summary-controls-row .summary-actions{width:100%}
-.action-row-title{margin-right:auto;white-space:nowrap}
+.action-row-title{margin:0 auto 0 0;white-space:nowrap;font-size:18px;font-weight:700;line-height:32px;letter-spacing:1.8px}
 .table-header>.table-controls{margin-left:auto}
 .workspace-toolbar{display:flex;align-items:center;gap:10px;margin:0 0 12px}
 .view-switcher{display:flex;align-items:center;gap:5px;flex:none}
@@ -237,7 +237,7 @@ th,td{white-space:normal;overflow-wrap:anywhere}
 .auto-reload-control select{height:24px;min-width:62px;padding:0 20px 0 6px;border:0;border-left:1px solid #e2e7eb;background:#fff;color:#405064;font:10px var(--sans);outline:none}
 .auto-reload-control:focus-within{border-color:#b9944a;box-shadow:0 0 0 2px #b9944a22}
 :root[data-theme="dark"] .auto-reload-control,:root[data-theme="dark"] .auto-reload-control select{background:#202b36;color:#d1dae4;border-color:#394654}
-@media(max-width:600px){.action-row-title{flex-basis:100%}.auto-reload-control{order:2}.summary-actions .refresh-btn{order:3}}
+@media(max-width:600px){.action-row-title{flex-basis:100%;font-size:14px;line-height:26px;letter-spacing:1.3px}.auto-reload-control{order:2}.summary-actions .refresh-btn{order:3}}
 
 /* Display the RHTC seal in the existing 34px sidebar logo footprint. */
 .brand-mark{overflow:hidden;background:transparent;padding:0;border:0}
