@@ -299,3 +299,8 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 :root[data-theme="dark"] .youtube-publish-actions button{border-color:#655638;background:#302a20;color:#dfc77f}
 :root[data-theme="dark"] #youtube-publish-status{color:#aab5c2}
 @media(max-width:650px){.youtube-publish-fields{grid-template-columns:1fr}.youtube-publish-fields .youtube-description-label{grid-column:auto}}
+
+/* Taller podcast and YouTube content areas */
+#analysis-podcast-transcript{height:min(48vh,520px);min-height:340px;max-height:none}
+.youtube-publish-fields textarea{height:min(34vh,360px);min-height:260px}
+@media(max-width:600px){#analysis-podcast-transcript{height:42vh;min-height:240px;max-height:none}.youtube-publish-fields textarea{height:min(38vh,360px);min-height:240px}}
