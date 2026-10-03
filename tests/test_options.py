@@ -582,7 +582,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual(holdings.json()["rows"][0]["symbol"], "MU")
         self.assertEqual(
             reloaded.json()["rows"],
-            [{**row, "call_score": None, "analysis_count": 0, "stock_score": None, "stock_rating_label": None, "stock_score": None, "stock_rating_label": None} for row in symbols],
+            [{**row, "call_score": None, "analysis_count": 0, "stock_score": None, "stock_rating_label": None} for row in symbols],
         )
         self.assertIsNone(by_symbol["MU"]["call_score"])
         self.assertEqual(by_symbol["MU"]["analysis_count"], 0)
@@ -600,12 +600,12 @@ class OptionsRoutesTest(unittest.TestCase):
             connection.execute("INSERT INTO app_state VALUES ('watchlist_seeded', '1')")
             connection.execute("INSERT INTO app_state VALUES ('legacy_import_open', '0')")
         old_rows = self.request("GET", "/options/api/watchlist").json()["rows"]
-        self.assertEqual(old_rows, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None, "call_score": None, "analysis_count": 0, "stock_score": None, "stock_rating_label": None, "stock_score": None, "stock_rating_label": None}])
+        self.assertEqual(old_rows, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None, "call_score": None, "analysis_count": 0, "stock_score": None, "stock_rating_label": None}])
         with patch.dict(os.environ, {"RHTC_WATCHLIST_ADMIN_TOKEN": ""}, clear=False):
             saved = self.request("PUT", "/options/api/watchlist", json={"rows": [{"symbol": "MU", "peak": "AI/I", "share_price": "", "quantity": ""}]})
             reloaded = self.request("GET", "/options/api/watchlist").json()["rows"]
         self.assertEqual(saved.status_code, 200)
-        self.assertEqual(reloaded, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None, "call_score": None, "analysis_count": 0, "stock_score": None, "stock_rating_label": None, "stock_score": None, "stock_rating_label": None}])
+        self.assertEqual(reloaded, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None, "call_score": None, "analysis_count": 0, "stock_score": None, "stock_rating_label": None}])
 
     def test_stock_rating_is_persisted_and_returned_with_opportunity_rows(self):
         with patch.dict(os.environ, {"RHTC_DATA_DIR": self.data_dir.name}, clear=False):
@@ -1255,7 +1255,7 @@ if __name__ == "__main__":
         self.assertEqual(holdings.json()["rows"][0]["symbol"], "MU")
         self.assertEqual(
             reloaded.json()["rows"],
-            [{**row, "call_score": None, "analysis_count": 0, "stock_score": None, "stock_rating_label": None, "stock_score": None, "stock_rating_label": None} for row in symbols],
+            [{**row, "call_score": None, "analysis_count": 0, "stock_score": None, "stock_rating_label": None} for row in symbols],
         )
         self.assertIsNone(by_symbol["MU"]["call_score"])
         self.assertEqual(by_symbol["MU"]["analysis_count"], 0)
@@ -1273,12 +1273,12 @@ if __name__ == "__main__":
             connection.execute("INSERT INTO app_state VALUES ('watchlist_seeded', '1')")
             connection.execute("INSERT INTO app_state VALUES ('legacy_import_open', '0')")
         old_rows = self.request("GET", "/options/api/watchlist").json()["rows"]
-        self.assertEqual(old_rows, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None, "call_score": None, "analysis_count": 0, "stock_score": None, "stock_rating_label": None, "stock_score": None, "stock_rating_label": None}])
+        self.assertEqual(old_rows, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None, "call_score": None, "analysis_count": 0, "stock_score": None, "stock_rating_label": None}])
         with patch.dict(os.environ, {"RHTC_WATCHLIST_ADMIN_TOKEN": ""}, clear=False):
             saved = self.request("PUT", "/options/api/watchlist", json={"rows": [{"symbol": "MU", "peak": "AI/I", "share_price": "", "quantity": ""}]})
             reloaded = self.request("GET", "/options/api/watchlist").json()["rows"]
         self.assertEqual(saved.status_code, 200)
-        self.assertEqual(reloaded, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None, "call_score": None, "analysis_count": 0, "stock_score": None, "stock_rating_label": None, "stock_score": None, "stock_rating_label": None}])
+        self.assertEqual(reloaded, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None, "call_score": None, "analysis_count": 0, "stock_score": None, "stock_rating_label": None}])
 
     def test_custom_symbol_list_rejects_duplicate_or_invalid_peaks(self):
         duplicate = [{"symbol": "MU", "peak": "AI/I"}, {"symbol": "MU", "peak": "Other"}]
