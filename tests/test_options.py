@@ -175,7 +175,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn("window.hideSymbolAnalysis=()=>{stopAnalysisSpeech();", script)
         self.assertIn("description.textContent=state.chainDescription", script)
         self.assertNotIn('title="View chain"', script)
-        for label in ('Ticker', 'Peak', 'Avg score / 5', 'Last', 'Change $', 'Change %', 'Cost', 'Call contract', 'Qty', 'Bid / ask', 'Bid / ask yield', 'Income', 'OI / Vol'):
+        for label in ('Ticker', 'Peak', 'Call score', 'Last', 'Change $', 'Change %', 'Cost', 'Call contract', 'Qty', 'Bid / ask', 'Bid / ask yield', 'Income', 'OI / Vol'):
             self.assertIn(f'data-label="{label}"', script)
         self.assertIn('function quantityForPrice(price)', script)
         self.assertIn('Math.trunc(ceiling/last)', script)
@@ -510,11 +510,11 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual(saved.status_code, 200)
         self.assertEqual(first.json()["total_score"], 4)
         self.assertEqual(second.json()["total_score"], 2)
-        self.assertEqual(second.json()["average_total_score"], 3)
+        self.assertEqual(second.json()["call_score"], 3)
         self.assertEqual(second.json()["analysis_count"], 2)
-        self.assertEqual(watchlist[0]["average_total_score"], 3)
+        self.assertEqual(watchlist[0]["call_score"], 3)
         self.assertEqual(watchlist[0]["analysis_count"], 2)
-        self.assertEqual(opportunities[0]["average_total_score"], 3)
+        self.assertEqual(opportunities[0]["call_score"], 3)
 
     def test_symbol_analysis_empty_model_output_returns_screen_verdict(self):
         class EmptyResponses:
@@ -579,9 +579,9 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual(holdings.json()["rows"][0]["symbol"], "MU")
         self.assertEqual(
             reloaded.json()["rows"],
-            [{**row, "average_total_score": None, "analysis_count": 0} for row in symbols],
+            [{**row, "call_score": None, "analysis_count": 0} for row in symbols],
         )
-        self.assertIsNone(by_symbol["MU"]["average_total_score"])
+        self.assertIsNone(by_symbol["MU"]["call_score"])
         self.assertEqual(by_symbol["MU"]["analysis_count"], 0)
         self.assertFalse(reloaded.json()["migration_open"])
         self.assertTrue(reloaded.json()["editing_enabled"])
@@ -597,12 +597,34 @@ class OptionsRoutesTest(unittest.TestCase):
             connection.execute("INSERT INTO app_state VALUES ('watchlist_seeded', '1')")
             connection.execute("INSERT INTO app_state VALUES ('legacy_import_open', '0')")
         old_rows = self.request("GET", "/options/api/watchlist").json()["rows"]
-        self.assertEqual(old_rows, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None, "average_total_score": None, "analysis_count": 0}])
+        self.assertEqual(old_rows, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None, "call_score": None, "analysis_count": 0}])
         with patch.dict(os.environ, {"RHTC_WATCHLIST_ADMIN_TOKEN": ""}, clear=False):
             saved = self.request("PUT", "/options/api/watchlist", json={"rows": [{"symbol": "MU", "peak": "AI/I", "share_price": "", "quantity": ""}]})
             reloaded = self.request("GET", "/options/api/watchlist").json()["rows"]
         self.assertEqual(saved.status_code, 200)
-        self.assertEqual(reloaded, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None, "average_total_score": None, "analysis_count": 0}])
+        self.assertEqual(reloaded, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None, "call_score": None, "analysis_count": 0}])
+
+    def test_call_score_migrates_legacy_average_total_score_database_column(self):
+        db_path = os.path.join(self.data_dir.name, "rhtc_symbols.sqlite3")
+        with sqlite3.connect(db_path) as connection:
+            connection.execute(
+                "CREATE TABLE symbols (position INTEGER PRIMARY KEY, symbol TEXT NOT NULL UNIQUE, peak TEXT NOT NULL, "
+                "share_price REAL, quantity REAL, average_total_score REAL, analysis_count INTEGER NOT NULL DEFAULT 0)"
+            )
+            connection.execute(
+                "INSERT INTO symbols(position, symbol, peak, average_total_score, analysis_count) VALUES (0, 'MU', 'AI/I', 3.75, 4)"
+            )
+            connection.execute("CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            connection.execute("INSERT INTO app_state VALUES ('watchlist_seeded', '1')")
+            connection.execute("INSERT INTO app_state VALUES ('legacy_import_open', '0')")
+        response = self.request("GET", "/options/api/watchlist")
+        self.assertEqual(response.status_code, 200)
+        row = response.json()["rows"][0]
+        self.assertEqual(row["call_score"], 3.75)
+        self.assertEqual(row["analysis_count"], 4)
+        with sqlite3.connect(db_path) as connection:
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(symbols)")}
+        self.assertIn("call_score", columns)
 
     def test_custom_symbol_list_rejects_duplicate_or_invalid_peaks(self):
         duplicate = [{"symbol": "MU", "peak": "AI/I"}, {"symbol": "MU", "peak": "Other"}]
@@ -1151,11 +1173,11 @@ if __name__ == "__main__":
         self.assertEqual(saved.status_code, 200)
         self.assertEqual(first.json()["total_score"], 4)
         self.assertEqual(second.json()["total_score"], 2)
-        self.assertEqual(second.json()["average_total_score"], 3)
+        self.assertEqual(second.json()["call_score"], 3)
         self.assertEqual(second.json()["analysis_count"], 2)
-        self.assertEqual(watchlist[0]["average_total_score"], 3)
+        self.assertEqual(watchlist[0]["call_score"], 3)
         self.assertEqual(watchlist[0]["analysis_count"], 2)
-        self.assertEqual(opportunities[0]["average_total_score"], 3)
+        self.assertEqual(opportunities[0]["call_score"], 3)
 
     def test_symbol_analysis_empty_model_output_returns_screen_verdict(self):
         class EmptyResponses:
@@ -1220,9 +1242,9 @@ if __name__ == "__main__":
         self.assertEqual(holdings.json()["rows"][0]["symbol"], "MU")
         self.assertEqual(
             reloaded.json()["rows"],
-            [{**row, "average_total_score": None, "analysis_count": 0} for row in symbols],
+            [{**row, "call_score": None, "analysis_count": 0} for row in symbols],
         )
-        self.assertIsNone(by_symbol["MU"]["average_total_score"])
+        self.assertIsNone(by_symbol["MU"]["call_score"])
         self.assertEqual(by_symbol["MU"]["analysis_count"], 0)
         self.assertFalse(reloaded.json()["migration_open"])
         self.assertTrue(reloaded.json()["editing_enabled"])
@@ -1238,12 +1260,12 @@ if __name__ == "__main__":
             connection.execute("INSERT INTO app_state VALUES ('watchlist_seeded', '1')")
             connection.execute("INSERT INTO app_state VALUES ('legacy_import_open', '0')")
         old_rows = self.request("GET", "/options/api/watchlist").json()["rows"]
-        self.assertEqual(old_rows, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None, "average_total_score": None, "analysis_count": 0}])
+        self.assertEqual(old_rows, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None, "call_score": None, "analysis_count": 0}])
         with patch.dict(os.environ, {"RHTC_WATCHLIST_ADMIN_TOKEN": ""}, clear=False):
             saved = self.request("PUT", "/options/api/watchlist", json={"rows": [{"symbol": "MU", "peak": "AI/I", "share_price": "", "quantity": ""}]})
             reloaded = self.request("GET", "/options/api/watchlist").json()["rows"]
         self.assertEqual(saved.status_code, 200)
-        self.assertEqual(reloaded, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None, "average_total_score": None, "analysis_count": 0}])
+        self.assertEqual(reloaded, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None, "call_score": None, "analysis_count": 0}])
 
     def test_custom_symbol_list_rejects_duplicate_or_invalid_peaks(self):
         duplicate = [{"symbol": "MU", "peak": "AI/I"}, {"symbol": "MU", "peak": "Other"}]
