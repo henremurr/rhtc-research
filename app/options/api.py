@@ -165,7 +165,7 @@ def connect_watchlist_db() -> sqlite3.Connection:
     connection = sqlite3.connect(watchlist_db_path(), timeout=15)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA journal_mode=WAL")
-    connection.execute("CREATE TABLE IF NOT EXISTS symbols (position INTEGER PRIMARY KEY, symbol TEXT NOT NULL UNIQUE, peak TEXT NOT NULL, share_price REAL, quantity REAL, call_score REAL, analysis_count INTEGER NOT NULL DEFAULT 0)")
+    connection.execute("CREATE TABLE IF NOT EXISTS symbols (position INTEGER PRIMARY KEY, symbol TEXT NOT NULL UNIQUE, peak TEXT NOT NULL, share_price REAL, quantity REAL, call_score REAL, analysis_count INTEGER NOT NULL DEFAULT 0, stock_score INTEGER, stock_rating_label TEXT)")
     columns = {row["name"] for row in connection.execute("PRAGMA table_info(symbols)")}
     if "share_price" not in columns:
         connection.execute("ALTER TABLE symbols ADD COLUMN share_price REAL")
@@ -180,6 +180,10 @@ def connect_watchlist_db() -> sqlite3.Connection:
         connection.execute("UPDATE symbols SET call_score = average_total_score WHERE call_score IS NULL AND average_total_score IS NOT NULL")
     if "analysis_count" not in columns:
         connection.execute("ALTER TABLE symbols ADD COLUMN analysis_count INTEGER NOT NULL DEFAULT 0")
+    if "stock_score" not in columns:
+        connection.execute("ALTER TABLE symbols ADD COLUMN stock_score INTEGER")
+    if "stock_rating_label" not in columns:
+        connection.execute("ALTER TABLE symbols ADD COLUMN stock_rating_label TEXT")
     connection.execute("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
     connection.execute("INSERT OR IGNORE INTO app_state(key, value) VALUES ('watchlist_seeded', '0')")
     seeded = connection.execute("SELECT value FROM app_state WHERE key = 'watchlist_seeded'").fetchone()
@@ -193,7 +197,7 @@ def connect_watchlist_db() -> sqlite3.Connection:
 
 def read_watchlist() -> list[dict[str, Any]]:
     with closing(connect_watchlist_db()) as connection:
-        return [dict(row) for row in connection.execute("SELECT symbol, peak, share_price, quantity, call_score, analysis_count FROM symbols ORDER BY position")]
+        return [dict(row) for row in connection.execute("SELECT symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label FROM symbols ORDER BY position")]
 
 
 def extract_analysis_total_score(analysis: str) -> int | None:
@@ -231,6 +235,18 @@ def record_call_score(symbol: str, analysis: str) -> tuple[int | None, float | N
         )
         connection.commit()
         return total_score, average, count
+
+
+def record_stock_rating(symbol: str, rating: int, rating_label: str) -> bool:
+    if rating not in {1, 2, 3, 4, 5} or not rating_label:
+        return False
+    with closing(connect_watchlist_db()) as connection:
+        cursor = connection.execute(
+            "UPDATE symbols SET stock_score = ?, stock_rating_label = ? WHERE symbol = ?",
+            (rating, rating_label, symbol),
+        )
+        connection.commit()
+        return cursor.rowcount > 0
 
 
 def optional_nonnegative_number(item: dict[str, Any], field: str) -> int | float | None:
@@ -283,16 +299,16 @@ def watchlist_storage_ready() -> bool:
 def replace_watchlist(rows: list[dict[str, Any]]) -> None:
     with closing(connect_watchlist_db()) as connection:
         scores = {
-            row["symbol"]: (row["call_score"], row["analysis_count"])
-            for row in connection.execute("SELECT symbol, call_score, analysis_count FROM symbols")
+            row["symbol"]: (row["call_score"], row["analysis_count"], row["stock_score"], row["stock_rating_label"])
+            for row in connection.execute("SELECT symbol, call_score, analysis_count, stock_score, stock_rating_label FROM symbols")
         }
         connection.execute("DELETE FROM symbols")
         connection.executemany(
-            "INSERT INTO symbols(position, symbol, peak, share_price, quantity, call_score, analysis_count) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO symbols(position, symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
                     i, row["symbol"], row["peak"], row["share_price"], row["quantity"],
-                    *scores.get(row["symbol"], (None, 0)),
+                    *scores.get(row["symbol"], (None, 0, None, None)),
                 )
                 for i, row in enumerate(rows)
             ],
@@ -795,6 +811,8 @@ async def opportunities(
         row["share_price"] = holding.get("share_price")
         row["quantity"] = holding.get("quantity")
         row["call_score"] = holding.get("call_score")
+        row["stock_score"] = holding.get("stock_score")
+        row["stock_rating_label"] = holding.get("stock_rating_label")
         row["coverage_status"] = "Needs review" if row.get("open_interest", 0) < 25 else "Liquid enough to review"
     if max_last is not None:
         rows = [
@@ -1117,6 +1135,8 @@ async def analyze_stock(data: StockAnalysisInput):
     )
     rating = int(rating_match.group(1)) if rating_match else None
     rating_label = rating_match.group(2).title() if rating_match else None
+    if rating is not None and rating_label:
+        record_stock_rating(symbol, rating, rating_label)
     summary_match = re.search(
         r"(?is)^##\s*Summary and rating\s*\n(.*?)(?=\n##\s*Detailed analysis\b)",
         analysis,
