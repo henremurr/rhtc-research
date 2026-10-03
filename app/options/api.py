@@ -784,7 +784,7 @@ async def opportunities(
         r for r in universe
         if (peak == "All Peaks" or r["peak"] == peak)
         and q.upper() in r["symbol"]
-        and (not holdings_only or (r.get("share_price") is not None and r.get("quantity") is not None))
+        and (not holdings_only or (r.get("share_price") is not None or r.get("quantity") is not None))
     ][:limit]
     token = os.getenv("TRADIER_API_TOKEN")
     if not token:
