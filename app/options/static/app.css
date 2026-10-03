@@ -343,3 +343,11 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 .screener-table .income-value.income-high{color:#58d68d}
 .screener-table .income-value.income-low{color:#ff6b6b}
 .screener-table .income-value.income-neutral{color:#fff}
+
+/* Put the dashboard icons and title on their own row above the filters. */
+.workspace-toolbar{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;align-items:start}
+.workspace-toolbar-heading{display:flex;align-items:center;gap:14px;min-height:34px;min-width:0}
+.workspace-toolbar-heading .action-row-title{margin:0;flex:0 1 auto;min-width:0}
+.options-toolbar-filters{width:100%;flex:none;justify-content:flex-start}
+@media(max-width:760px){.workspace-toolbar{display:grid;grid-template-columns:minmax(0,1fr);align-items:start}.workspace-toolbar-heading{width:100%}.options-toolbar-filters{flex-basis:auto;width:100%}}
+@media(max-width:600px){.workspace-toolbar-heading .action-row-title{font-size:14px;line-height:26px;letter-spacing:1.3px;flex-basis:auto}}
