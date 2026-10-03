@@ -330,3 +330,7 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 
 .stock-score-pill{display:inline-flex;align-items:center;padding:3px 7px;border:1px solid;border-radius:999px;font:700 10px/1.2 var(--sans);white-space:nowrap}
 .rhtc-score-pill{display:inline-flex;align-items:center;padding:3px 7px;border:1px solid;border-radius:999px;font:700 10px/1.2 var(--mono);white-space:nowrap}.rhtc-score-low{color:#b42318;background:#fee4e2;border-color:#fecdca}.rhtc-score-high{color:#067647;background:#d1fadf;border-color:#a6f4c5}:root[data-theme="dark"] .rhtc-score-low{color:#ffb4b4;background:#4a2427;border-color:#773b3f}:root[data-theme="dark"] .rhtc-score-high{color:#8ae6ae;background:#17382b;border-color:#2c694c}
+
+/* Keep option contracts and yields visually neutral in the compact screener. */
+.screener-table .contract b{font-weight:400}
+.screener-table .yield-pill,.screener-table .yield-pill.high{background:transparent;color:inherit;font-weight:400}
