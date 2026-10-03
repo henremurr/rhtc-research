@@ -351,3 +351,9 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 .options-toolbar-filters{width:100%;flex:none;justify-content:flex-start}
 @media(max-width:760px){.workspace-toolbar{display:grid;grid-template-columns:minmax(0,1fr);align-items:start}.workspace-toolbar-heading{width:100%}.options-toolbar-filters{flex-basis:auto;width:100%}}
 @media(max-width:600px){.workspace-toolbar-heading .action-row-title{font-size:14px;line-height:26px;letter-spacing:1.3px;flex-basis:auto}}
+
+/* Keep all dashboard controls together with the icons and title in the top toolbar row. */
+.workspace-toolbar-heading{flex-wrap:wrap;column-gap:14px;row-gap:8px}
+.workspace-toolbar-heading .summary-actions{display:flex;align-items:center;gap:7px;flex:0 1 auto;max-width:100%;margin:0;justify-content:flex-start;white-space:nowrap}
+.workspace-toolbar-heading .summary-actions .source-pill{margin-right:0}
+@media(max-width:760px){.workspace-toolbar-heading{align-items:flex-start}.workspace-toolbar-heading .summary-actions{flex:1 1 100%;margin:0;justify-content:flex-start}}
