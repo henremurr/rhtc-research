@@ -337,3 +337,6 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 /* The stock quote modal is a two-column grid; give analysis the full row. */
 .detail-modal>.stock-analysis-actions,.detail-modal>#stock-analysis-results{grid-column:1/-1;width:100%;min-width:0}
 .detail-modal>#stock-analysis-results .stock-analysis-summary,.detail-modal>#stock-analysis-results .stock-analysis-details{min-width:0}
+
+
+.stock-score-pill{display:inline-flex;align-items:center;padding:3px 7px;border:1px solid;border-radius:999px;font:700 10px/1.2 var(--sans);white-space:nowrap}
