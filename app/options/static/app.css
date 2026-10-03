@@ -251,44 +251,17 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 .content{max-width:none;padding-left:18px;padding-right:18px}
 @media(min-width:901px){
   .table-wrap{overflow-x:auto;overscroll-behavior-x:contain;touch-action:pan-x pan-y}
-  .screener-table{table-layout:fixed;min-width:1450px;width:100%}
-  .screener-table th,.screener-table td{min-width:0;padding-left:9px;padding-right:9px;white-space:nowrap;overflow:hidden;overflow-wrap:normal;text-overflow:clip}
-  .screener-table td{height:39px;padding-top:3px;padding-bottom:3px}
-  .screener-table .peak-chip{padding-top:3px;padding-bottom:3px}
-  .screener-table .yield-pill{padding-top:4px;padding-bottom:4px}
-  .screener-table th{letter-spacing:.5px}
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  .screener-table th:nth-child(1){width:6%}
-  .screener-table th:nth-child(2){width:6%}
-  .screener-table th:nth-child(3){width:7%}
-  .screener-table th:nth-child(4){width:5.5%}
-  .screener-table th:nth-child(5){width:6%}
-  .screener-table th:nth-child(6){width:6%}
-  .screener-table th:nth-child(7){width:5%}
-  .screener-table th:nth-child(8){width:5%}
-  .screener-table th:nth-child(9){width:11%}
-  .screener-table th:nth-child(10){width:4%}
-  .screener-table th:nth-child(11){width:4%}
-  .screener-table th:nth-child(12){width:8%}
-  .screener-table th:nth-child(13){width:8%}
-  .screener-table th:nth-child(14){width:8%}
-  .screener-table th:nth-child(15){width:5.5%}
-  .screener-table th:nth-child(16){width:5%}
+  .screener-table{table-layout:auto;min-width:0;width:100%}
+  .screener-table th,.screener-table td{min-width:0;padding-left:3px;padding-right:3px;white-space:nowrap;overflow:visible;overflow-wrap:normal;text-overflow:initial}
+  .screener-table th{font-size:7px;letter-spacing:.2px}
+  .screener-table td{height:36px;padding-top:2px;padding-bottom:2px;font-size:8px}
+  .screener-table .ticker{gap:3px}
+  .screener-table .stock-score-pill,.screener-table .call-score-pill,.screener-table .rhtc-score-pill{font-size:8px;padding:2px 3px}
+  .screener-table .peak-chip{gap:3px;padding:3px 4px;font-size:8px}
+  .screener-table .number,.screener-table .quote,.screener-table .contract b,.screener-table .oi,.screener-table .quote-volume,.screener-table .yield-pill{font-size:8px}
+  .screener-table .yield-pill{padding:3px 3px}
   .screener-table .contract b,.screener-table .contract small{white-space:nowrap}
-  .screener-table .quote-volume{display:inline;font:10px var(--mono);color:inherit;margin:0}
+  .screener-table .quote-volume{display:inline;color:inherit;margin:0}
 }
 
 .news-item-actions{flex-wrap:wrap}.news-translation{white-space:pre-wrap;margin-top:10px!important;padding:12px 14px;border-left:3px solid #c8b27c;border-radius:4px;background:#fbf9f4;color:#4e5b68!important;font-size:12px;line-height:1.7}:root[data-theme="dark"] .news-translation{background:#202a35;color:#d5dde6!important}
