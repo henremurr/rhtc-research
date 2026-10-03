@@ -899,6 +899,11 @@ class SummaryInput(BaseModel):
     rows: list[dict[str, Any]] = Field(default_factory=list, max_length=200)
 
 
+class StockAnalysisInput(BaseModel):
+    symbol: str = Field(min_length=1, max_length=10)
+    quote: dict[str, Any] = Field(default_factory=dict)
+
+
 class SymbolAnalysisInput(BaseModel):
     symbol: str = Field(min_length=1, max_length=10)
     screen: dict[str, Any] = Field(default_factory=dict)
@@ -1021,6 +1026,106 @@ async def summarize(data: SummaryInput):
         return {"mode": "openai", "summary": text}
     except Exception:
         return {"mode": "rules", "summary": basic_summary(rows, data.source)}
+
+
+@app.post("/api/stock-analysis")
+async def analyze_stock(data: StockAnalysisInput):
+    symbol = data.symbol.strip().upper()
+    if not SYMBOL_PATTERN.fullmatch(symbol):
+        raise HTTPException(400, "Enter a valid ticker symbol.")
+    key = os.getenv("OPENAI_API_KEY")
+    if not key:
+        raise HTTPException(503, "Stock analysis is unavailable. Configure OPENAI_API_KEY in the server settings.")
+
+    quote_fields = (
+        "description", "source", "quote_time", "price", "change", "change_pct", "bid", "ask",
+        "open", "high", "low", "volume", "week_52_high", "week_52_low", "average_volume",
+        "previous_close", "market_cap", "price_earnings_ratio", "earnings_per_share",
+        "profit_margin", "revenue", "shares_outstanding", "total_debt_to_capital",
+        "insider_sentiment_mspr", "insider_sentiment_month", "company_profile",
+    )
+    quote = {field: data.quote.get(field) for field in quote_fields if field in data.quote}
+    quote_json = json.dumps(quote, allow_nan=False, separators=(",", ":"))
+    instructions = (
+        "You are the company analyst in the RHTC Three Peaks stock research dashboard. Research the company "
+        "identified by the ticker and assess its business quality, outlook, risks, financial condition, and "
+        "valuation using current public information. Verify the ticker-company match. Prefer SEC filings, company "
+        "investor relations, government sources, and reputable financial reporting. Treat the supplied quote as "
+        "a snapshot, not necessarily a live quote. Clearly distinguish reported facts from inference.\n\n"
+        "Use exactly this five-level scale, in order from least to most attractive: "
+        "1 = Avoid; 2 = Sell; 3 = Watch; 4 = Grow; 5 = Bargain. Assign one overall rating, considering business "
+        "quality, forward prospects, valuation, and risks together. Use Bargain only when valuation appears "
+        "attractive relative to company prospects and risks. Do not treat one-day price movement as the thesis.\n\n"
+        "Start with exactly these sections:\n"
+        "## Summary and rating\n"
+        "Start with **Rating: N — LABEL** using the scale above. Follow with a concise 2-3 sentence summary "
+        "that explains the rating in plain English.\n"
+        "## Detailed analysis\n"
+        "Then give concise subsections or bullets for: business and competitive position; latest revenue, margins "
+        "and earnings trend; cash flow, debt and capital needs; valuation; near-term catalysts; and principal risks. "
+        "Use current dates and comparable periods for time-sensitive claims. Conclude with the most important "
+        "evidence that would move the rating up or down. Keep the full response under 600 words. No raw URLs in "
+        "the prose; citations will be shown separately. Do not give a personalized trade instruction."
+    )
+    prompt = (
+        f"Analyze {symbol} for the RHTC Three Peaks research framework.\n"
+        f"Quote and company metrics supplied by the dashboard: {quote_json}\n"
+        "Search the latest available company filings, earnings, guidance, and material news. If a metric is missing "
+        "or appears stale or implausible, say so and do not invent a replacement."
+    )
+    try:
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=key, timeout=75, max_retries=0)
+        response = await client.responses.create(
+            model=os.getenv("OPENAI_ANALYSIS_MODEL", os.getenv("OPENAI_MODEL", "gpt-5-mini")),
+            tools=[{"type": "web_search"}],
+            reasoning={"effort": "low"},
+            instructions=instructions,
+            input=prompt,
+            max_output_tokens=7000,
+            max_tool_calls=6,
+            store=False,
+        )
+    except Exception as exc:
+        raise HTTPException(502, openai_error_message(exc)) from exc
+
+    citations: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
+    for item in getattr(response, "output", []) or []:
+        for content in getattr(item, "content", []) or []:
+            for annotation in getattr(content, "annotations", []) or []:
+                if getattr(annotation, "type", "") != "url_citation":
+                    continue
+                citation = getattr(annotation, "url_citation", None)
+                url = getattr(citation, "url", "") if citation else ""
+                title = getattr(citation, "title", "") if citation else ""
+                if url.startswith("https://") and url not in seen_urls:
+                    citations.append({"title": title or url, "url": url})
+                    seen_urls.add(url)
+    analysis = (getattr(response, "output_text", "") or "").strip()
+    if not analysis:
+        raise HTTPException(502, "The stock analysis returned no readable text. Please try again.")
+
+    rating_match = re.search(
+        r"(?im)^\\s*\\*{0,2}Rating:\\s*([1-5])\\s*[—–-]\\s*(Avoid|Sell|Watch|Grow|Bargain)\\b",
+        analysis,
+    )
+    rating = int(rating_match.group(1)) if rating_match else None
+    rating_label = rating_match.group(2).title() if rating_match else None
+    summary_match = re.search(
+        r"(?is)^##\\s*Summary and rating\\s*\\n(.*?)(?=\\n##\\s*Detailed analysis\\b)",
+        analysis,
+    )
+    details_match = re.search(r"(?is)^##\\s*Detailed analysis\\s*\\n(.*)$", analysis)
+    summary = summary_match.group(1).strip() if summary_match else ""
+    details = details_match.group(1).strip() if details_match else analysis
+    if not summary:
+        summary = analysis.split("\\n", 1)[0].strip()
+    return {
+        "symbol": symbol, "rating": rating, "rating_label": rating_label,
+        "summary": summary, "details": details, "citations": citations,
+        "mode": "openai",
+    }
 
 
 @app.post("/api/symbol-analysis")
