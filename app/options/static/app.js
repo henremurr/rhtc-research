@@ -64,7 +64,7 @@ function renderRows(){
     const rhtcScore=stockScore!==null&&callScore!==null&&callScore>=0&&callScore<=5?stockScore+callScore:null;
     const rhtcScoreClass=rhtcScore===null?'':rhtcScore<5?'rhtc-score-low':'rhtc-score-high';
     const askYield=Number(r.price)>0&&Number(r.ask)>0?Number(r.ask)/Number(r.price)*100:null;
-    return `<tr><td data-label="Ticker"><div class="ticker"><button class="ticker-details-btn" title="View ${safe(r.symbol)} option details" aria-label="View ${safe(r.symbol)} option details" onclick="viewChain('${safe(r.symbol)}')">${safe(r.symbol)}</button><button class="ticker-ai-btn" type="button" title="Open ChatGPT deep analysis for ${safe(r.symbol)}" aria-label="Open ChatGPT deep analysis for ${safe(r.symbol)}" onclick="analyzeSymbol('${safe(r.symbol)}')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 14.4 9.6 21.5 12l-7.1 2.4L12 21.5l-2.4-7.1L2.5 12l7.1-2.4L12 2.5Z"/><path d="m19 2 .8 2.2L22 5l-2.2.8L19 8l-.8-2.2L16 5l2.2-.8L19 2Z"/></svg></button></div></td><td data-label="Peak">${peakChip(r.peak)}</td><td data-label="Stock score"><span class="stock-score-pill ${stockScoreClass}">${stockScore===null?'—':`${stockScore} · ${safe(stockLabel)}`}</span></td><td data-label="Call score"><span class="call-score-pill ${callScoreClass}">${callScore===null?'—':`${fmt(callScore)}/5`}</span></td><td data-label="RHTC / 10"><span class="rhtc-score-pill ${rhtcScoreClass}">${rhtcScore===null?'—':`${fmt(rhtcScore)}/10`}</span></td><td data-label="Last"><span class="number ${changeClass(r.change_pct)}">${String.fromCharCode(36)}${fmt(r.price)}</span></td><td data-label="Call contract"><div class="contract"><b>${safe(contractLabel(r))}</b>${r.historyAt?`<small>Saved ${new Date(r.historyAt).toLocaleDateString()}</small>`:''}</div></td><td data-label="DTE"><span class="number">${r.dte??'—'}</span></td><td data-label="Qty"><span class="number">${qty}</span></td><td data-label="Bid / ask" class="quote"><span class="bid">$${fmt(r.bid)}</span> / $${fmt(r.ask)}</td><td data-label="Bid / ask yield"><span class="yield-pill ${yieldVal>1.5?'high':''}">${fmt(yieldVal)}% / ${askYield===null?'—':fmt(askYield)+'%'}</span></td><td data-label="Income"><span class="number income-value ${incomeClass}">${income===null?'—':`${fmt(income)}`}</span></td><td data-label="Volume"><span class="quote-size quote-volume">${Number(r.bid_size||0).toLocaleString()} × ${Number(r.ask_size||0).toLocaleString()}</span></td><td data-label="OI / Vol"><span class="oi">${Number(r.open_interest||0).toLocaleString()} / ${Number(r.volume||0).toLocaleString()}</span></td></tr>`
+    return `<tr><td data-label="Ticker"><div class="ticker"><button class="ticker-details-btn" title="View ${safe(r.symbol)} option details" aria-label="View ${safe(r.symbol)} option details" onclick="viewChain('${safe(r.symbol)}')">${safe(r.symbol)}</button></div></td><td data-label="Peak">${peakChip(r.peak)}</td><td data-label="Stock score"><span class="stock-score-pill ${stockScoreClass}">${stockScore===null?'—':`${stockScore} · ${safe(stockLabel)}`}</span></td><td data-label="Call score"><span class="call-score-pill ${callScoreClass}">${callScore===null?'—':`${fmt(callScore)}/5`}</span></td><td data-label="RHTC / 10"><span class="rhtc-score-pill ${rhtcScoreClass}">${rhtcScore===null?'—':`${fmt(rhtcScore)}/10`}</span></td><td data-label="Last"><span class="number ${changeClass(r.change_pct)}">${String.fromCharCode(36)}${fmt(r.price)}</span></td><td data-label="Call contract"><div class="contract"><b>${safe(contractLabel(r))}</b>${r.historyAt?`<small>Saved ${new Date(r.historyAt).toLocaleDateString()}</small>`:''}</div></td><td data-label="DTE"><span class="number">${r.dte??'—'}</span></td><td data-label="Qty"><span class="number">${qty}</span></td><td data-label="Bid / ask" class="quote"><span class="bid">$${fmt(r.bid)}</span> / $${fmt(r.ask)}</td><td data-label="Bid / ask yield"><span class="yield-pill ${yieldVal>1.5?'high':''}">${fmt(yieldVal)}% / ${askYield===null?'—':fmt(askYield)+'%'}</span></td><td data-label="Income"><span class="number income-value ${incomeClass}">${income===null?'—':`${fmt(income)}`}</span></td><td data-label="Volume"><span class="quote-size quote-volume">${Number(r.bid_size||0).toLocaleString()} × ${Number(r.ask_size||0).toLocaleString()}</span></td><td data-label="OI / Vol"><span class="oi">${Number(r.open_interest||0).toLocaleString()} / ${Number(r.volume||0).toLocaleString()}</span></td></tr>`
   }).join('');
   $('#showing').textContent=state.mode==='history'?`Showing ${subset.length} of ${orderedRows.length} saved rows`:`Showing ${subset.length} of ${rows.length} screened symbols`;
 }
@@ -79,10 +79,22 @@ function renderChainPage(){
   $('#chain-prev').disabled=state.chainIndex===0;
   $('#chain-next').disabled=state.chainIndex===state.chainRows.length-1;
   if(x.error){
+    $('#call-analyze-btn').disabled=true;
+    $('#call-analysis-status').textContent='No covered call is available to analyze.';
+    $('#call-analysis-results').hidden=true;
     $('#detail-subtitle').textContent='';
     $('#detail-content').innerHTML='<p class="error-text">'+safe(x.error)+'</p>';
     return;
   }
+  const context=window.stockQuoteContext||{};
+  context.call=x;
+  window.stockQuoteContext=context;
+  $('#call-analyze-btn').disabled=false;
+  $('#call-analyze-btn').textContent='✦ Analyze call';
+  $('#call-analysis-status').textContent='Uses current-source research and OpenAI API credits.';
+  $('#call-analysis-results').hidden=true;
+  $('#call-analysis-details').innerHTML='';
+  $('#call-analysis-sources').innerHTML='';
   $('#detail-subtitle').textContent='';
   $('#detail-content').innerHTML=
     '<div class="detail-call-block">'+
@@ -164,6 +176,33 @@ async function analyzeStockQuote(){
     button.disabled=false;button.textContent='✦ Analyze stock';
   }
 }
+async function analyzeCallQuote(){
+  const context=window.stockQuoteContext||{},call=context.call||{},symbol=context.symbol;
+  const button=$('#call-analyze-btn'),status=$('#call-analysis-status'),results=$('#call-analysis-results');
+  if(!symbol||!call.strike){status.textContent='Load a covered-call quote before analyzing.';return}
+  const row={...(state.rows.find(item=>item.symbol===symbol)||{}),...call,symbol,price:context.quote?.price,change:context.quote?.change,change_pct:context.quote?.change_pct,source:call.source||state.chainSource||context.quote?.source};
+  const screen=analysisScreenForRow(row);
+  button.disabled=true;button.textContent='Analyzing…';status.textContent='Searching current sources and preparing the covered-call assessment…';results.hidden=true;
+  try{
+    const response=await fetch('/options/api/symbol-analysis',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol,screen})});
+    const data=await response.json();
+    if(!response.ok)throw Error(data.detail||'Call analysis request failed.');
+    if(data.call_score!==null&&data.call_score!==undefined&&Number.isFinite(Number(data.call_score))){
+      const score=Number(data.call_score);
+      state.rows=state.rows.map(item=>item.symbol===symbol?{...item,call_score:score}:item);
+      state.watchlist=state.watchlist.map(item=>item.symbol===symbol?{...item,call_score:score,analysis_count:data.analysis_count}:item);
+      renderRows();
+    }
+    $('#call-analysis-details').innerHTML=renderAnalysis(data.analysis||'No call analysis was returned.');
+    $('#call-analysis-sources').innerHTML=(data.citations||[]).map(citation=>'<li><a href="'+safe(citation.url)+'" target="_blank" rel="noopener noreferrer">'+safe(citation.title||citation.url)+'</a></li>').join('');
+    results.hidden=false;
+    status.textContent=data.mode==='screen_fallback'?'Quote-based verdict · Current-source research did not finish':(data.citations?.length?'Current-source analysis · '+data.citations.length+' cited sources':'Current-source analysis');
+  }catch(error){
+    status.textContent=error.message.includes('OPENAI_API_KEY')?'Analysis is not enabled. Add OPENAI_API_KEY to Railway Variables, then redeploy.':error.message;
+  }finally{
+    button.disabled=false;button.textContent='✦ Analyze call';
+  }
+}
 async function viewChain(symbol){
   const modal=$('#detail-modal'),quoteBox=$('#detail-quote-content'),detail=$('#detail-content');
   $('#detail-title').textContent=symbol+' stock quote and covered-call screen';
@@ -174,6 +213,7 @@ async function viewChain(symbol){
   window.stockQuoteContext=null;
   $('#stock-analyze-btn').disabled=true;$('#stock-analysis-status').textContent='Uses current-source research and OpenAI API credits.';
   $('#stock-analysis-results').hidden=true;$('#stock-analysis-summary').innerHTML='';$('#stock-analysis-details').innerHTML='';$('#stock-analysis-sources').innerHTML='';
+  $('#call-analyze-btn').disabled=true;$('#call-analyze-btn').textContent='✦ Analyze call';$('#call-analysis-status').textContent='Uses current-source research and OpenAI API credits.';$('#call-analysis-results').hidden=true;$('#call-analysis-details').innerHTML='';$('#call-analysis-sources').innerHTML='';
   quoteBox.innerHTML='<div class="loading">Retrieving stock quote…</div>';
   detail.innerHTML='<div class="loading">Retrieving covered-call data…</div>';
   openFullscreenModal(modal,modal.querySelector('.detail-modal'),$('#detail-fullscreen-toggle'));
