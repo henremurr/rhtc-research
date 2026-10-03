@@ -11,7 +11,7 @@ from unittest.mock import patch
 import httpx
 
 from main import app
-from app.options.api import Tradier, WATCHLIST, parse_finnhub_company_overview, parse_finnhub_metrics, format_option_contract, openai_error_message, split_speech_chunks, strip_mp3_metadata, record_stock_rating
+from app.options.api import Tradier, WATCHLIST, parse_finnhub_company_overview, parse_finnhub_metrics, format_option_contract, openai_error_message, split_speech_chunks, strip_mp3_metadata, record_stock_rating, split_stock_analysis_sections
 from app.options import news
 
 
@@ -458,6 +458,23 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual(unavailable.status_code, 503)
         too_long = self.request("POST", "/options/api/analysis-podcast/audio", json={"title": "Story", "transcript": "x" * 11501})
         self.assertEqual(too_long.status_code, 422)
+
+    def test_stock_analysis_sections_do_not_repeat_summary_in_details(self):
+        analysis = (
+            "Research note before sections.\n"
+            "### Summary and rating\n"
+            "**Rating: 3 — Watch**\n"
+            "A concise company summary.\n"
+            "### Detailed analysis\n"
+            "#### Business and competitive position\n"
+            "The company has a differentiated business."
+        )
+        summary, details = split_stock_analysis_sections(analysis)
+        self.assertIn("A concise company summary.", summary)
+        self.assertNotIn("Research note before sections.", summary)
+        self.assertNotIn("Summary and rating", details)
+        self.assertNotIn("A concise company summary.", details)
+        self.assertIn("Business and competitive position", details)
 
     def test_symbol_analysis_requires_server_openai_key(self):
         with patch.dict(os.environ, {}, clear=True):
