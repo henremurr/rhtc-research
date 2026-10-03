@@ -95,7 +95,9 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertLess(page.text.index('id="search"'), page.text.index('<span>Rows</span>'))
         self.assertLess(page.text.index('<span>Rows</span>'), page.text.index('id="review-limit"'))
         self.assertIn('<span>Order by</span><select id="sort">', page.text)
+        self.assertIn('<option value="stock_score">Stock score</option>', page.text)
         self.assertIn('<option value="call_score">Call score</option>', page.text)
+        self.assertLess(page.text.index('<option value="stock_score">'), page.text.index('<option value="call_score">'))
         self.assertIn('<th title="Latest stock analysis rating: 1 Avoid · 2 Sell · 3 Watch · 4 Grow · 5 Bargain">STOCK SCORE</th><th>CALL SCORE</th>', page.text)
         self.assertIn('>Analyze calls</button>', page.text)
         self.assertLess(page.text.index('Max Last'), page.text.index('<span>Order by</span>'))
@@ -610,10 +612,13 @@ class OptionsRoutesTest(unittest.TestCase):
     def test_stock_rating_is_persisted_and_returned_with_opportunity_rows(self):
         with patch.dict(os.environ, {"RHTC_DATA_DIR": self.data_dir.name}, clear=False):
             self.assertTrue(record_stock_rating("MU", 4, "Grow"))
-            response = self.request("GET", "/options/api/opportunities?limit=200")
+            self.assertTrue(record_stock_rating("OKLO", 5, "Bargain"))
+            response = self.request("GET", "/options/api/opportunities?sort=stock_score&limit=200")
         self.assertEqual(response.status_code, 200)
-        mu = next(row for row in response.json()["rows"] if row["symbol"] == "MU")
-        self.assertEqual(mu["stock_score"], 4)
+        rows = response.json()["rows"]
+        scored = [(row["symbol"], row["stock_score"]) for row in rows if row["stock_score"] is not None]
+        self.assertEqual(scored, [("OKLO", 5), ("MU", 4)])
+        mu = next(row for row in rows if row["symbol"] == "MU")
         self.assertEqual(mu["stock_rating_label"], "Grow")
 
     def test_call_score_migrates_legacy_average_total_score_database_column(self):
