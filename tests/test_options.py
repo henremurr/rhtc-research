@@ -625,6 +625,7 @@ class OptionsRoutesTest(unittest.TestCase):
         with sqlite3.connect(db_path) as connection:
             columns = {row[1] for row in connection.execute("PRAGMA table_info(symbols)")}
         self.assertIn("call_score", columns)
+        self.assertNotIn("average_total_score", columns)
 
     def test_custom_symbol_list_rejects_duplicate_or_invalid_peaks(self):
         duplicate = [{"symbol": "MU", "peak": "AI/I"}, {"symbol": "MU", "peak": "Other"}]
