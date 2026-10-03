@@ -232,14 +232,14 @@ async function analyzeDisplayedSymbols(){
   const symbols=[...new Set([...document.querySelectorAll('#rows .ticker-details-btn')].map(el=>el.textContent.trim()).filter(Boolean))];
   if(!symbols.length){toast('There are no displayed symbols to analyze.');return}
   const skipped=[];
-  let updated=0;
+  let updated=0,completed=0;
   button.disabled=true;
   button.title='Runs a current-source analysis for each displayed ticker and uses OpenAI API credits.';
   try{
     for(let index=0;index<symbols.length;index++){
       const symbol=symbols[index],row=state.rows.find(item=>item.symbol===symbol);
-      button.textContent=`Analyzing ${index+1}/${symbols.length}…`;
-      progress.textContent=`${index+1}/${symbols.length} · ${symbol}`;
+      button.textContent=`Analyzing ${completed}/${symbols.length}…`;
+      progress.textContent=`Completed ${completed} of ${symbols.length} · analyzing ${symbol}`;
       try{
         if(!row)throw Error('Ticker is no longer in the loaded screen');
         const response=await fetch('/options/api/symbol-analysis',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol,screen:analysisScreenForRow(row)})});
@@ -253,7 +253,10 @@ async function analyzeDisplayedSymbols(){
         state.watchlist=state.watchlist.map(item=>item.symbol===symbol?{...item,average_total_score:Number(data.average_total_score),analysis_count:data.analysis_count}:item);
         updated++;
         renderRows();
-      }catch(error){skipped.push(`${symbol}: ${error.message}`)}
+      }catch(error){skipped.push(`${symbol}: ${error.message}`)}finally{
+        completed++;
+        progress.textContent=`Completed ${completed} of ${symbols.length}`;
+      }
     }
     progress.textContent=skipped.length?`Updated ${updated}/${symbols.length} · ${skipped.length} skipped`:`Updated ${updated}/${symbols.length} Avg scores`;
     progress.title=skipped.join('\n');
