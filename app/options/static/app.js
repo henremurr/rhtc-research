@@ -167,7 +167,10 @@ async function analyzeStockQuote(){
     }
     const summary=$('#stock-analysis-summary');
     summary.innerHTML='<div class="stock-rating stock-rating-'+(Number.isFinite(rating)?rating:0)+'"><span>RHTC rating</span><b>'+(Number.isFinite(rating)?rating+' · ':'')+safe(label)+'</b></div><div class="stock-ranking-scale" aria-label="Rating scale">1 Avoid · 2 Sell · 3 Watch · 4 Grow · 5 Bargain</div><div class="stock-summary-copy">'+renderAnalysis(data.summary||'Summary was not returned.')+'</div>';
-    $('#stock-analysis-details').innerHTML=renderAnalysis(data.details||'Detailed analysis was not returned.');
+    const detailText=String(data.details||'Detailed analysis was not returned.');
+    const detailedHeading=/^\s*#{1,3}\s*Detailed analysis\b[^\n]*\n/im.exec(detailText);
+    const details=detailedHeading?detailText.slice(detailedHeading.index+detailedHeading[0].length).trim():detailText;
+    $('#stock-analysis-details').innerHTML=renderAnalysis(details||'Detailed analysis was not returned.');
     $('#stock-analysis-sources').innerHTML=(data.citations||[]).map(citation=>'<li><a href="'+safe(citation.url)+'" target="_blank" rel="noopener noreferrer">'+safe(citation.title||citation.url)+'</a></li>').join('');
     results.hidden=false;status.textContent=data.citations?.length?'Current-source analysis · '+data.citations.length+' cited sources':'Current-source analysis';
   }catch(error){

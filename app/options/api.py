@@ -1051,6 +1051,33 @@ async def summarize(data: SummaryInput):
         return {"mode": "rules", "summary": basic_summary(rows, data.source)}
 
 
+def split_stock_analysis_sections(analysis: str) -> tuple[str, str]:
+    """Split a stock report into one summary and its detailed analysis."""
+    text = (analysis or "").replace("\r", "").strip()
+    summary_heading = re.search(
+        r"(?im)^\s*#{1,3}\s*Summary and rating\b[^\n]*$",
+        text,
+    )
+    details_heading = re.search(
+        r"(?im)^\s*#{1,3}\s*Detailed analysis\b[^\n]*$",
+        text,
+    )
+    if summary_heading:
+        summary_start = summary_heading.end()
+        summary_end = details_heading.start() if details_heading and details_heading.start() > summary_start else len(text)
+        summary = text[summary_start:summary_end].strip()
+    elif details_heading:
+        summary = text[:details_heading.start()].strip()
+    else:
+        summary = ""
+    details = text[details_heading.end():].strip() if details_heading else ""
+    if not summary:
+        paragraphs = [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
+        summary = "\n\n".join(paragraphs[:2])
+    if not details:
+        details = text[summary_heading.end():].strip() if summary_heading else text
+    return summary, details
+
 @app.post("/api/stock-analysis")
 async def analyze_stock(data: StockAnalysisInput):
     symbol = data.symbol.strip().upper()
@@ -1137,15 +1164,7 @@ async def analyze_stock(data: StockAnalysisInput):
     rating_label = rating_match.group(2).title() if rating_match else None
     if rating is not None and rating_label:
         record_stock_rating(symbol, rating, rating_label)
-    summary_match = re.search(
-        r"(?is)^##\s*Summary and rating\s*\n(.*?)(?=\n##\s*Detailed analysis\b)",
-        analysis,
-    )
-    details_match = re.search(r"(?is)^##\s*Detailed analysis\s*\n(.*)$", analysis)
-    summary = summary_match.group(1).strip() if summary_match else ""
-    details = details_match.group(1).strip() if details_match else analysis
-    if not summary:
-        summary = analysis.split("\\n", 1)[0].strip()
+    summary, details = split_stock_analysis_sections(analysis)
     return {
         "symbol": symbol, "rating": rating, "rating_label": rating_label,
         "summary": summary, "details": details, "citations": citations,
