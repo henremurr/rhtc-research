@@ -1107,16 +1107,16 @@ async def analyze_stock(data: StockAnalysisInput):
         raise HTTPException(502, "The stock analysis returned no readable text. Please try again.")
 
     rating_match = re.search(
-        r"(?im)^\\s*\\*{0,2}Rating:\\s*([1-5])\\s*[—–-]\\s*(Avoid|Sell|Watch|Grow|Bargain)\\b",
+        r"(?im)^\s*\*{0,2}Rating:\s*([1-5])\s*[—–-]\s*(Avoid|Sell|Watch|Grow|Bargain)\b",
         analysis,
     )
     rating = int(rating_match.group(1)) if rating_match else None
     rating_label = rating_match.group(2).title() if rating_match else None
     summary_match = re.search(
-        r"(?is)^##\\s*Summary and rating\\s*\\n(.*?)(?=\\n##\\s*Detailed analysis\\b)",
+        r"(?is)^##\s*Summary and rating\s*\n(.*?)(?=\n##\s*Detailed analysis\b)",
         analysis,
     )
-    details_match = re.search(r"(?is)^##\\s*Detailed analysis\\s*\\n(.*)$", analysis)
+    details_match = re.search(r"(?is)^##\s*Detailed analysis\s*\n(.*)$", analysis)
     summary = summary_match.group(1).strip() if summary_match else ""
     details = details_match.group(1).strip() if details_match else analysis
     if not summary:
