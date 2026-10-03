@@ -333,3 +333,7 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 /* Stock analysis markdown is rendered directly into these containers (without .analysis-body). */
 #stock-analysis-summary a,#stock-analysis-details a{color:#80652e!important;text-decoration:underline;overflow-wrap:anywhere}
 :root[data-theme="dark"] #stock-analysis-summary a,:root[data-theme="dark"] #stock-analysis-details a{color:#ead28b!important}
+
+/* The stock quote modal is a two-column grid; give analysis the full row. */
+.detail-modal>.stock-analysis-actions,.detail-modal>#stock-analysis-results{grid-column:1/-1;width:100%;min-width:0}
+.detail-modal>#stock-analysis-results .stock-analysis-summary,.detail-modal>#stock-analysis-results .stock-analysis-details{min-width:0}
