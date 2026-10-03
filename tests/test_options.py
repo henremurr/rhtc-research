@@ -122,7 +122,8 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('id="analysis-stop-btn"', page.text)
         self.assertIn('id="detail-description"', page.text)
 
-        self.assertIn('<th>CHG $</th><th>CHG %</th>', page.text)
+        self.assertNotIn('<th>CHG $</th>', page.text)
+        self.assertNotIn('<th>CHG %</th>', page.text)
         self.assertIn('title="Share price saved in Manage symbols">COST</th>', page.text)
         self.assertIn('colspan="13"', page.text)
         self.assertLess(page.text.index('>CALL CONTRACT</th>'), page.text.index('<th>QTY</th>'))
@@ -133,6 +134,8 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn("/options/api/news/analyze", script)
         self.assertIn("sort:'income'", script)
         self.assertIn('ticker-details-btn', script)
+        self.assertNotIn('data-label="Change $"', script)
+        self.assertNotIn('data-label="Change %"', script)
         self.assertIn('id="detail-quote-content"', page.text)
         self.assertIn('.detail-modal>.modal-close{position:sticky', css)
         self.assertIn('width:44px;height:44px', css)
