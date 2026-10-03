@@ -304,3 +304,12 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 #analysis-podcast-transcript{height:min(48vh,520px);min-height:340px;max-height:none}
 .youtube-publish-fields textarea{height:min(34vh,360px);min-height:260px}
 @media(max-width:600px){#analysis-podcast-transcript{height:42vh;min-height:240px;max-height:none}.youtube-publish-fields textarea{height:min(38vh,360px);min-height:240px}}
+
+/* Analyze every ticker currently rendered in the DTE screen and show progress. */
+.main-pager{flex-wrap:wrap}
+.main-pager .batch-analysis-button{margin-left:auto;border-color:#b9944a;background:#f4eedf;color:#5f4b27;font-weight:700}
+.main-pager .batch-analysis-button:hover{background:#eae0c8}
+.main-pager .batch-analysis-button:disabled{opacity:.6;cursor:progress}
+.main-pager .batch-analysis-status{flex:1 1 100%;min-height:1em;text-align:right;white-space:normal;overflow-wrap:anywhere}
+:root[data-theme="dark"] .main-pager .batch-analysis-button{border-color:#655638;background:#302a20;color:#dfc77f}
+:root[data-theme="dark"] .main-pager .batch-analysis-button:hover{background:#3a3224}
