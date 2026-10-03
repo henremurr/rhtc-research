@@ -300,6 +300,8 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 .main-pager .batch-analysis-button{margin-left:auto;border-color:#b9944a;background:#f4eedf;color:#5f4b27;font-weight:700}
 .main-pager .batch-analysis-button:hover{background:#eae0c8}
 .main-pager .batch-analysis-button:disabled{opacity:.6;cursor:progress}
+.main-pager .batch-analysis-actions{display:flex;align-items:center;gap:8px;margin-left:auto}
+.main-pager .batch-analysis-actions .batch-analysis-button{margin-left:0}
 .main-pager .batch-analysis-status{flex:1 1 100%;min-height:1em;text-align:right;white-space:normal;overflow-wrap:anywhere}
 :root[data-theme="dark"] .main-pager .batch-analysis-button{border-color:#655638;background:#302a20;color:#dfc77f}
 :root[data-theme="dark"] .main-pager .batch-analysis-button:hover{background:#3a3224}
