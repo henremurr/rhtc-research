@@ -338,3 +338,8 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 .screener-table .yield-pill,.screener-table .yield-pill.high{background:transparent;color:inherit;font-weight:400}
 
 :root[data-theme="dark"] .screener-table .yield-pill,:root[data-theme="dark"] .screener-table .yield-pill.high{background:transparent;color:inherit;font-weight:400}
+
+/* Color Income values by threshold while keeping the middle range neutral on the dark dashboard. */
+.screener-table .income-value.income-high{color:#58d68d}
+.screener-table .income-value.income-low{color:#ff6b6b}
+.screener-table .income-value.income-neutral{color:#fff}
