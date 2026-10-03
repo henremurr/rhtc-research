@@ -314,3 +314,18 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 .main-pager .batch-analysis-status{flex:1 1 100%;min-height:1em;text-align:right;white-space:normal;overflow-wrap:anywhere}
 :root[data-theme="dark"] .main-pager .batch-analysis-button{border-color:#655638;background:#302a20;color:#dfc77f}
 :root[data-theme="dark"] .main-pager .batch-analysis-button:hover{background:#3a3224}
+
+
+/* Distinguish each RHTC stock rating and keep analysis links in the dashboard's gold link palette. */
+.stock-rating.stock-rating-1{background:#fde9e8;color:#9f252b;border:1px solid #f2b9b8;border-left:4px solid #d84d55}
+.stock-rating.stock-rating-2{background:#fff0e4;color:#98420d;border:1px solid #f4c49b;border-left:4px solid #df7733}
+.stock-rating.stock-rating-3{background:#edf1f5;color:#4b5968;border:1px solid #cbd4de;border-left:4px solid #8a9aab}
+.stock-rating.stock-rating-4{background:#e5f5ec;color:#17613f;border:1px solid #a8ddbd;border-left:4px solid #4a9b7a}
+.stock-rating.stock-rating-5{background:#fbf3dc;color:#72551b;border:1px solid #e6d39c;border-left:4px solid #d0a83f}
+:root[data-theme="dark"] .stock-rating.stock-rating-1{background:#3b2226;color:#ffb4b4;border-color:#774148;border-left-color:#ff6b73}
+:root[data-theme="dark"] .stock-rating.stock-rating-2{background:#39291f;color:#ffc08c;border-color:#70472d;border-left-color:#f28a43}
+:root[data-theme="dark"] .stock-rating.stock-rating-3{background:#28313b;color:#d0d9e3;border-color:#485565;border-left-color:#8a9aab}
+:root[data-theme="dark"] .stock-rating.stock-rating-4{background:#1d3329;color:#9ee2b7;border-color:#356149;border-left-color:#61c28d}
+:root[data-theme="dark"] .stock-rating.stock-rating-5{background:#362f20;color:#f0d78d;border-color:#66552e;border-left-color:#dfbd58}
+.stock-analysis-results .analysis-body a,#stock-analysis-sources a{color:#80652e!important;text-decoration:underline;overflow-wrap:anywhere}
+:root[data-theme="dark"] .stock-analysis-results .analysis-body a,:root[data-theme="dark"] #stock-analysis-sources a{color:#ead28b!important}
