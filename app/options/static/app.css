@@ -252,14 +252,14 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 @media(min-width:901px){
   .table-wrap{overflow-x:auto;overscroll-behavior-x:contain;touch-action:pan-x pan-y}
   .screener-table{table-layout:auto;min-width:0;width:100%}
-  .screener-table th,.screener-table td{min-width:0;padding-left:3px;padding-right:3px;white-space:nowrap;overflow:visible;overflow-wrap:normal;text-overflow:initial}
-  .screener-table th{font-size:7px;letter-spacing:.2px}
-  .screener-table td{height:36px;padding-top:2px;padding-bottom:2px;font-size:8px}
+  .screener-table th,.screener-table td{min-width:0;padding-left:1px;padding-right:1px;white-space:nowrap;overflow:visible;overflow-wrap:normal;text-overflow:initial}
+  .screener-table th{font-size:9px;letter-spacing:.1px}
+  .screener-table td{height:36px;padding-top:2px;padding-bottom:2px;font-size:10px}
   .screener-table .ticker{gap:3px}
-  .screener-table .stock-score-pill,.screener-table .call-score-pill,.screener-table .rhtc-score-pill{font-size:8px;padding:2px 3px}
-  .screener-table .peak-chip{gap:3px;padding:3px 4px;font-size:8px}
-  .screener-table .number,.screener-table .quote,.screener-table .contract b,.screener-table .oi,.screener-table .quote-volume,.screener-table .yield-pill{font-size:8px}
-  .screener-table .yield-pill{padding:3px 3px}
+  .screener-table .stock-score-pill,.screener-table .call-score-pill,.screener-table .rhtc-score-pill{font-size:9px;padding:2px}
+  .screener-table .peak-chip{gap:3px;padding:2px 3px;font-size:9px}
+  .screener-table .number,.screener-table .quote,.screener-table .contract b,.screener-table .oi,.screener-table .quote-volume,.screener-table .yield-pill{font-size:10px}
+  .screener-table .yield-pill{padding:2px}
   .screener-table .contract b,.screener-table .contract small{white-space:nowrap}
   .screener-table .quote-volume{display:inline;color:inherit;margin:0}
 }
