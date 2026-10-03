@@ -40,7 +40,7 @@ function renderRows(){
   let rows=state.rows.filter(r=>(!state.selectedOnly||held.has(r.symbol))&&(!state.costOnly||hasHoldingCost(r)));
   if(state.mode==='history'){
     const history=JSON.parse(localStorage.getItem('rhtc-option-history')||'[]');
-    rows=history.flatMap(s=>s.rows.map(r=>({...r,historyAt:s.at}))).filter(r=>(state.peak==='All Peaks'||r.peak===state.peak)&&r.symbol.toUpperCase().includes(state.query.toUpperCase()));
+    rows=history.flatMap(s=>s.rows.map(r=>({...r,call_score:r.call_score??r.average_total_score,historyAt:s.at}))).filter(r=>(state.peak==='All Peaks'||r.peak===state.peak)&&r.symbol.toUpperCase().includes(state.query.toUpperCase()));
   }else if(state.sort==='income'){
     rows.sort((a,b)=>{const ai=incomeForRow(a),bi=incomeForRow(b);if(ai===null)return bi===null?0:1;if(bi===null)return -1;return bi-ai});
   }
@@ -49,16 +49,16 @@ function renderRows(){
   const orderedRows=state.mode==='history'?rows.slice().reverse().slice(0,180):rows;const subset=orderedRows.slice(0,Number(state.displayLimit)||200);
   $('#rows').innerHTML=subset.map(r=>{
     const error=r.error,yieldVal=Number(r.premium_yield||0),qtyValue=error?null:quantityForPrice(r.price),qty=qtyValue===null?'—':qtyValue.toLocaleString(),income=incomeForRow(r);
-    const avgScore=r.average_total_score!==null&&r.average_total_score!==undefined&&Number.isFinite(Number(r.average_total_score))?Number(r.average_total_score):null;
-    const avgScoreClass=avgScore===null?'':`analysis-score-${Math.max(1,Math.min(5,Math.round(avgScore)))}`;
+    const callScore=r.call_score!==null&&r.call_score!==undefined&&Number.isFinite(Number(r.call_score))?Number(r.call_score):null;
+    const callScoreClass=callScore===null?'':`analysis-score-${Math.max(1,Math.min(5,Math.round(callScore)))}`;
     const askYield=Number(r.price)>0&&Number(r.ask)>0?Number(r.ask)/Number(r.price)*100:null;
-    return `<tr><td data-label="Ticker"><div class="ticker"><button class="ticker-details-btn" title="View ${safe(r.symbol)} option details" aria-label="View ${safe(r.symbol)} option details" onclick="viewChain('${safe(r.symbol)}')">${safe(r.symbol)}</button><button class="ticker-ai-btn" type="button" title="Open ChatGPT deep analysis for ${safe(r.symbol)}" aria-label="Open ChatGPT deep analysis for ${safe(r.symbol)}" onclick="analyzeSymbol('${safe(r.symbol)}')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 14.4 9.6 21.5 12l-7.1 2.4L12 21.5l-2.4-7.1L2.5 12l7.1-2.4L12 2.5Z"/><path d="m19 2 .8 2.2L22 5l-2.2.8L19 8l-.8-2.2L16 5l2.2-.8L19 2Z"/></svg></button></div></td><td data-label="Peak">${peakChip(r.peak)}</td><td data-label="Avg score / 5"><span class="avg-score-pill ${avgScoreClass}">${avgScore===null?'—':`${fmt(avgScore)}/5`}</span></td><td data-label="Last"><span class="number">$${fmt(r.price)}</span></td><td data-label="Change $"><span class="change-value ${changeClass(r.change)}">${changeText(r.change,'$')}</span></td><td data-label="Change %"><span class="change-value ${changeClass(r.change_pct)}">${changeText(r.change_pct,'%')}</span></td><td data-label="Call contract"><div class="contract"><b>${safe(contractLabel(r))}</b>${r.historyAt?`<small>Saved ${new Date(r.historyAt).toLocaleDateString()}</small>`:''}</div></td><td data-label="DTE"><span class="number">${r.dte??'—'} DTE</span></td><td data-label="Qty"><span class="number">${qty}</span></td><td data-label="Bid / ask" class="quote"><span class="bid">$${fmt(r.bid)}</span> / $${fmt(r.ask)}</td><td data-label="Bid / ask volume"><span class="quote-size quote-volume">${Number(r.bid_size||0).toLocaleString()} × ${Number(r.ask_size||0).toLocaleString()}</span></td><td data-label="Bid / ask yield"><span class="yield-pill ${yieldVal>1.5?'high':''}">${fmt(yieldVal)}% / ${askYield===null?'—':fmt(askYield)+'%'}</span></td><td data-label="Income"><span class="number">${income===null?'—':`$${fmt(income)}`}</span></td><td data-label="OI / Vol"><span class="oi">${Number(r.open_interest||0).toLocaleString()} / ${Number(r.volume||0).toLocaleString()}</span></td></tr>`
+    return `<tr><td data-label="Ticker"><div class="ticker"><button class="ticker-details-btn" title="View ${safe(r.symbol)} option details" aria-label="View ${safe(r.symbol)} option details" onclick="viewChain('${safe(r.symbol)}')">${safe(r.symbol)}</button><button class="ticker-ai-btn" type="button" title="Open ChatGPT deep analysis for ${safe(r.symbol)}" aria-label="Open ChatGPT deep analysis for ${safe(r.symbol)}" onclick="analyzeSymbol('${safe(r.symbol)}')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 14.4 9.6 21.5 12l-7.1 2.4L12 21.5l-2.4-7.1L2.5 12l7.1-2.4L12 2.5Z"/><path d="m19 2 .8 2.2L22 5l-2.2.8L19 8l-.8-2.2L16 5l2.2-.8L19 2Z"/></svg></button></div></td><td data-label="Peak">${peakChip(r.peak)}</td><td data-label="Call score"><span class="call-score-pill ${callScoreClass}">${callScore===null?'—':`${fmt(callScore)}/5`}</span></td><td data-label="Last"><span class="number">$${fmt(r.price)}</span></td><td data-label="Change $"><span class="change-value ${changeClass(r.change)}">${changeText(r.change,'$')}</span></td><td data-label="Change %"><span class="change-value ${changeClass(r.change_pct)}">${changeText(r.change_pct,'%')}</span></td><td data-label="Call contract"><div class="contract"><b>${safe(contractLabel(r))}</b>${r.historyAt?`<small>Saved ${new Date(r.historyAt).toLocaleDateString()}</small>`:''}</div></td><td data-label="DTE"><span class="number">${r.dte??'—'} DTE</span></td><td data-label="Qty"><span class="number">${qty}</span></td><td data-label="Bid / ask" class="quote"><span class="bid">$${fmt(r.bid)}</span> / $${fmt(r.ask)}</td><td data-label="Bid / ask volume"><span class="quote-size quote-volume">${Number(r.bid_size||0).toLocaleString()} × ${Number(r.ask_size||0).toLocaleString()}</span></td><td data-label="Bid / ask yield"><span class="yield-pill ${yieldVal>1.5?'high':''}">${fmt(yieldVal)}% / ${askYield===null?'—':fmt(askYield)+'%'}</span></td><td data-label="Income"><span class="number">${income===null?'—':`$${fmt(income)}`}</span></td><td data-label="OI / Vol"><span class="oi">${Number(r.open_interest||0).toLocaleString()} / ${Number(r.volume||0).toLocaleString()}</span></td></tr>`
   }).join('');
   $('#showing').textContent=state.mode==='history'?`Showing ${subset.length} of ${orderedRows.length} saved rows`:`Showing ${subset.length} of ${rows.length} screened symbols`;
 }
 function updateStats(){let good=state.rows.filter(r=>!r.error&&Number.isFinite(Number(r.premium_yield)));let sorted=good.map(r=>Number(r.premium_yield)).sort((a,b)=>a-b);let mid=sorted.length?sorted[Math.floor(sorted.length/2)]:0;$('#review-value').innerHTML=`${good.length} <small>calls</small>`;$('#median-value').innerHTML=`${fmt(mid)} <small>%</small>`;const stamp=new Date();$('#asof-value').textContent=stamp.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',timeZone:'America/Los_Angeles'});$('#asof-date').textContent=stamp.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',timeZone:'America/Los_Angeles'});$('#foot-source').textContent=`Data mode: ${state.source}`;$('#source-pill').innerHTML=`<span class="source-dot"></span> ${state.source==='tradier_sandbox'?'TRADIER SANDBOX · DELAYED':state.source==='tradier'?'TRADIER QUOTES':'DEMO DATA'}`;$('#modal-mode').textContent=state.source==='tradier_sandbox'?'Sandbox · delayed':state.source==='tradier'?'Tradier connected':'Demo';const demoAlert=$('#demo-alert');if(demoAlert)demoAlert.style.display=state.source==='demo'?'flex':'none';}
 async function loadRows({ai=false,snapshot=false}={}){const btn=$('#refresh');btn.disabled=true;$('.refresh-icon').classList.add('spin');$('#rows').innerHTML='<tr><td colspan="14" class="loading">Loading the RHTC option screen…</td></tr>';try{const p=new URLSearchParams({peak:state.peak,q:state.query,sort:state.sort,limit:'200',expiration_set:String(state.expirationSet),holdings_only:String(state.costOnly)});const maxLast=$('#max-last').value.trim();if(maxLast!=='')p.set('max_last',maxLast);const res=await fetch(`/options/api/opportunities?${p}`);if(!res.ok)throw Error(await res.text());const data=await res.json();state.rows=data.rows;state.source=data.source;updateStats();drawPeakBars();renderRows();if(snapshot)saveSnapshot();if(ai)await loadSummary();}catch(e){$('#rows').innerHTML=`<tr><td colspan="14" class="empty">Could not load data: ${safe(e.message)}. Check the server connection and try again.</td></tr>`;toast('Refresh failed. See the table message.')}finally{btn.disabled=false;$('.refresh-icon').classList.remove('spin')}}
-function saveSnapshot(){if(!state.rows.length)return;const history=JSON.parse(localStorage.getItem('rhtc-option-history')||'[]');history.push({at:new Date().toISOString(),rows:state.rows.map(({symbol,peak,price,change,change_pct,strike,expiry,dte,bid,ask,premium_yield,delta,iv,open_interest,volume,bid_size,ask_size,quote_time,contract,share_price,quantity,average_total_score})=>({symbol,peak,price,change,change_pct,strike,expiry,dte,bid,ask,premium_yield,delta,iv,open_interest,volume,bid_size,ask_size,contract,share_price,quantity,average_total_score}))});localStorage.setItem('rhtc-option-history',JSON.stringify(history.slice(-12)))}
+function saveSnapshot(){if(!state.rows.length)return;const history=JSON.parse(localStorage.getItem('rhtc-option-history')||'[]');history.push({at:new Date().toISOString(),rows:state.rows.map(({symbol,peak,price,change,change_pct,strike,expiry,dte,bid,ask,premium_yield,delta,iv,open_interest,volume,bid_size,ask_size,quote_time,contract,share_price,quantity,call_score})=>({symbol,peak,price,change,change_pct,strike,expiry,dte,bid,ask,premium_yield,delta,iv,open_interest,volume,bid_size,ask_size,contract,share_price,quantity,call_score}))});localStorage.setItem('rhtc-option-history',JSON.stringify(history.slice(-12)))}
 async function loadSummary(){let text=$('#ai-summary-text');if(!text)return;text.innerHTML='<span class="summary-loading">Reviewing the latest screen…</span>';try{const response=await fetch('/options/api/summary',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:state.source,rows:state.rows})});const data=await response.json();text.textContent=data.summary;$('#ai-summary-mode').textContent=data.mode==='openai'?'OPENAI SUMMARY':'RULE-BASED SUMMARY';}catch(e){text.textContent='Summary is unavailable. The quote table remains available for review.'}}
 function renderChainPage(){
   const x=state.chainRows[state.chainIndex];
@@ -244,9 +244,9 @@ async function analyzeSymbol(symbol){activeNewsStory=null;activeAnalysisCitation
     const response=await fetch('/options/api/symbol-analysis',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol,screen})});
     const data=await response.json();
     if(!response.ok)throw Error(data.detail||'Analysis request failed.');
-    if(data.average_total_score!==null&&data.average_total_score!==undefined&&Number.isFinite(Number(data.average_total_score))){
-      state.rows=state.rows.map(item=>item.symbol===symbol?{...item,average_total_score:data.average_total_score}:item);
-      state.watchlist=state.watchlist.map(item=>item.symbol===symbol?{...item,average_total_score:data.average_total_score,analysis_count:data.analysis_count}:item);
+    if(data.call_score!==null&&data.call_score!==undefined&&Number.isFinite(Number(data.call_score))){
+      state.rows=state.rows.map(item=>item.symbol===symbol?{...item,call_score:data.call_score}:item);
+      state.watchlist=state.watchlist.map(item=>item.symbol===symbol?{...item,call_score:data.call_score,analysis_count:data.analysis_count}:item);
       renderRows();
     }
     body.innerHTML=renderAnalysis(data.analysis||'No analysis was returned.');
@@ -259,27 +259,27 @@ async function analyzeSymbol(symbol){activeNewsStory=null;activeAnalysisCitation
 async function analyzeDisplayedSymbols(){
   const button=$('#analyze-displayed-btn'),progress=$('#batch-analysis-status');
   const symbols=[...new Set([...document.querySelectorAll('#rows .ticker-details-btn')].map(el=>el.textContent.trim()).filter(Boolean))];
-  if(!symbols.length){toast('There are no displayed symbols to analyze.');return}
+  if(!symbols.length){toast('There are no displayed calls to analyze.');return}
   const skipped=[];
   let updated=0,completed=0;
   button.disabled=true;
-  button.title='Runs a current-source analysis for each displayed ticker and uses OpenAI API credits.';
+  button.title='Runs a current-source analysis for each displayed covered call and uses OpenAI API credits.';
   try{
     for(let index=0;index<symbols.length;index++){
       const symbol=symbols[index],row=state.rows.find(item=>item.symbol===symbol);
-      button.textContent=`Analyzing ${completed}/${symbols.length}…`;
+      button.textContent=`Analyzing call ${completed+1}/${symbols.length}…`;
       progress.textContent=`Completed ${completed} of ${symbols.length} · analyzing ${symbol}`;
       try{
         if(!row)throw Error('Ticker is no longer in the loaded screen');
         const response=await fetch('/options/api/symbol-analysis',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol,screen:analysisScreenForRow(row)})});
         const data=await response.json();
         if(!response.ok)throw Error(data.detail||'Analysis request failed');
-        if(data.total_score===null||data.total_score===undefined||data.average_total_score===null||data.average_total_score===undefined||!Number.isFinite(Number(data.average_total_score))){
+        if(data.total_score===null||data.total_score===undefined||data.call_score===null||data.call_score===undefined||!Number.isFinite(Number(data.call_score))){
           skipped.push(`${symbol}: no scorecard returned`);
           continue;
         }
-        state.rows=state.rows.map(item=>item.symbol===symbol?{...item,average_total_score:Number(data.average_total_score)}:item);
-        state.watchlist=state.watchlist.map(item=>item.symbol===symbol?{...item,average_total_score:Number(data.average_total_score),analysis_count:data.analysis_count}:item);
+        state.rows=state.rows.map(item=>item.symbol===symbol?{...item,call_score:Number(data.call_score)}:item);
+        state.watchlist=state.watchlist.map(item=>item.symbol===symbol?{...item,call_score:Number(data.call_score),analysis_count:data.analysis_count}:item);
         updated++;
         renderRows();
       }catch(error){skipped.push(`${symbol}: ${error.message}`)}finally{
@@ -287,12 +287,12 @@ async function analyzeDisplayedSymbols(){
         progress.textContent=`Completed ${completed} of ${symbols.length}`;
       }
     }
-    progress.textContent=skipped.length?`Updated ${updated}/${symbols.length} · ${skipped.length} skipped`:`Updated ${updated}/${symbols.length} Avg scores`;
+    progress.textContent=skipped.length?`Updated ${updated}/${symbols.length} · ${skipped.length} skipped`:`Updated ${updated}/${symbols.length} call scores`;
     progress.title=skipped.join('\n');
-    toast(skipped.length?`Updated ${updated} scores; ${skipped.length} skipped. See status for details.`:`Updated Avg score / 5 for ${updated} displayed symbols.`);
+    toast(skipped.length?`Updated ${updated} scores; ${skipped.length} skipped. See status for details.`:`Updated Call score for ${updated} displayed calls.`);
   }finally{
     button.disabled=false;
-    button.textContent='Analyze displayed symbols';
+    button.textContent='Analyze calls';
   }
 }
 function pageChain(delta){const next=state.chainIndex+delta;if(next<0||next>=state.chainRows.length)return;state.chainIndex=next;renderChainPage()}
