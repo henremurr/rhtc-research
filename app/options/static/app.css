@@ -361,3 +361,5 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 .modal-backdrop.is-fullscreen>.modal:not(.detail-modal):not(.analysis-modal){box-sizing:border-box;width:100vw;max-width:none;height:100vh;height:100dvh;max-height:none;margin:0;border-radius:0;overflow:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:max(14px,env(safe-area-inset-top,0px)) max(18px,env(safe-area-inset-right,0px)) max(18px,env(safe-area-inset-bottom,0px)) max(18px,env(safe-area-inset-left,0px))}
 
 :root[data-theme="dark"] .screener-table .number.positive{color:#58d68d}:root[data-theme="dark"] .screener-table .number.negative{color:#ff6b6b}
+
+.screener-table .number.positive{color:#58d68d}.screener-table .number.negative{color:#ff6b6b}
