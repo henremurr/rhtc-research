@@ -11,7 +11,7 @@ from unittest.mock import patch
 import httpx
 
 from main import app
-from app.options.api import Tradier, WATCHLIST, parse_finnhub_company_overview, parse_finnhub_metrics, format_option_contract, openai_error_message, split_speech_chunks, strip_mp3_metadata
+from app.options.api import Tradier, WATCHLIST, parse_finnhub_company_overview, parse_finnhub_metrics, format_option_contract, openai_error_message, split_speech_chunks, strip_mp3_metadata, record_stock_rating
 from app.options import news
 
 
@@ -96,13 +96,13 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertLess(page.text.index('<span>Rows</span>'), page.text.index('id="review-limit"'))
         self.assertIn('<span>Order by</span><select id="sort">', page.text)
         self.assertIn('<option value="call_score">Call score</option>', page.text)
-        self.assertIn('<th>CALL SCORE</th>', page.text)
+        self.assertIn('<th title="Latest stock analysis rating: 1 Avoid · 2 Sell · 3 Watch · 4 Grow · 5 Bargain">STOCK SCORE</th><th>CALL SCORE</th>', page.text)
         self.assertIn('>Analyze calls</button>', page.text)
         self.assertLess(page.text.index('Max Last'), page.text.index('<span>Order by</span>'))
-        self.assertIn('app.css?v=call-score-20261003', page.text)
-        self.assertIn('app.js?v=call-score-20261003', page.text)
-        self.assertIn('app.css?v=call-score-20261003', page.text)
-        self.assertIn('app.js?v=call-score-20261003', page.text)
+        self.assertIn('app.css?v=stock-score-20261003', page.text)
+        self.assertIn('app.js?v=stock-score-20261003', page.text)
+        self.assertIn('app.css?v=stock-score-20261003', page.text)
+        self.assertIn('app.js?v=stock-score-20261003', page.text)
         self.assertIn('id="analysis-mp3-btn"', page.text)
         self.assertIn('id="analysis-podcast-transcript"', page.text)
         self.assertIn('data-filter="news"', page.text)
@@ -163,7 +163,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('function analysisScorecardMarkup(line)', script)
         self.assertIn('class="analysis-score-token analysis-score-${score}"', script)
         self.assertIn('.analysis-scorecard{display:flex', css)
-        self.assertIn('call-score-20261003', page.text)
+        self.assertIn('stock-score-20261003', page.text)
         self.assertIn('Total score: ${totalScore} out of 5', script)
         self.assertIn('async function analyzeSymbol(symbol)', script)
         self.assertIn('contractParts.push(`${fmt(strike)} Call`)', script)
@@ -178,7 +178,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn("window.hideSymbolAnalysis=()=>{stopAnalysisSpeech();", script)
         self.assertIn("description.textContent=state.chainDescription", script)
         self.assertNotIn('title="View chain"', script)
-        for label in ('Ticker', 'Peak', 'Call score', 'Last', 'Change $', 'Change %', 'Cost', 'Call contract', 'Qty', 'Bid / ask', 'Bid / ask yield', 'Income', 'OI / Vol'):
+        for label in ('Ticker', 'Peak', 'Stock score', 'Call score', 'Last', 'Change $', 'Change %', 'Cost', 'Call contract', 'Qty', 'Bid / ask', 'Bid / ask yield', 'Income', 'OI / Vol'):
             self.assertIn(f'data-label="{label}"', script)
         self.assertIn('function quantityForPrice(price)', script)
         self.assertIn('Math.trunc(ceiling/last)', script)
@@ -582,7 +582,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual(holdings.json()["rows"][0]["symbol"], "MU")
         self.assertEqual(
             reloaded.json()["rows"],
-            [{**row, "call_score": None, "analysis_count": 0} for row in symbols],
+            [{**row, "call_score": None, "analysis_count": 0, "stock_score": None, "stock_rating_label": None, "stock_score": None, "stock_rating_label": None} for row in symbols],
         )
         self.assertIsNone(by_symbol["MU"]["call_score"])
         self.assertEqual(by_symbol["MU"]["analysis_count"], 0)
@@ -600,12 +600,21 @@ class OptionsRoutesTest(unittest.TestCase):
             connection.execute("INSERT INTO app_state VALUES ('watchlist_seeded', '1')")
             connection.execute("INSERT INTO app_state VALUES ('legacy_import_open', '0')")
         old_rows = self.request("GET", "/options/api/watchlist").json()["rows"]
-        self.assertEqual(old_rows, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None, "call_score": None, "analysis_count": 0}])
+        self.assertEqual(old_rows, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None, "call_score": None, "analysis_count": 0, "stock_score": None, "stock_rating_label": None, "stock_score": None, "stock_rating_label": None}])
         with patch.dict(os.environ, {"RHTC_WATCHLIST_ADMIN_TOKEN": ""}, clear=False):
             saved = self.request("PUT", "/options/api/watchlist", json={"rows": [{"symbol": "MU", "peak": "AI/I", "share_price": "", "quantity": ""}]})
             reloaded = self.request("GET", "/options/api/watchlist").json()["rows"]
         self.assertEqual(saved.status_code, 200)
-        self.assertEqual(reloaded, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None, "call_score": None, "analysis_count": 0}])
+        self.assertEqual(reloaded, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None, "call_score": None, "analysis_count": 0, "stock_score": None, "stock_rating_label": None, "stock_score": None, "stock_rating_label": None}])
+
+    def test_stock_rating_is_persisted_and_returned_with_opportunity_rows(self):
+        with patch.dict(os.environ, {"RHTC_DATA_DIR": self.data_dir.name}, clear=False):
+            self.assertTrue(record_stock_rating("MU", 4, "Grow"))
+            response = self.request("GET", "/options/api/opportunities?limit=200")
+        self.assertEqual(response.status_code, 200)
+        mu = next(row for row in response.json()["rows"] if row["symbol"] == "MU")
+        self.assertEqual(mu["stock_score"], 4)
+        self.assertEqual(mu["stock_rating_label"], "Grow")
 
     def test_call_score_migrates_legacy_average_total_score_database_column(self):
         db_path = os.path.join(self.data_dir.name, "rhtc_symbols.sqlite3")
@@ -1246,7 +1255,7 @@ if __name__ == "__main__":
         self.assertEqual(holdings.json()["rows"][0]["symbol"], "MU")
         self.assertEqual(
             reloaded.json()["rows"],
-            [{**row, "call_score": None, "analysis_count": 0} for row in symbols],
+            [{**row, "call_score": None, "analysis_count": 0, "stock_score": None, "stock_rating_label": None, "stock_score": None, "stock_rating_label": None} for row in symbols],
         )
         self.assertIsNone(by_symbol["MU"]["call_score"])
         self.assertEqual(by_symbol["MU"]["analysis_count"], 0)
@@ -1264,12 +1273,12 @@ if __name__ == "__main__":
             connection.execute("INSERT INTO app_state VALUES ('watchlist_seeded', '1')")
             connection.execute("INSERT INTO app_state VALUES ('legacy_import_open', '0')")
         old_rows = self.request("GET", "/options/api/watchlist").json()["rows"]
-        self.assertEqual(old_rows, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None, "call_score": None, "analysis_count": 0}])
+        self.assertEqual(old_rows, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None, "call_score": None, "analysis_count": 0, "stock_score": None, "stock_rating_label": None, "stock_score": None, "stock_rating_label": None}])
         with patch.dict(os.environ, {"RHTC_WATCHLIST_ADMIN_TOKEN": ""}, clear=False):
             saved = self.request("PUT", "/options/api/watchlist", json={"rows": [{"symbol": "MU", "peak": "AI/I", "share_price": "", "quantity": ""}]})
             reloaded = self.request("GET", "/options/api/watchlist").json()["rows"]
         self.assertEqual(saved.status_code, 200)
-        self.assertEqual(reloaded, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None, "call_score": None, "analysis_count": 0}])
+        self.assertEqual(reloaded, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None, "call_score": None, "analysis_count": 0, "stock_score": None, "stock_rating_label": None, "stock_score": None, "stock_rating_label": None}])
 
     def test_custom_symbol_list_rejects_duplicate_or_invalid_peaks(self):
         duplicate = [{"symbol": "MU", "peak": "AI/I"}, {"symbol": "MU", "peak": "Other"}]
