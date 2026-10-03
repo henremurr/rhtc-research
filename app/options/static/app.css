@@ -334,3 +334,5 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 /* Keep option contracts and yields visually neutral in the compact screener. */
 .screener-table .contract b{font-weight:400}
 .screener-table .yield-pill,.screener-table .yield-pill.high{background:transparent;color:inherit;font-weight:400}
+
+:root[data-theme="dark"] .screener-table .yield-pill,:root[data-theme="dark"] .screener-table .yield-pill.high{background:transparent;color:inherit;font-weight:400}
