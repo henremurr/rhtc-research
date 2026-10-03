@@ -338,7 +338,7 @@ async function analyzeDisplayedStocks(){
       }
     }
     progress.textContent=skipped.length?`Updated ${updated}/${symbols.length} · ${skipped.length} skipped`:`Updated Stock / 5 for ${updated}/${symbols.length} displayed stocks`;
-    progress.title=skipped.join('\\n');
+    progress.title=skipped.join('\n');
     toast(skipped.length?`Updated ${updated} stock scores; ${skipped.length} skipped. See status for details.`:`Updated Stock / 5 for ${updated} displayed stocks.`);
   }finally{
     button.disabled=false;callButton.disabled=false;
