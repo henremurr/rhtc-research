@@ -250,27 +250,43 @@ th,td{white-space:normal;overflow-wrap:anywhere}
 html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 .content{max-width:none;padding-left:18px;padding-right:18px}
 @media(min-width:901px){
-  .table-wrap{overflow-x:hidden;overscroll-behavior-x:none;touch-action:pan-y}
-  .screener-table{table-layout:fixed}
-  .screener-table th,.screener-table td{min-width:0;padding-left:7px;padding-right:7px;white-space:nowrap;overflow:hidden;overflow-wrap:normal;text-overflow:clip}
+  .table-wrap{overflow-x:auto;overscroll-behavior-x:contain;touch-action:pan-x pan-y}
+  .screener-table{table-layout:fixed;min-width:1450px;width:100%}
+  .screener-table th,.screener-table td{min-width:0;padding-left:9px;padding-right:9px;white-space:nowrap;overflow:hidden;overflow-wrap:normal;text-overflow:clip}
   .screener-table td{height:39px;padding-top:3px;padding-bottom:3px}
   .screener-table .peak-chip{padding-top:3px;padding-bottom:3px}
   .screener-table .yield-pill{padding-top:4px;padding-bottom:4px}
   .screener-table th{letter-spacing:.5px}
-  .screener-table th:nth-child(1){width:7%}
-  .screener-table th:nth-child(2){width:7%}
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  .screener-table th:nth-child(1){width:6%}
+  .screener-table th:nth-child(2){width:6%}
   .screener-table th:nth-child(3){width:7%}
-  .screener-table th:nth-child(4){width:6%}
+  .screener-table th:nth-child(4){width:5.5%}
   .screener-table th:nth-child(5){width:6%}
   .screener-table th:nth-child(6){width:6%}
-  .screener-table th:nth-child(7){width:12%}
+  .screener-table th:nth-child(7){width:5%}
   .screener-table th:nth-child(8){width:5%}
-  .screener-table th:nth-child(9){width:5%}
-  .screener-table th:nth-child(10){width:9%}
-  .screener-table th:nth-child(11){width:8%}
-  .screener-table th:nth-child(12){width:10%}
-  .screener-table th:nth-child(13){width:7%}
-  .screener-table th:nth-child(14){width:5%}
+  .screener-table th:nth-child(9){width:11%}
+  .screener-table th:nth-child(10){width:4%}
+  .screener-table th:nth-child(11){width:4%}
+  .screener-table th:nth-child(12){width:8%}
+  .screener-table th:nth-child(13){width:8%}
+  .screener-table th:nth-child(14){width:8%}
+  .screener-table th:nth-child(15){width:5.5%}
+  .screener-table th:nth-child(16){width:5%}
   .screener-table .contract b,.screener-table .contract small{white-space:nowrap}
   .screener-table .quote-volume{display:inline;font:10px var(--mono);color:inherit;margin:0}
 }
