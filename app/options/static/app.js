@@ -124,6 +124,30 @@ function renderCompanyOverview(profile,symbol,quoteName){
   const website=typeof info.website==='string'&&(info.website.startsWith('https://')||info.website.startsWith('http://'))?'<a href="'+safe(info.website)+'" target="_blank" rel="noopener noreferrer">Company website ↗</a>':'';
   return '<section class="company-overview"><div class="company-overview-heading"><h3>About '+safe(name)+'</h3>'+website+'</div><p>'+safe(summary)+'</p><div class="company-overview-facts"><div><small>Industry</small><b>'+safe(info.industry||'Not available')+'</b></div><div><small>Headquarters</small><b>'+safe(headquarters)+'</b></div><div><small>Public-market history</small><b>'+safe(companyPublicHistory(info.ipo))+'</b></div></div><small class="company-overview-note">IPO date shows time as a public company; the business may be older.</small></section>';
 }
+async function analyzeStockQuote(){
+  const context=window.stockQuoteContext||{};
+  const symbol=context.symbol,quote=context.quote||{};
+  const button=$('#stock-analyze-btn'),status=$('#stock-analysis-status'),results=$('#stock-analysis-results');
+  if(!symbol){status.textContent='Load a stock quote before analyzing.';return}
+  button.disabled=true;button.textContent='Analyzing…';status.textContent='Searching current sources and preparing the stock assessment…';
+  results.hidden=true;
+  try{
+    const response=await fetch('/options/api/stock-analysis',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol,quote})});
+    const data=await response.json();
+    if(!response.ok)throw Error(data.detail||'Stock analysis request failed.');
+    const labels={1:'Avoid',2:'Sell',3:'Watch',4:'Grow',5:'Bargain'};
+    const rating=Number(data.rating),label=labels[rating]||data.rating_label||'Unrated';
+    const summary=$('#stock-analysis-summary');
+    summary.innerHTML='<div class="stock-rating stock-rating-'+(Number.isFinite(rating)?rating:0)+'"><span>RHTC rating</span><b>'+(Number.isFinite(rating)?rating+' · ':'')+safe(label)+'</b></div><div class="stock-ranking-scale" aria-label="Rating scale">1 Avoid · 2 Sell · 3 Watch · 4 Grow · 5 Bargain</div><div class="stock-summary-copy">'+renderAnalysis(data.summary||'Summary was not returned.')+'</div>';
+    $('#stock-analysis-details').innerHTML=renderAnalysis(data.details||'Detailed analysis was not returned.');
+    $('#stock-analysis-sources').innerHTML=(data.citations||[]).map(citation=>'<li><a href="'+safe(citation.url)+'" target="_blank" rel="noopener noreferrer">'+safe(citation.title||citation.url)+'</a></li>').join('');
+    results.hidden=false;status.textContent=data.citations?.length?'Current-source analysis · '+data.citations.length+' cited sources':'Current-source analysis';
+  }catch(error){
+    status.textContent=error.message.includes('OPENAI_API_KEY')?'Analysis is not enabled. Add OPENAI_API_KEY to Railway Variables, then redeploy.':error.message;
+  }finally{
+    button.disabled=false;button.textContent='✦ Analyze stock';
+  }
+}
 async function viewChain(symbol){
   const modal=$('#detail-modal'),quoteBox=$('#detail-quote-content'),detail=$('#detail-content');
   $('#detail-title').textContent=symbol+' stock quote and covered-call screen';
@@ -131,6 +155,9 @@ async function viewChain(symbol){
   $('#detail-description').hidden=true;
   $('#detail-company-overview').innerHTML='<div class="loading">Loading company overview…</div>';
   $('#detail-option-source').innerHTML='';
+  window.stockQuoteContext=null;
+  $('#stock-analyze-btn').disabled=true;$('#stock-analysis-status').textContent='Uses current-source research and OpenAI API credits.';
+  $('#stock-analysis-results').hidden=true;$('#stock-analysis-summary').innerHTML='';$('#stock-analysis-details').innerHTML='';$('#stock-analysis-sources').innerHTML='';
   quoteBox.innerHTML='<div class="loading">Retrieving stock quote…</div>';
   detail.innerHTML='<div class="loading">Retrieving covered-call data…</div>';
   modal.classList.add('open');
@@ -141,6 +168,8 @@ async function viewChain(symbol){
     ]);
     const quote=await responses[0].json(),chainData=await responses[1].json();
     if(!responses[0].ok)throw Error(quote.detail||'Stock quote unavailable.');
+    window.stockQuoteContext={symbol,quote};
+    $('#stock-analyze-btn').disabled=false;
     const sourceLabel=quote.source==='demo'?'Illustrative demo values · Not live market data':quote.source==='tradier_sandbox'?'Tradier sandbox quote · May be delayed':'Tradier stock quote';
     $('#detail-title').textContent=quote.description?symbol+' · '+quote.description:symbol+' stock quote and covered-call screen';
     $('#detail-subtitle').textContent=sourceLabel;
