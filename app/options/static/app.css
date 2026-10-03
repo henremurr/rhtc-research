@@ -329,3 +329,7 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 :root[data-theme="dark"] .stock-rating.stock-rating-5{background:#362f20;color:#f0d78d;border-color:#66552e;border-left-color:#dfbd58}
 .stock-analysis-results .analysis-body a,#stock-analysis-sources a{color:#80652e!important;text-decoration:underline;overflow-wrap:anywhere}
 :root[data-theme="dark"] .stock-analysis-results .analysis-body a,:root[data-theme="dark"] #stock-analysis-sources a{color:#ead28b!important}
+
+/* Stock analysis markdown is rendered directly into these containers (without .analysis-body). */
+#stock-analysis-summary a,#stock-analysis-details a{color:#80652e!important;text-decoration:underline;overflow-wrap:anywhere}
+:root[data-theme="dark"] #stock-analysis-summary a,:root[data-theme="dark"] #stock-analysis-details a{color:#ead28b!important}
