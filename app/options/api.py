@@ -172,8 +172,11 @@ def connect_watchlist_db() -> sqlite3.Connection:
     if "quantity" not in columns:
         connection.execute("ALTER TABLE symbols ADD COLUMN quantity REAL")
     if "call_score" not in columns:
-        connection.execute("ALTER TABLE symbols ADD COLUMN call_score REAL")
-    if "average_total_score" in columns:
+        if "average_total_score" in columns:
+            connection.execute("ALTER TABLE symbols RENAME COLUMN average_total_score TO call_score")
+        else:
+            connection.execute("ALTER TABLE symbols ADD COLUMN call_score REAL")
+    elif "average_total_score" in columns:
         connection.execute("UPDATE symbols SET call_score = average_total_score WHERE call_score IS NULL AND average_total_score IS NOT NULL")
     if "analysis_count" not in columns:
         connection.execute("ALTER TABLE symbols ADD COLUMN analysis_count INTEGER NOT NULL DEFAULT 0")
