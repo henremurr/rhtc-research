@@ -101,9 +101,9 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('<th title="Latest stock analysis rating: 1 Avoid · 2 Sell · 3 Watch · 4 Grow · 5 Bargain">STOCK / 5</th><th>CALL / 5</th><th title="Combined stock and call scores, each out of 5">RHTC / 10</th>', page.text)
         self.assertIn('>Analyze calls</button>', page.text)
         self.assertLess(page.text.index('Max Last'), page.text.index('<span>Order by</span>'))
-        self.assertIn('app.css?v=compact-screener-20261003', page.text)
+        self.assertIn('app.css?v=readable-screener-20261003', page.text)
         self.assertIn('app.js?v=rhtc-score-20261003', page.text)
-        self.assertIn('app.css?v=compact-screener-20261003', page.text)
+        self.assertIn('app.css?v=readable-screener-20261003', page.text)
         self.assertIn('app.js?v=rhtc-score-20261003', page.text)
         self.assertIn('id="analysis-mp3-btn"', page.text)
         self.assertIn('id="analysis-podcast-transcript"', page.text)
@@ -214,9 +214,9 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn('@media(max-width:900px){.table-wrap{max-height:none;overflow:visible}', css)
         self.assertIn('.table-wrap{overflow-x:auto;overscroll-behavior-x:contain;touch-action:pan-x pan-y}', css)
         self.assertIn('.screener-table{table-layout:auto;min-width:0;width:100%}', css)
-        self.assertIn('padding-left:3px;padding-right:3px', css)
+        self.assertIn('padding-left:1px;padding-right:1px', css)
         self.assertIn('overflow:visible;overflow-wrap:normal;text-overflow:initial', css)
-        self.assertIn('.screener-table .number,.screener-table .quote,.screener-table .contract b,.screener-table .oi,.screener-table .quote-volume,.screener-table .yield-pill{font-size:8px}', css)
+        self.assertIn('.screener-table .number,.screener-table .quote,.screener-table .contract b,.screener-table .oi,.screener-table .quote-volume,.screener-table .yield-pill{font-size:10px}', css)
         self.assertEqual(self.request("GET", "/options/api/health").json()["watchlist_count"], 129)
 
     def test_news_feed_is_authenticated_and_uses_persistent_database(self):
