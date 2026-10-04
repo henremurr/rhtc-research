@@ -614,3 +614,23 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 :root[data-theme="dark"] .infra-fresh-checks>p,:root[data-theme="dark"] .infra-source p,:root[data-theme="dark"] .infra-source time,:root[data-theme="dark"] .infra-source-empty{color:#9eabb9}
 :root[data-theme="dark"] .infra-source{border-color:#303b48}
 :root[data-theme="dark"] .infra-source>a{color:#e0c77f}
+
+
+.infra-source-snippet{margin-top:7px;padding:11px 13px;border:1px solid var(--line);border-radius:6px;background:color-mix(in srgb,var(--bg) 78%,transparent);color:var(--ink);font-size:11px;line-height:1.6;overflow-wrap:anywhere}
+.infra-source-snippet p{margin:0 0 8px;color:inherit;font-size:inherit;line-height:inherit}
+.infra-source-snippet p:last-child{margin-bottom:0}
+.infra-source-snippet h4{margin:0 0 5px;color:var(--ink);font:700 11px var(--display)}
+.infra-source-snippet ul{margin:4px 0 8px;padding-left:18px}
+.infra-source-snippet li{margin:2px 0;padding-left:2px}
+.infra-source-snippet strong{font-weight:700;color:var(--ink)}
+.infra-source-snippet code{font:10px var(--mono);padding:1px 4px;border-radius:3px;background:rgba(127,140,153,.13);overflow-wrap:anywhere}
+.infra-table-wrap{max-width:100%;overflow-x:auto;margin:8px 0}
+.infra-source-table{width:100%;border-collapse:collapse;font-size:10px;line-height:1.45}
+.infra-source-table th,.infra-source-table td{padding:6px 8px;text-align:left;vertical-align:top;border:1px solid var(--line)}
+.infra-source-table th{font-weight:700;background:rgba(127,140,153,.12);color:var(--ink);white-space:nowrap}
+.infra-source-table td{color:var(--muted)}
+:root[data-theme="dark"] .infra-source-snippet{background:#18212b;border-color:#394654;color:#dce4ec}
+:root[data-theme="dark"] .infra-source-snippet p,:root[data-theme="dark"] .infra-source-snippet li,:root[data-theme="dark"] .infra-source-table td{color:#b6c1cd}
+:root[data-theme="dark"] .infra-source-snippet h4,:root[data-theme="dark"] .infra-source-snippet strong,:root[data-theme="dark"] .infra-source-table th{color:#e3e9f0}
+:root[data-theme="dark"] .infra-source-table th{background:#293542}
+:root[data-theme="dark"] .infra-source-table th,:root[data-theme="dark"] .infra-source-table td{border-color:#394654}

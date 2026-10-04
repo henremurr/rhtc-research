@@ -507,6 +507,42 @@ function infraProductState(item,data){
   if(configured>0)return {label:'Partial',cls:'partial'};
   return {label:'Not detected',cls:''};
 }
+function renderInfraSnippet(source){
+  const clean=String(source||'')
+    .replace(/\r/g,'')
+    .replace(/\\n/g,'\n')
+    .replace(/<\/?[a-z][^>]*>/gi,' ')
+    .replace(/[ \t]+/g,' ')
+    .trim();
+  if(!clean)return '';
+  const lines=clean.split('\n').map(line=>line.trim()).filter(Boolean);
+  const inline=value=>analysisInline(value)
+    .replace(/(^|\s)_([^_]+)_(?=$|\s)/g,'$1<em>$2</em>');
+  const out=[];
+  for(let i=0;i<lines.length;){
+    const line=lines[i];
+    if(line.includes('|')&&i+1<lines.length&&/^\s*\|?\s*:?-{3,}/.test(lines[i+1])){
+      const cells=value=>value.replace(/^\s*\|/,'').replace(/\|\s*$/,'').split('|').map(cell=>cell.trim());
+      const headers=cells(line);
+      i+=2;
+      const rows=[];
+      while(i<lines.length&&lines[i].includes('|')){rows.push(cells(lines[i]));i++}
+      out.push('<div class="infra-table-wrap"><table class="infra-source-table"><thead><tr>'+headers.map(cell=>'<th>'+inline(cell)+'</th>').join('')+'</tr></thead><tbody>'+rows.map(row=>'<tr>'+headers.map((_,index)=>'<td>'+inline(row[index]||'')+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>');
+      continue;
+    }
+    const heading=line.match(/^#{1,4}\s+(.+)$/);
+    if(heading){out.push('<h4>'+inline(heading[1].replace(/#+$/,'').trim())+'</h4>');i++;continue}
+    if(/^[-*]\s+/.test(line)){
+      const items=[];
+      while(i<lines.length&&/^[-*]\s+/.test(lines[i]))items.push('<li>'+inline(lines[i++].replace(/^[-*]\s+/,''))+'</li>');
+      out.push('<ul>'+items.join('')+'</ul>');continue;
+    }
+    const paragraph=[line];i++;
+    while(i<lines.length&&!/^#{1,4}\s+/.test(lines[i])&&!/^[-*]\s+/.test(lines[i])&&!(lines[i].includes('|')&&i+1<lines.length&&/^\s*\|?\s*:?-{3,}/.test(lines[i+1])))paragraph.push(lines[i++]);
+    out.push('<p>'+paragraph.map(inline).join(' ')+'</p>');
+  }
+  return out.join('');
+}
 function infrastructureInventoryMarkup(data){
   const credentials=data?.credential_status||{};
   const credentialNames=Object.keys(credentials);
@@ -536,7 +572,7 @@ function infrastructureInventoryMarkup(data){
   }).join('');
   const location=data?.data_dir||data?.railway_volume_mount_path||'Not reported';
   const checks=data?.source_checks||{status:'not_requested',results:[]};
-  const freshSources=(checks.results||[]).map(item=>'<article class="infra-source"><a href="'+safe(item.url)+'" target="_blank" rel="noopener noreferrer">'+safe(item.title)+' ↗</a>'+(item.date?'<time>'+safe(item.date)+'</time>':'')+(item.snippet?'<p>'+safe(item.snippet)+'</p>':'')+'</article>').join('');
+  const freshSources=(checks.results||[]).map(item=>'<article class="infra-source"><a href="'+safe(item.url)+'" target="_blank" rel="noopener noreferrer">'+safe(item.title)+' ↗</a>'+(item.date?'<time>'+safe(item.date)+'</time>':'')+(item.snippet?'<div class="infra-source-snippet">'+renderInfraSnippet(item.snippet)+'</div>':'')+'</article>').join('');
   const sourceSection='<section class="infra-fresh-checks"><div class="infra-results-head"><h3>Fresh provider documentation check</h3><span>'+(checks.status==='complete'?(checks.results||[]).length+' sources returned':checks.status==='not_configured'?'Perplexity key not detected':checks.status==='unavailable'?'Search temporarily unavailable':'Not run')+'</span></div><p>Each audit sends five current pricing, API, quota, and deprecation queries in one Perplexity Fast Search request. Current listed rate: about $0.001 per successful audit request; no token fee.</p>'+(freshSources||'<div class="infra-source-empty">No current source results are available. Use the official documentation links in each product card.</div>')+'</section>';
   return '<div class="infra-stats"><article class="infra-stat"><div class="infra-stat-label">Products inventoried</div><div class="infra-stat-value">'+infrastructureProducts.length+'</div><div class="infra-stat-note">Application and external services</div></article><article class="infra-stat"><div class="infra-stat-label">Core credentials</div><div class="infra-stat-value">'+present+' / '+credentialNames.length+'</div><div class="infra-stat-note">Presence only · secret values never returned</div></article><article class="infra-stat"><div class="infra-stat-label">Production runtime</div><div class="infra-stat-value">Python '+safe(runtime)+'</div><div class="infra-stat-note">'+safe(source)+'</div></article><article class="infra-stat"><div class="infra-stat-label">Last inventory check</div><div class="infra-stat-value">'+safe(generated)+'</div><div class="infra-stat-note">Storage: '+safe(location)+'</div></article></div>'+products+sourceSection+'<div class="infra-note"><b>Account and billing visibility:</b> the app can confirm runtime versions and whether named secrets exist, but it cannot read provider account owners, billing plans, trial status, balances, or invoices. Pricing and lifecycle notes above were reviewed October 4, 2026; use the linked official product pages to confirm later changes. <b>API tokens are never displayed.</b></div>';
 }
