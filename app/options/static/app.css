@@ -533,3 +533,14 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 :root[data-theme="dark"] .symbol-add-form>button{background:#202b36;color:#74ce91;border-color:#3c5647}
 :root[data-theme="dark"] .symbol-add-form>button:hover{background:#23382e;border-color:#74ce91;color:#9be5ad}
 @media(max-width:800px){.symbol-add-form>button{grid-column:auto;width:30px;height:30px;justify-self:start}}
+
+/* Keep all Watchlist Manager add fields and the action icon on one row. */
+.symbol-add-form{grid-template-columns:minmax(72px,.8fr) minmax(115px,1.25fr) minmax(95px,1fr) minmax(85px,.85fr) minmax(130px,1.3fr) minmax(95px,.95fr) minmax(80px,.8fr) minmax(105px,1.05fr) 30px;gap:6px;align-items:end}
+.symbol-add-form>button{grid-column:auto;width:30px;height:30px;min-width:30px;display:grid;place-items:center;padding:0}
+.symbol-add-form>button svg{width:18px;height:18px}
+@media(max-width:800px){
+  .symbol-add-form{grid-template-columns:minmax(60px,.8fr) minmax(88px,1.15fr) minmax(70px,.9fr) minmax(65px,.8fr) minmax(96px,1.2fr) minmax(65px,.85fr) minmax(58px,.7fr) minmax(74px,1fr) 30px;gap:4px;padding:8px}
+  .symbol-add-form label{font-size:7px;letter-spacing:.25px;gap:4px}
+  .symbol-add-form input,.symbol-add-form select{height:30px;padding:0 5px;font-size:9px}
+  .symbol-add-form>button{grid-column:auto;width:30px;height:30px;min-width:30px;justify-self:stretch}
+}
