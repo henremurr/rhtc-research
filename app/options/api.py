@@ -166,7 +166,7 @@ def connect_watchlist_db() -> sqlite3.Connection:
     connection = sqlite3.connect(watchlist_db_path(), timeout=15)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA journal_mode=WAL")
-    connection.execute("CREATE TABLE IF NOT EXISTS symbols (position INTEGER PRIMARY KEY, symbol TEXT NOT NULL UNIQUE, peak TEXT NOT NULL, share_price REAL, quantity REAL, call_score REAL, analysis_count INTEGER NOT NULL DEFAULT 0, stock_score INTEGER, stock_rating_label TEXT)")
+    connection.execute("CREATE TABLE IF NOT EXISTS symbols (position INTEGER PRIMARY KEY, symbol TEXT NOT NULL UNIQUE, peak TEXT NOT NULL, share_price REAL, quantity REAL, call_score REAL, analysis_count INTEGER NOT NULL DEFAULT 0, stock_score INTEGER, stock_rating_label TEXT, lt_call TEXT, lt_qty INTEGER, lt_premium REAL)")
     columns = {row["name"] for row in connection.execute("PRAGMA table_info(symbols)")}
     if "account" not in columns:
         connection.execute("ALTER TABLE symbols ADD COLUMN account TEXT")
@@ -174,6 +174,12 @@ def connect_watchlist_db() -> sqlite3.Connection:
         connection.execute("ALTER TABLE symbols ADD COLUMN share_price REAL")
     if "quantity" not in columns:
         connection.execute("ALTER TABLE symbols ADD COLUMN quantity REAL")
+    if "lt_call" not in columns:
+        connection.execute("ALTER TABLE symbols ADD COLUMN lt_call TEXT")
+    if "lt_qty" not in columns:
+        connection.execute("ALTER TABLE symbols ADD COLUMN lt_qty INTEGER")
+    if "lt_premium" not in columns:
+        connection.execute("ALTER TABLE symbols ADD COLUMN lt_premium REAL")
     if "call_score" not in columns:
         if "average_total_score" in columns:
             connection.execute("ALTER TABLE symbols RENAME COLUMN average_total_score TO call_score")
@@ -200,7 +206,7 @@ def connect_watchlist_db() -> sqlite3.Connection:
 
 def read_watchlist() -> list[dict[str, Any]]:
     with closing(connect_watchlist_db()) as connection:
-        return [dict(row) for row in connection.execute("SELECT symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account FROM symbols ORDER BY position")]
+        return [dict(row) for row in connection.execute("SELECT symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account, lt_call, lt_qty, lt_premium FROM symbols ORDER BY position")]
 
 
 def extract_analysis_total_score(analysis: str) -> int | None:
@@ -271,6 +277,13 @@ def optional_nonnegative_number(item: dict[str, Any], field: str) -> int | float
     return int(number) if number.is_integer() else number
 
 
+def optional_nonnegative_integer(item: dict[str, Any], field: str) -> int | None:
+    value = optional_nonnegative_number(item, field)
+    if value is not None and not isinstance(value, int):
+        raise HTTPException(400, f"{field.replace('_', ' ').title()} must be a non-negative integer or blank.")
+    return value
+
+
 def validate_watchlist(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if len(rows) > 200:
         raise HTTPException(400, "The watchlist can contain at most 200 symbols.")
@@ -280,6 +293,9 @@ def validate_watchlist(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         ticker = str(item.get("symbol", "")).strip().upper()
         peak = str(item.get("peak", "Other"))
         account = str(item.get("account") or "")
+        lt_call = str(item.get("lt_call") or "").strip()
+        if len(lt_call) > 80:
+            raise HTTPException(400, "LT-Call must be 80 characters or fewer.")
         if not SYMBOL_PATTERN.fullmatch(ticker) or peak not in VALID_PEAKS or ticker in seen:
             raise HTTPException(400, "Use unique ticker symbols and a valid Three Peaks category.")
         if account not in VALID_ACCOUNTS:
@@ -291,6 +307,9 @@ def validate_watchlist(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "share_price": optional_nonnegative_number(item, "share_price"),
             "quantity": optional_nonnegative_number(item, "quantity"),
             "account": account or None,
+            "lt_call": lt_call,
+            "lt_qty": optional_nonnegative_integer(item, "lt_qty"),
+            "lt_premium": optional_nonnegative_number(item, "lt_premium"),
         })
     return cleaned
 
@@ -311,12 +330,12 @@ def replace_watchlist(rows: list[dict[str, Any]]) -> None:
         }
         connection.execute("DELETE FROM symbols")
         connection.executemany(
-            "INSERT INTO symbols(position, symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO symbols(position, symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account, lt_call, lt_qty, lt_premium) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
                     i, row["symbol"], row["peak"], row["share_price"], row["quantity"],
                     *scores.get(row["symbol"], (None, 0, None, None)),
-                    row["account"],
+                    row["account"], row["lt_call"], row["lt_qty"], row["lt_premium"],
                 )
                 for i, row in enumerate(rows)
             ],
