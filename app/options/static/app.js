@@ -471,6 +471,102 @@ async function saveEditedSymbol(row){const oldSymbol=row.dataset.symbol;const ol
 window.showSettings=()=>{const backdrop=$('#settings-modal');openFullscreenModal(backdrop,backdrop.querySelector('.modal'))};window.hideSettings=()=>{const backdrop=$('#settings-modal');resetFullscreenModal(backdrop,backdrop.querySelector('.modal'))};window.hideDetail=()=>{const backdrop=$('#detail-modal'),modal=backdrop.querySelector('.detail-modal'),button=$('#detail-fullscreen-toggle');resetFullscreenModal(backdrop,modal,button)};window.hideSymbols=()=>{const backdrop=$('#symbols-modal');resetFullscreenModal(backdrop,backdrop.querySelector('.modal'))};window.hideSymbolAnalysis=()=>{const backdrop=$('#symbol-analysis-modal'),modal=backdrop.querySelector('.analysis-modal'),button=$('#analysis-fullscreen-toggle');stopAnalysisSpeech();resetFullscreenModal(backdrop,modal,button)};window.viewChain=viewChain;window.analyzeSymbol=analyzeSymbol;
 $('#analysis-fullscreen-toggle').addEventListener('click',()=>{const backdrop=$('#symbol-analysis-modal'),modal=backdrop.querySelector('.analysis-modal'),button=$('#analysis-fullscreen-toggle'),active=!modal.classList.contains('is-fullscreen');modal.classList.toggle('is-fullscreen',active);backdrop.classList.toggle('is-fullscreen',active);button.setAttribute('aria-label',active?'Exit full screen':'Enter full screen');button.title=active?'Exit full screen':'Enter full screen';button.setAttribute('aria-pressed',String(active))});$('#detail-fullscreen-toggle').addEventListener('click',()=>{const backdrop=$('#detail-modal'),modal=backdrop.querySelector('.detail-modal'),button=$('#detail-fullscreen-toggle'),active=!modal.classList.contains('is-fullscreen');modal.classList.toggle('is-fullscreen',active);backdrop.classList.toggle('is-fullscreen',active);button.setAttribute('aria-label',active?'Exit full screen':'Enter full screen');button.title=active?'Exit full screen':'Enter full screen';button.setAttribute('aria-pressed',String(active))});$('#manage-symbols').addEventListener('click',openSymbols);$('#add-symbol').addEventListener('click',addSymbol);$('#new-symbol').addEventListener('keydown',e=>{if(e.key==='Enter')addSymbol()});$('#symbol-filter').addEventListener('input',renderSymbolList);$('#symbol-peak-filter').addEventListener('change',renderSymbolList);$('#import-browser-list').addEventListener('click',()=>{if(state.legacyWatchlist)saveSymbolList(state.legacyWatchlist)});
 $('#symbol-list').addEventListener('click',async e=>{const button=e.target.closest('button[data-action]');if(!button)return;const row=button.closest('.symbol-entry');if(!row)return;const action=button.dataset.action;setSymbolError();if(action==='edit'){state.editingSymbol=symbolAccountKey(row.dataset.symbol,row.dataset.account);renderSymbolList()}else if(action==='cancel'){state.editingSymbol=null;renderSymbolList()}else if(action==='save'){saveEditedSymbol(row)}else if(action==='delete'){const updated=state.watchlist.filter(r=>!(r.symbol===row.dataset.symbol&&(r.account||'')===(row.dataset.account||'')));if(await saveSymbolList(updated)){state.editingSymbol=null;renderSymbolList()}}});
+
+const infrastructureProducts=[
+  {group:'Hosting & delivery',name:'Railway',sub:'Application hosting, deployment, variables, persistent volume',api:'Railway platform / GitHub-connected deploy',version:'Production service · app runtime checked live',credentials:['RAILWAY_VOLUME_MOUNT_PATH'],optional:true,owner:'Railway operates the platform; the Railway project owner manages billing and service settings.',cost:'Free trial: $5 credit for 30 days; Free: $1/month credit; Hobby: $5 minimum with $5 usage included. Usage above included credits is billed.',risk:'Usage can exceed included credits. Verify volume backups and service plan in Railway billing.',links:[['Pricing & trial','https://railway.com/pricing'],['Trial details','https://docs.railway.com/pricing/free-trial']]},
+  {group:'Hosting & delivery',name:'GitHub',sub:'Source repository and deployment trigger',api:'GitHub repository + Railway integration',version:'henremurr/rhtc-research · main branch',credentials:[],owner:'GitHub repository owner controls source access; Railway deploys connected commits.',cost:'No separate app charge identified. Repository and account plan are not visible to the app.',risk:'Deployment depends on the GitHub connection and main-branch build. No GitHub Actions workflow was found in the reviewed app.',links:[['Repository','https://github.com/henremurr/rhtc-research'],['Plans','https://github.com/pricing']]},
+  {group:'Hosting & delivery',name:'Python application stack',sub:'Web framework and runtime dependencies',api:'FastAPI · Uvicorn · HTTPX · Pydantic · ReportLab · OpenAI SDK · langdetect · imageio-ffmpeg · python-multipart',version:'Python 3.11+ expected; exact production runtime and installed package versions are checked live above.',credentials:[],owner:'RHTC maintains application code and dependency pins; Railway supplies the production runtime.',cost:'Open-source packages; no package subscription identified.',risk:'Requirements pin several packages, but Python minor version is not pinned. Review dependency updates and test before upgrading.',links:[['Requirements file','https://github.com/henremurr/rhtc-research/blob/main/requirements.txt']]},
+  {group:'Hosting & delivery',name:'SQLite',sub:'Watchlist and application data storage',api:'Python standard-library sqlite3',version:'Database file under configured RHTC data directory / Railway volume',credentials:[],owner:'RHTC app writes the database; Railway hosts the persistent volume.',cost:'No separate database subscription. Storage and backup are part of hosting operations.',risk:'Recovery depends on the Railway volume and backups. This is a single-file database, not a managed database cluster.',links:[]},
+  {group:'Market data',name:'Tradier',sub:'Quotes, option expirations, option chains',api:'Brokerage API v1',version:'Sandbox default; current base URL is checked live above',credentials:['TRADIER_API_TOKEN'],owner:'Tradier issues production and sandbox tokens; the brokerage account owner manages them.',cost:'Sandbox is for development/paper trading and delayed quotes. Account-linked data access; check Tradier account terms for exact costs.',risk:'Current default points to sandbox, with delayed data and lower request limits. Production requires the live token and production base URL; this dashboard does not place orders.',links:[['API guide','https://docs.tradier.com/docs/getting-started'],['Environments','https://docs.tradier.com/docs/endpoints'],['Rate limits','https://docs.tradier.com/docs/rate-limiting']]},
+  {group:'Market data',name:'Finnhub',sub:'Optional company profile and fundamentals',api:'REST endpoints: profile2, metric, profile, insider-sentiment',version:'REST API; optional integration',credentials:['FINNHUB_API_KEY'],owner:'Finnhub account owner manages API key and plan.',cost:'Free and paid plans are offered; exact plan, quota, and billing are account-specific and not visible to the app.',risk:'Optional fields are unavailable when the key is absent or a plan/rate limit blocks the endpoint.',links:[['Plans','https://finnhub.io/pricing'],['API docs','https://finnhub.io/docs/api']]},
+  {group:'AI & research',name:'OpenAI API',sub:'Research notes, ticker analysis, podcast scripts, speech',api:'OpenAI API · Python SDK',version:'SDK version checked live; defaults: gpt-5-mini and gpt-4o-mini-tts',credentials:['OPENAI_API_KEY'],owner:'OpenAI Platform project owner manages API key, limits, and billing.',cost:'Usage-based API billing, separate from ChatGPT. At the Oct. 4, 2026 check: GPT-5 Mini $0.25/M input and $2/M output tokens; GPT-4o Mini TTS $0.60/M text input and $12/M audio output tokens.',risk:'High: GPT-5 Mini snapshot removal is scheduled for Dec. 11, 2026; dated GPT-4o Mini TTS snapshots are scheduled for Jan. 6, 2027. Confirm active aliases and migrate/test before removal.',links:[['API pricing','https://developers.openai.com/api/docs/pricing'],['Model deprecations','https://developers.openai.com/api/docs/deprecations']]},
+  {group:'AI & research',name:'Perplexity API',sub:'Current-news search and cited analysis',api:'Search API POST /search · Sonar POST /v1/sonar',version:'Fast Search · sonar / sonar-pro model names',credentials:['PERPLEXITY_API_KEY'],owner:'Perplexity API project owner manages API credits, key, and usage tier.',cost:'API billed separately from consumer plans. Fast Search: $1 per 1,000 successful requests; regular Search: $5 per 1,000. Sonar analysis is usage/model-priced.',risk:'Search request billing is per request (up to five queries per request); model and endpoint lifecycle can change. No official retirement notice for /v1/sonar was found in the current changelog check.',links:[['API pricing','https://docs.perplexity.ai/docs/getting-started/pricing'],['API changelog','https://docs.perplexity.ai/docs/resources/changelog']]},
+  {group:'Publishing',name:'Google Cloud OAuth + YouTube',sub:'Uploads generated episodes to the RHTC YouTube channel',api:'YouTube Data API v3 · OAuth 2.0 web application · resumable video upload',version:'YouTube quota and upload API; Google OAuth refresh flow',credentials:['YOUTUBE_CLIENT_ID','YOUTUBE_CLIENT_SECRET','YOUTUBE_REFRESH_TOKEN'],owner:'Google Cloud project owner controls OAuth consent/API quota; channel owner controls publishing.',cost:'Default quota includes 100 video uploads/day and 10,000 units/day for other API calls. No separate app fee identified; quota may be extended after review.',risk:'High: OAuth external app left in Testing can issue refresh tokens that expire after 7 days. Tokens can also be revoked or invalidated. Unverified projects may be restricted to private uploads.',links:[['YouTube API quota','https://developers.google.com/youtube/v3/getting-started'],['OAuth token expiration','https://developers.google.com/identity/protocols/oauth2']]},
+  {group:'Browser assets',name:'Google Fonts',sub:'DM Mono, DM Sans, and Manrope typography',api:'Google Fonts CSS and font delivery',version:'Browser-loaded web fonts',credentials:[],owner:'Google serves fonts; RHTC controls the font references in the page.',cost:'No separate app subscription identified.',risk:'If the external font service is unavailable, the browser falls back to local font families.',links:[['Google Fonts','https://fonts.google.com/']]}
+];
+function infraCredentialLabel(names,data){
+  if(!names.length)return 'No secret required';
+  const status=data?.credential_status||{};
+  const present=names.filter(name=>status[name]).length;
+  const missing=names.filter(name=>!status[name]);
+  if(present===names.length)return 'Configured · '+names.join(', ');
+  if(present===0)return 'Not detected · '+names.join(', ');
+  return 'Partially configured · present: '+names.filter(name=>status[name]).join(', ')+' · missing: '+missing.join(', ');
+}
+function infraPackageVersion(data,name){
+  return data?.packages?.[name]||'not reported';
+}
+function infraProductState(item,data){
+  if(item.optional&&!item.credentials.length)return {label:'Available',cls:''};
+  if(!item.credentials.length)return {label:'Inventory',cls:''};
+  const status=data?.credential_status||{};
+  const configured=item.credentials.filter(name=>status[name]).length;
+  if(configured===item.credentials.length)return {label:'Configured',cls:'ready'};
+  if(configured>0)return {label:'Partial',cls:'partial'};
+  return {label:'Not detected',cls:''};
+}
+function infrastructureInventoryMarkup(data){
+  const credentials=data?.credential_status||{};
+  const credentialNames=Object.keys(credentials);
+  const present=credentialNames.filter(name=>credentials[name]).length;
+  const runtime=data?.python_version||'Not reported';
+  const generated=data?.generated_at?new Intl.DateTimeFormat('en-US',{timeZone:'America/Los_Angeles',dateStyle:'medium',timeStyle:'short'}).format(new Date(data.generated_at))+' PT':'Not checked';
+  const source=data?.data_source==='tradier_sandbox'?'Tradier sandbox':data?.data_source==='tradier'?'Tradier production':'Demo / no Tradier token';
+  const packageRows=[
+    ['FastAPI','FastAPI'],['Uvicorn','Uvicorn'],['HTTPX','HTTPX'],['Pydantic','Pydantic'],['ReportLab','ReportLab'],['OpenAI SDK','OpenAI Python SDK'],['langdetect','langdetect'],['imageio-ffmpeg','imageio-ffmpeg'],['python-multipart','python-multipart']
+  ].map(([label,key])=>'<span>'+safe(label)+' <b>'+safe(infraPackageVersion(data,key))+'</b></span>').join('');
+  const groups=[...new Set(infrastructureProducts.map(item=>item.group))];
+  const products=groups.map(group=>{
+    const cards=infrastructureProducts.filter(item=>item.group===group).map(item=>{
+      const status=infraProductState(item,data);
+      let version=item.version;
+      if(item.name==='Python application stack')version='Python '+runtime+' · installed packages below';
+      if(item.name==='Tradier')version='Base URL: '+(data?.tradier_base_url||'https://sandbox.tradier.com/v1');
+      if(item.name==='OpenAI API'){
+        const models=data?.models||{};
+        version='SDK '+infraPackageVersion(data,'OpenAI Python SDK')+' · '+(models.OPENAI_MODEL||'gpt-5-mini')+' · '+(models.OPENAI_TTS_MODEL||'gpt-4o-mini-tts');
+      }
+      const links=item.links.map(([label,url])=>'<a href="'+safe(url)+'" target="_blank" rel="noopener noreferrer">'+safe(label)+' ↗</a>').join('');
+      const extras=item.name==='Python application stack'?'<div class="infra-package-list">'+packageRows+'</div>':'';
+      return '<article class="infra-product"><div class="infra-product-head"><div><div class="infra-product-name">'+safe(item.name)+'</div><div class="infra-product-sub">'+safe(item.sub)+'</div></div><span class="infra-state '+status.cls+'">'+safe(status.label)+'</span></div><div class="infra-details"><div class="infra-detail"><b>API / version</b> · '+safe(item.api)+'<br><code>'+safe(version)+'</code></div><div class="infra-detail"><b>Credentials</b> · '+safe(infraCredentialLabel(item.credentials,data))+'</div><div class="infra-detail"><b>Managed by</b> · '+safe(item.owner)+'</div><div class="infra-detail"><b>Plan / cost</b> · '+safe(item.cost)+'</div><div class="infra-detail"><b>Lifecycle risk</b> · '+safe(item.risk)+'</div></div>'+extras+(links?'<div class="infra-links">'+links+'</div>':'')+'</article>';
+    }).join('');
+    return '<section class="infra-group"><h3 class="infra-group-title">'+safe(group)+'</h3><div class="infra-product-grid">'+cards+'</div></section>';
+  }).join('');
+  const location=data?.data_dir||data?.railway_volume_mount_path||'Not reported';
+  return '<div class="infra-stats"><article class="infra-stat"><div class="infra-stat-label">Products inventoried</div><div class="infra-stat-value">'+infrastructureProducts.length+'</div><div class="infra-stat-note">Application and external services</div></article><article class="infra-stat"><div class="infra-stat-label">Core credentials</div><div class="infra-stat-value">'+present+' / '+credentialNames.length+'</div><div class="infra-stat-note">Presence only · secret values never returned</div></article><article class="infra-stat"><div class="infra-stat-label">Production runtime</div><div class="infra-stat-value">Python '+safe(runtime)+'</div><div class="infra-stat-note">'+safe(source)+'</div></article><article class="infra-stat"><div class="infra-stat-label">Last inventory check</div><div class="infra-stat-value">'+safe(generated)+'</div><div class="infra-stat-note">Storage: '+safe(location)+'</div></article></div>'+groups.map((_,i)=>'').join('')+products+'<div class="infra-note"><b>Account and billing visibility:</b> the app can confirm runtime versions and whether named secrets exist, but it cannot read provider account owners, billing plans, trial status, balances, or invoices. Pricing and lifecycle notes above were reviewed October 4, 2026; use the linked official product pages to confirm later changes. <b>API tokens are never displayed.</b></div>';
+}
+async function runInfrastructureInventory(){
+  const button=$('#infra-refresh');
+  const status=$('#infra-status');
+  const results=$('#infra-inventory-results');
+  button.disabled=true;button.textContent='↻ Checking…';
+  status.dataset.kind='';status.textContent='Inspecting the deployed runtime and configured variable names. Secret values are not read or returned.';
+  try{
+    const response=await fetch('/options/api/infrastructure-inventory',{credentials:'same-origin',cache:'no-store'});
+    const payload=await response.json();
+    if(!response.ok)throw new Error(payload.detail||'Inventory check failed ('+response.status+').');
+    results.innerHTML=infrastructureInventoryMarkup(payload);
+    status.dataset.kind='ok';
+    status.textContent='Deployment check completed '+new Intl.DateTimeFormat('en-US',{timeZone:'America/Los_Angeles',dateStyle:'medium',timeStyle:'short'}).format(new Date(payload.generated_at))+' PT. Provider plan and billing details are not exposed to the app.';
+  }catch(error){
+    results.innerHTML=infrastructureInventoryMarkup(null);
+    status.dataset.kind='warn';
+    status.textContent='Live deployment check unavailable: '+(error?.message||'request failed')+' The product reference inventory is still shown below.';
+  }finally{
+    button.disabled=false;button.textContent='↻ Recheck deployment';
+  }
+}
+function showInfrastructureInventory(){
+  $('#infra-modal').classList.add('open');
+  document.body.classList.add('modal-open');
+  runInfrastructureInventory();
+}
+function hideInfrastructureInventory(){
+  $('#infra-modal').classList.remove('open');
+  document.body.classList.remove('modal-open');
+}
+
+$('#infra-audit-btn').addEventListener('click',showInfrastructureInventory);$('#infra-refresh').addEventListener('click',runInfrastructureInventory);
 $('#theme-toggle').addEventListener('click',()=>setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark'));
 $('#chain-prev').addEventListener('click',()=>pageChain(-1));$('#chain-next').addEventListener('click',()=>pageChain(1));$('#analyze-displayed-btn').addEventListener('click',analyzeDisplayedSymbols);$('#analyze-displayed-stocks-btn').addEventListener('click',analyzeDisplayedStocks);
 $('#main-prev').addEventListener('click',()=>pageMain(-1));$('#main-next').addEventListener('click',()=>pageMain(1));$('#main-prev').disabled=true;
