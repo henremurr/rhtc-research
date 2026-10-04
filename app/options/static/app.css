@@ -524,3 +524,12 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 .symbol-manager-heading{display:flex;align-items:center;gap:9px;margin:0 0 14px}
 .symbol-manager-heading .symbol-manager-logo{display:block;width:25px;height:25px;flex:0 0 25px;object-fit:cover;border-radius:3px}
 .symbol-manager-heading h2{margin:0;color:var(--gold-dark);font:700 21px/1.15 var(--display);letter-spacing:-.35px}
+
+/* Match the add control to the edit/delete icon buttons and use a green plus. */
+.symbol-add-form{grid-template-columns:minmax(115px,1fr) minmax(135px,1.2fr) minmax(100px,.95fr) minmax(95px,.8fr) minmax(145px,1.25fr) 30px}
+.symbol-add-form>button{grid-column:auto;width:30px;height:30px;display:grid;place-items:center;padding:0;border-radius:4px;background:#fff;color:#328454;border-color:#d6e5da}
+.symbol-add-form>button svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.symbol-add-form>button:hover{background:#edf7f0;border-color:#5c9b70;color:#246b40}
+:root[data-theme="dark"] .symbol-add-form>button{background:#202b36;color:#74ce91;border-color:#3c5647}
+:root[data-theme="dark"] .symbol-add-form>button:hover{background:#23382e;border-color:#74ce91;color:#9be5ad}
+@media(max-width:800px){.symbol-add-form>button{grid-column:auto;width:30px;height:30px;justify-self:start}}
