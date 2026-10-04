@@ -519,3 +519,8 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 .symbol-manager-toolbar .searchbox{flex:0 0 190px;min-width:170px}
 #symbol-count{white-space:nowrap}
 @media(max-width:760px){.symbol-manager-toolbar{justify-content:flex-start;gap:10px 14px;flex-wrap:wrap}.symbol-manager-toolbar .searchbox{flex:1 1 180px}.symbol-manager-toolbar #symbol-count{flex:0 0 100%}}
+
+/* Single branded title for the Watchlist Manager. */
+.symbol-manager-heading{display:flex;align-items:center;gap:9px;margin:0 0 14px}
+.symbol-manager-heading .symbol-manager-logo{display:block;width:25px;height:25px;flex:0 0 25px;object-fit:cover;border-radius:3px}
+.symbol-manager-heading h2{margin:0;color:var(--gold-dark);font:700 21px/1.15 var(--display);letter-spacing:-.35px}
