@@ -54,7 +54,7 @@
 :root[data-theme="dark"] ::selection{background:#6d5c34;color:#fff}
 @media(prefers-reduced-motion:no-preference){body,.sidebar,.topbar,.metric-card,.content-card,.modal{transition:background-color .18s ease,color .18s ease,border-color .18s ease}}
 .chain-pager{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:14px 0 4px;padding:9px 10px;border:1px solid #edf0f2;border-radius:5px;background:#fbfcfc}.chain-pager button{border:1px solid #e5e9ed;border-radius:4px;background:#fff;color:#596677;padding:6px 9px;font:10px var(--sans);cursor:pointer}.chain-pager button:disabled{opacity:.42;cursor:default}.chain-pager span{font:9px var(--mono);color:#75808d}
-.main-pager{margin:0 0 10px}.main-pager[hidden]{display:none}
+.main-pager{margin:0 0 2px;padding-bottom:3px;row-gap:4px}.main-pager .batch-analysis-status:empty{display:none}.main-pager[hidden]{display:none}
 
 .manage-symbols-btn{height:31px;padding:0 12px;border:1px solid #e2e7eb;border-radius:4px;background:#fff;color:#687584;font:10px var(--sans);cursor:pointer}
 .manage-symbols-btn:hover{border-color:#cbb77f;color:#896f36;background:#fbf8f0}
