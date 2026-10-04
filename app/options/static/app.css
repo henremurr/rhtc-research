@@ -401,9 +401,23 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 }
 
 
-/* Double the screener typography for easier reading on tablets and desktop. */
+/* Keep the screener readable without crowding values or headers. */
 @media(min-width:901px){
-  .screener-table thead th{font-size:15px!important}
-  .screener-table tbody td,.screener-table tbody td *{font-size:16px!important}
-  .screener-table tbody td{height:48px;padding-top:5px;padding-bottom:5px}
+  .screener-table thead th{font-size:12px!important}
+  .screener-table tbody td,.screener-table tbody td *{font-size:13px!important}
+  .screener-table tbody td{height:43px;padding-top:3px;padding-bottom:3px}
+  .screener-table thead th:nth-child(1),.screener-table tbody td:nth-child(1),
+  .screener-table thead th:nth-child(2),.screener-table tbody td:nth-child(2),
+  .screener-table thead th:nth-child(7),.screener-table tbody td:nth-child(7),
+  .screener-table thead th:nth-child(8),.screener-table tbody td:nth-child(8){text-align:left}
+  .screener-table thead th:nth-child(3),.screener-table tbody td:nth-child(3),
+  .screener-table thead th:nth-child(4),.screener-table tbody td:nth-child(4),
+  .screener-table thead th:nth-child(5),.screener-table tbody td:nth-child(5){text-align:center}
+  .screener-table thead th:nth-child(6),.screener-table tbody td:nth-child(6),
+  .screener-table thead th:nth-child(9),.screener-table tbody td:nth-child(9),
+  .screener-table thead th:nth-child(10),.screener-table tbody td:nth-child(10),
+  .screener-table thead th:nth-child(11),.screener-table tbody td:nth-child(11),
+  .screener-table thead th:nth-child(12),.screener-table tbody td:nth-child(12),
+  .screener-table thead th:nth-child(13),.screener-table tbody td:nth-child(13),
+  .screener-table thead th:nth-child(14),.screener-table tbody td:nth-child(14){text-align:right}
 }
