@@ -166,7 +166,7 @@ def connect_watchlist_db() -> sqlite3.Connection:
     connection = sqlite3.connect(watchlist_db_path(), timeout=15)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA journal_mode=WAL")
-    connection.execute("CREATE TABLE IF NOT EXISTS symbols (position INTEGER PRIMARY KEY, symbol TEXT NOT NULL UNIQUE, peak TEXT NOT NULL, share_price REAL, quantity REAL, call_score REAL, analysis_count INTEGER NOT NULL DEFAULT 0, stock_score INTEGER, stock_rating_label TEXT, lt_call TEXT, lt_qty INTEGER, lt_premium REAL)")
+    connection.execute("CREATE TABLE IF NOT EXISTS symbols (position INTEGER PRIMARY KEY, symbol TEXT NOT NULL, peak TEXT NOT NULL, share_price REAL, quantity REAL, call_score REAL, analysis_count INTEGER NOT NULL DEFAULT 0, stock_score INTEGER, stock_rating_label TEXT, lt_call TEXT, lt_qty INTEGER, lt_premium REAL)")
     columns = {row["name"] for row in connection.execute("PRAGMA table_info(symbols)")}
     if "account" not in columns:
         connection.execute("ALTER TABLE symbols ADD COLUMN account TEXT")
@@ -193,6 +193,32 @@ def connect_watchlist_db() -> sqlite3.Connection:
         connection.execute("ALTER TABLE symbols ADD COLUMN stock_score INTEGER")
     if "stock_rating_label" not in columns:
         connection.execute("ALTER TABLE symbols ADD COLUMN stock_rating_label TEXT, account TEXT")
+    # Migrate the former ticker-only UNIQUE constraint so tickers can appear once per account.
+    ticker_unique = False
+    for index in connection.execute("PRAGMA index_list(symbols)"):
+        if index["unique"]:
+            index_name = str(index["name"]).replace('"', '""')
+            index_columns = [
+                part["name"]
+                for part in connection.execute(f'PRAGMA index_info("{index_name}")')
+            ]
+            if index_columns == ["symbol"]:
+                ticker_unique = True
+                break
+    if ticker_unique:
+        connection.execute("ALTER TABLE symbols RENAME TO symbols_old")
+        connection.execute(
+            "CREATE TABLE symbols (position INTEGER PRIMARY KEY, symbol TEXT NOT NULL, peak TEXT NOT NULL, share_price REAL, quantity REAL, call_score REAL, analysis_count INTEGER NOT NULL DEFAULT 0, stock_score INTEGER, stock_rating_label TEXT, lt_call TEXT, lt_qty INTEGER, lt_premium REAL, account TEXT)"
+        )
+        connection.execute(
+            "INSERT INTO symbols(position, symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, lt_call, lt_qty, lt_premium, account) "
+            "SELECT position, symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, lt_call, lt_qty, lt_premium, account FROM symbols_old"
+        )
+        connection.execute("DROP TABLE symbols_old")
+    connection.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_symbols_symbol_account "
+        "ON symbols(symbol, COALESCE(account, ''))"
+    )
     connection.execute("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
     connection.execute("INSERT OR IGNORE INTO app_state(key, value) VALUES ('watchlist_seeded', '0')")
     seeded = connection.execute("SELECT value FROM app_state WHERE key = 'watchlist_seeded'").fetchone()
@@ -288,7 +314,7 @@ def validate_watchlist(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if len(rows) > 200:
         raise HTTPException(400, "The watchlist can contain at most 200 symbols.")
     cleaned: list[dict[str, Any]] = []
-    seen: set[str] = set()
+    seen: set[tuple[str, str]] = set()
     for item in rows:
         ticker = str(item.get("symbol", "")).strip().upper()
         peak = str(item.get("peak", "Other"))
@@ -296,11 +322,12 @@ def validate_watchlist(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         lt_call = str(item.get("lt_call") or "").strip()
         if len(lt_call) > 80:
             raise HTTPException(400, "LT-Call must be 80 characters or fewer.")
-        if not SYMBOL_PATTERN.fullmatch(ticker) or peak not in VALID_PEAKS or ticker in seen:
-            raise HTTPException(400, "Use unique ticker symbols and a valid Three Peaks category.")
+        ticker_account = (ticker, account)
+        if not SYMBOL_PATTERN.fullmatch(ticker) or peak not in VALID_PEAKS or ticker_account in seen:
+            raise HTTPException(400, "Use a unique ticker/account pair and a valid Three Peaks category.")
         if account not in VALID_ACCOUNTS:
             raise HTTPException(400, "Choose a valid account or leave the account blank.")
-        seen.add(ticker)
+        seen.add(ticker_account)
         cleaned.append({
             "symbol": ticker,
             "peak": peak,
