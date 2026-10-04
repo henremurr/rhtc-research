@@ -459,3 +459,11 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 .symbol-add-form>button svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .symbol-add-form>button:hover{background:#34475f;border-color:#b9944a;color:#f0d78d}
 @media(max-width:800px){.symbol-add-form{grid-template-columns:repeat(2,minmax(0,1fr))}.symbol-add-form>button{grid-column:auto;width:36px;justify-self:start}}
+
+/* Keep Done beside Find a ticker and let the symbol list fill the fullscreen modal. */
+.symbol-manager-toolbar .modal-done{flex:none;margin:0;float:none;min-height:30px;padding:6px 12px;white-space:nowrap}
+.symbols-modal.is-fullscreen{display:flex;flex-direction:column;box-sizing:border-box;width:100vw;height:100vh;height:100dvh;max-height:none;overflow:hidden;padding:max(14px,env(safe-area-inset-top,0px)) max(18px,env(safe-area-inset-right,0px)) max(18px,env(safe-area-inset-bottom,0px)) max(18px,env(safe-area-inset-left,0px))}
+.symbols-modal.is-fullscreen>.symbol-manager-toolbar{flex:none;gap:9px}
+.symbols-modal.is-fullscreen>.symbol-list{flex:1;min-height:0;max-height:none;overflow:auto}
+.symbols-modal.is-fullscreen>.symbol-error{flex:none}
+@media(max-width:760px){.symbol-manager-toolbar .modal-done{padding:6px 9px}.symbols-modal.is-fullscreen{padding:max(10px,env(safe-area-inset-top,0px)) 12px max(12px,env(safe-area-inset-bottom,0px))}}
