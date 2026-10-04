@@ -484,3 +484,9 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 .symbol-description b{font-size:13px}
 .symbol-description small{font-size:12px}
 .symbol-entry.editing input,.symbol-entry.editing select,.symbol-entry.editing button{font-size:13px}
+
+/* Match all symbol-row fields to the ticker's readable size. */
+.symbol-entry:not(.editing) .symbol-description>*{font-size:13px!important}
+.symbol-entry:not(.editing) .symbol-description b{font-size:13px!important}
+.symbol-entry.editing input,.symbol-entry.editing select,.symbol-entry.editing button{font-size:13px!important}
+.symbol-actions button{font-size:13px}
