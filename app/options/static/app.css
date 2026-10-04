@@ -452,3 +452,10 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 :root[data-theme="dark"] .symbol-entry:not(.editing) .symbol-description b{color:#dce4ed}
 :root[data-theme="dark"] .symbol-entry:not(.editing) .symbol-description small{color:#9caaba}
 @media(max-width:800px){.symbol-entry:not(.editing){min-width:620px}.symbol-entry:not(.editing) .symbol-description{grid-template-columns:minmax(52px,.5fr) minmax(95px,.8fr) minmax(115px,1fr) minmax(130px,1.2fr);gap:7px}.symbol-actions button.icon-button{width:28px;height:28px}}
+
+/* Fit the Manage Symbols add controls in one horizontal row. */
+.symbol-add-form{grid-template-columns:minmax(115px,1fr) minmax(135px,1.2fr) minmax(100px,.95fr) minmax(95px,.8fr) minmax(145px,1.25fr) 36px;gap:8px;align-items:end}
+.symbol-add-form>button{grid-column:auto;width:36px;height:34px;display:grid;place-items:center;padding:0;border-radius:4px;background:#263548;color:#fff;border-color:#263548}
+.symbol-add-form>button svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.symbol-add-form>button:hover{background:#34475f;border-color:#b9944a;color:#f0d78d}
+@media(max-width:800px){.symbol-add-form{grid-template-columns:repeat(2,minmax(0,1fr))}.symbol-add-form>button{grid-column:auto;width:36px;justify-self:start}}
