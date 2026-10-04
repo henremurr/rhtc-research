@@ -834,12 +834,21 @@ async def opportunities(
     max_last: float | None = Query(default=None, ge=0),
 ):
     universe = read_watchlist()
-    selected = [
-        r for r in universe
-        if (peak == "All Peaks" or r["peak"] == peak)
-        and q.upper() in r["symbol"]
-        and (not holdings_only or (r.get("share_price") is not None or r.get("quantity") is not None))
-    ][:limit]
+    selected = []
+    seen_symbols: set[str] = set()
+    for item in universe:
+        if peak != "All Peaks" and item["peak"] != peak:
+            continue
+        if q.upper() not in item["symbol"]:
+            continue
+        if holdings_only and item.get("share_price") is None and item.get("quantity") is None:
+            continue
+        if item["symbol"] in seen_symbols:
+            continue
+        seen_symbols.add(item["symbol"])
+        selected.append(item)
+        if len(selected) >= limit:
+            break
     token = os.getenv("TRADIER_API_TOKEN")
     if not token:
         days = (7, 14, 22, 28, 35, 42, 49, 56, 63, 70, 77)
