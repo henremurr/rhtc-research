@@ -857,6 +857,18 @@ async def infrastructure_inventory(include_sources: bool = Query(default=False))
                             "max_results": 5,
                             "search_type": "fast",
                             "search_context_size": "low",
+                            "search_domain_filter": [
+                                "railway.com",
+                                "docs.railway.com",
+                                "github.com",
+                                "docs.tradier.com",
+                                "tradier.com",
+                                "finnhub.io",
+                                "docs.perplexity.ai",
+                                "developers.openai.com",
+                                "platform.openai.com",
+                                "developers.google.com",
+                            ],
                         },
                     )
                     response.raise_for_status()
