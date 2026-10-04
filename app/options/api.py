@@ -796,7 +796,7 @@ async def health():
 
 
 @app.get("/api/infrastructure-inventory")
-async def infrastructure_inventory():
+async def infrastructure_inventory(include_sources: bool = Query(default=False)):
     """Return safe, live deployment metadata for the on-demand infrastructure report."""
     distributions = {
         "FastAPI": "fastapi",
@@ -831,11 +831,61 @@ async def infrastructure_inventory():
         name: bool(os.getenv(name, "").strip())
         for name in credential_names
     }
+    source_checks: dict[str, Any] = {"status": "not_requested", "results": []}
+    if include_sources:
+        perplexity_key = os.getenv("PERPLEXITY_API_KEY", "").strip()
+        if not perplexity_key:
+            source_checks = {"status": "not_configured", "results": []}
+        else:
+            search_queries = [
+                "Official Railway current pricing, free trial credits, free plan, Hobby and Pro included usage",
+                "Official Tradier Brokerage API sandbox and production market data access and Finnhub API pricing plans",
+                "Official Perplexity API Search Fast pricing and Sonar API models, endpoint or model deprecations",
+                "Official OpenAI API pricing for GPT-5 Mini and GPT-4o Mini TTS and announced model deprecations",
+                "Official YouTube Data API v3 upload quota and Google OAuth refresh token expiration in Testing mode",
+            ]
+            try:
+                async with httpx.AsyncClient(timeout=35.0) as client:
+                    response = await client.post(
+                        "https://api.perplexity.ai/search",
+                        headers={
+                            "Authorization": f"Bearer {perplexity_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "query": search_queries,
+                            "max_results": 5,
+                            "search_type": "fast",
+                            "search_context_size": "low",
+                        },
+                    )
+                    response.raise_for_status()
+                    search_payload = response.json()
+                results = []
+                for item in search_payload.get("results", []) if isinstance(search_payload, dict) else []:
+                    if not isinstance(item, dict):
+                        continue
+                    url = str(item.get("url", "")).strip()
+                    if not url.startswith(("https://", "http://")):
+                        continue
+                    results.append({
+                        "title": str(item.get("title", "Source page"))[:300],
+                        "url": url[:2000],
+                        "snippet": str(item.get("snippet", item.get("content", "")))[:1000],
+                        "date": str(item.get("date", item.get("last_updated", "")))[:80],
+                    })
+                    if len(results) >= 20:
+                        break
+                source_checks = {"status": "complete", "results": results}
+            except (httpx.HTTPError, ValueError, TypeError):
+                source_checks = {"status": "unavailable", "results": []}
+
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "python_version": platform.python_version(),
         "packages": packages,
         "credential_status": credential_status,
+        "source_checks": source_checks,
         "models": {
             "OPENAI_MODEL": os.getenv("OPENAI_MODEL", "gpt-5-mini"),
             "OPENAI_ANALYSIS_MODEL": os.getenv("OPENAI_ANALYSIS_MODEL") or os.getenv("OPENAI_MODEL", "gpt-5-mini"),
