@@ -490,3 +490,13 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 .symbol-entry:not(.editing) .symbol-description b{font-size:13px!important}
 .symbol-entry.editing input,.symbol-entry.editing select,.symbol-entry.editing button{font-size:13px!important}
 .symbol-actions button{font-size:13px}
+
+/* Long-term call details: keep add and edit controls in one horizontal row. */
+.symbol-add-form{grid-template-columns:minmax(65px,.7fr) minmax(105px,1.05fr) minmax(75px,.78fr) minmax(65px,.68fr) minmax(105px,1.05fr) minmax(85px,.9fr) minmax(65px,.68fr) minmax(80px,.82fr) 36px;gap:6px}
+.symbol-add-form>button#add-symbol{grid-column:auto;width:36px;min-width:36px;max-width:36px;justify-self:end}
+.symbol-entry.editing{grid-template-columns:minmax(65px,.7fr) minmax(105px,1.05fr) minmax(75px,.78fr) minmax(65px,.68fr) minmax(105px,1.05fr) minmax(85px,.9fr) minmax(65px,.68fr) minmax(80px,.82fr) auto auto;gap:6px;min-width:900px}
+.symbol-entry:not(.editing){min-width:800px}
+.symbol-entry:not(.editing) .symbol-description{grid-template-columns:minmax(60px,.55fr) minmax(105px,.95fr) minmax(100px,.9fr) minmax(120px,1.1fr) minmax(125px,1.2fr);gap:8px}
+.symbol-entry.editing input,.symbol-entry.editing select{width:100%;min-width:0}
+.symbol-entry.editing button{white-space:nowrap}
+@media(max-width:900px){.symbol-add-form{grid-template-columns:75px 120px 85px 72px 120px 100px 72px 95px 36px;overflow-x:auto}.symbol-list{overflow-x:auto}}
