@@ -152,6 +152,7 @@ GROUPS = {
 }
 WATCHLIST = [{"symbol": s, "peak": peak} for peak, symbols in GROUPS.items() for s in symbols.split()]
 VALID_PEAKS = {"AI/I", "EFM/I", "DS/I", "Other"}
+VALID_ACCOUNTS = {"", "Fidelity Brokerage", "Fidelity IRA", "Schwab PRCA", "Vanguard 401k", "Vanguard IRA-M"}
 SYMBOL_PATTERN = re.compile(r"^[A-Z][A-Z0-9.-]{0,9}$")
 
 
@@ -167,6 +168,8 @@ def connect_watchlist_db() -> sqlite3.Connection:
     connection.execute("PRAGMA journal_mode=WAL")
     connection.execute("CREATE TABLE IF NOT EXISTS symbols (position INTEGER PRIMARY KEY, symbol TEXT NOT NULL UNIQUE, peak TEXT NOT NULL, share_price REAL, quantity REAL, call_score REAL, analysis_count INTEGER NOT NULL DEFAULT 0, stock_score INTEGER, stock_rating_label TEXT)")
     columns = {row["name"] for row in connection.execute("PRAGMA table_info(symbols)")}
+    if "account" not in columns:
+        connection.execute("ALTER TABLE symbols ADD COLUMN account TEXT")
     if "share_price" not in columns:
         connection.execute("ALTER TABLE symbols ADD COLUMN share_price REAL")
     if "quantity" not in columns:
@@ -183,7 +186,7 @@ def connect_watchlist_db() -> sqlite3.Connection:
     if "stock_score" not in columns:
         connection.execute("ALTER TABLE symbols ADD COLUMN stock_score INTEGER")
     if "stock_rating_label" not in columns:
-        connection.execute("ALTER TABLE symbols ADD COLUMN stock_rating_label TEXT")
+        connection.execute("ALTER TABLE symbols ADD COLUMN stock_rating_label TEXT, account TEXT")
     connection.execute("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
     connection.execute("INSERT OR IGNORE INTO app_state(key, value) VALUES ('watchlist_seeded', '0')")
     seeded = connection.execute("SELECT value FROM app_state WHERE key = 'watchlist_seeded'").fetchone()
@@ -197,7 +200,7 @@ def connect_watchlist_db() -> sqlite3.Connection:
 
 def read_watchlist() -> list[dict[str, Any]]:
     with closing(connect_watchlist_db()) as connection:
-        return [dict(row) for row in connection.execute("SELECT symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label FROM symbols ORDER BY position")]
+        return [dict(row) for row in connection.execute("SELECT symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account FROM symbols ORDER BY position")]
 
 
 def extract_analysis_total_score(analysis: str) -> int | None:
@@ -276,14 +279,18 @@ def validate_watchlist(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for item in rows:
         ticker = str(item.get("symbol", "")).strip().upper()
         peak = str(item.get("peak", "Other"))
+        account = str(item.get("account") or "")
         if not SYMBOL_PATTERN.fullmatch(ticker) or peak not in VALID_PEAKS or ticker in seen:
             raise HTTPException(400, "Use unique ticker symbols and a valid Three Peaks category.")
+        if account not in VALID_ACCOUNTS:
+            raise HTTPException(400, "Choose a valid account or leave the account blank.")
         seen.add(ticker)
         cleaned.append({
             "symbol": ticker,
             "peak": peak,
             "share_price": optional_nonnegative_number(item, "share_price"),
             "quantity": optional_nonnegative_number(item, "quantity"),
+            "account": account or None,
         })
     return cleaned
 
@@ -304,11 +311,12 @@ def replace_watchlist(rows: list[dict[str, Any]]) -> None:
         }
         connection.execute("DELETE FROM symbols")
         connection.executemany(
-            "INSERT INTO symbols(position, symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO symbols(position, symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
                     i, row["symbol"], row["peak"], row["share_price"], row["quantity"],
                     *scores.get(row["symbol"], (None, 0, None, None)),
+                    row["account"],
                 )
                 for i, row in enumerate(rows)
             ],
