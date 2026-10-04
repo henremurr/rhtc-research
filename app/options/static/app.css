@@ -508,3 +508,7 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 :root[data-theme="dark"] .symbol-edit-lt-call:focus,
 :root[data-theme="dark"] .symbol-edit-lt-qty:focus,
 :root[data-theme="dark"] .symbol-edit-lt-premium:focus{border-color:#b9a16a;box-shadow:0 0 0 2px #b9a16a22}
+
+/* Place the trash action before the ticker while keeping edit on the right. */
+.symbol-entry:not(.editing){grid-template-columns:30px minmax(0,1fr) auto}
+.symbol-entry:not(.editing) .symbol-delete-action{justify-content:flex-start}
