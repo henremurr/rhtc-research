@@ -599,3 +599,5 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 :root[data-theme="dark"] .infra-state.partial{background:#342f23;color:#e5d091;border-color:#66552d}
 :root[data-theme="dark"] .infra-links a{color:#e0c77f}
 :root[data-theme="dark"] .infra-modal-header,:root[data-theme="dark"] .infra-note{border-color:#303b48}
+
+.infra-package-list{display:flex;flex-wrap:wrap;gap:5px 11px;padding:7px 0 2px;border-top:1px solid var(--line);margin-top:3px}.infra-package-list span{font:9px var(--mono);color:var(--muted)}.infra-package-list b{color:var(--ink);font-weight:500}:root[data-theme="dark"] .infra-package-list{border-color:#303b48}:root[data-theme="dark"] .infra-package-list span{color:#9eabb9}:root[data-theme="dark"] .infra-package-list b{color:#e3e9f0}
