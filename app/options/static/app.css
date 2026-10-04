@@ -475,3 +475,12 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 .symbol-add-form>button#add-symbol{box-sizing:border-box;grid-column:auto;width:36px;min-width:0;max-width:36px;height:34px;justify-self:end;overflow:hidden}
 .symbol-add-form>button#add-symbol svg{display:block;width:18px;height:18px;flex:none}
 @media(max-width:800px){.symbol-add-form{grid-template-columns:repeat(2,minmax(0,1fr))}.symbol-add-form>button#add-symbol{grid-column:auto;width:36px;max-width:36px;justify-self:start}}
+
+/* Improve readability and remove excess space in Watchlist Manager. */
+.symbols-modal h2{margin-bottom:4px}
+.symbols-modal #symbol-storage-status{display:none}
+.symbols-modal .symbol-add-form{margin-top:8px}
+.symbol-add-form input,.symbol-add-form select,.symbol-edit-ticker,.symbol-edit-peak,.symbol-edit-price,.symbol-edit-quantity,.symbol-edit-account{font-size:13px}
+.symbol-description b{font-size:13px}
+.symbol-description small{font-size:12px}
+.symbol-entry.editing input,.symbol-entry.editing select,.symbol-entry.editing button{font-size:13px}
