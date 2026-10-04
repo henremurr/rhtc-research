@@ -879,5 +879,28 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn("No listed expiration", first["error"])
 
 
+    def test_infrastructure_inventory_reports_runtime_without_exposing_secret_values(self):
+        secret_values = {
+            "TRADIER_API_TOKEN": "tradier-secret-test-value",
+            "OPENAI_API_KEY": "openai-secret-test-value",
+            "PERPLEXITY_API_KEY": "perplexity-secret-test-value",
+        }
+        with patch.dict(os.environ, secret_values, clear=False):
+            response = self.request("GET", "/options/api/infrastructure-inventory")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["python_version"])
+        self.assertIn("FastAPI", payload["packages"])
+        self.assertTrue(payload["credential_status"]["TRADIER_API_TOKEN"])
+        self.assertTrue(payload["credential_status"]["OPENAI_API_KEY"])
+        self.assertTrue(payload["credential_status"]["PERPLEXITY_API_KEY"])
+        for secret in secret_values.values():
+            self.assertNotIn(secret, response.text)
+
+    def test_infrastructure_inventory_requires_sign_in(self):
+        response = self.request("GET", "/options/api/infrastructure-inventory", authenticated=False)
+        self.assertEqual(response.status_code, 401)
+
+
 if __name__ == "__main__":
     unittest.main()
