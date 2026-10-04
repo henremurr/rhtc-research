@@ -51,16 +51,16 @@ class NewsAnalysisInput(BaseModel):
     published_at: str = Field(default="", max_length=40)
 
 SEARCH_QUERIES = [
-    "AI compute infrastructure, GPUs, accelerators and hyperscaler investment news",
-    "semiconductors, memory, networking, servers and data center supply chain news",
-    "electric power, grid, generation and utility infrastructure news",
-    "nuclear energy, uranium, natural gas, LNG, fuels and critical minerals news",
-    "US defense, Pentagon procurement, missiles and munitions news",
-    "military drones, autonomy, electronic warfare and defense technology news",
-    "space industry, launch vehicles and commercial spaceflight news",
-    "satellites, Space Force, NASA and national security space news",
-    "CSIS, Hudson Institute, FDD and Heritage Foundation reports on defense and security",
-    "think tank reports on AI infrastructure, energy security, minerals and space policy",
+    "current developments across the RHTC Three Peaks thesis: AI compute, power, fuels and minerals, defense and security, and space",
+    "latest AI compute, semiconductors, GPUs, data centers, networking, memory, and hyperscaler investment news",
+    "latest electricity, grid, generation, nuclear, uranium, oil, natural gas, LNG, fuels, and critical minerals news",
+    "latest US defense, Pentagon procurement, missiles, munitions, military technology, and security news",
+    "latest space, satellite, launch, Space Force, NASA, and national security space developments",
+    "recent geopolitical developments, conflicts, sanctions, trade controls, shipping chokepoints, and supply-chain disruptions",
+    "recent US economic news: Federal Reserve, interest rates, inflation, employment, GDP, Treasury yields, fiscal policy, trade, and manufacturing",
+    "recent global economic news: central banks, growth, inflation, currency, trade, commodities, and industrial supply chains",
+    "recent policy, legislative, and regulatory decisions affecting AI infrastructure, electricity, energy, minerals, defense, and space",
+    "recent CSIS, Hudson, FDD, Heritage, and other think-tank reports on AI, energy security, defense, geopolitics, and space",
 ]
 
 PEAK_TERMS = {
@@ -169,11 +169,21 @@ def clean_result(item: dict[str, Any], seen_at: str) -> dict[str, str] | None:
         return None
     source = (parsed.hostname or "").removeprefix("www.")[:200]
     snippet = str(item.get("snippet") or "").strip()[:3000]
+    published_raw = str(item.get("date") or item.get("last_updated") or "").strip()[:40]
+    try:
+        datetime.fromisoformat(published_raw.replace("Z", "+00:00"))
+        published_at = published_raw
+    except ValueError:
+        try:
+            published_at = datetime.strptime(published_raw, "%m/%d/%Y").date().isoformat()
+        except ValueError:
+            published_at = ""
+
     return {
         "url": canonical_url[:2000],
         "title": title,
         "source": source,
-        "published_at": str(item.get("date") or item.get("last_updated") or "")[:40],
+        "published_at": published_at,
         "snippet": snippet,
         "peak": classify_peak(title, snippet),
         "seen_at": seen_at,
@@ -185,28 +195,24 @@ def latest_scan_at(connection: sqlite3.Connection) -> str | None:
     return row["value"] if row else None
 
 
-async def scan_news(*, scheduled: bool = False) -> dict[str, Any]:
+async def scan_news(*, scheduled: bool = False, query: str | None = None) -> dict[str, Any]:
     async with SCAN_LOCK:
         api_key = os.getenv("PERPLEXITY_API_KEY")
         if not api_key:
             raise HTTPException(503, "News search is not configured. Add PERPLEXITY_API_KEY to the Railway service variables.")
 
-        with closing(connect_db()) as connection:
-            previous = latest_scan_at(connection)
-        if previous:
-            try:
-                last = datetime.fromisoformat(previous)
-                if last.tzinfo is None:
-                    last = last.replace(tzinfo=PACIFIC)
-                if not scheduled and (now_pacific() - last.astimezone(PACIFIC)) < timedelta(minutes=10):
-                    return {"status": "recent", "last_scan_at": previous, "added": 0}
-            except ValueError:
-                pass
-
         after_date = (now_pacific() - timedelta(days=NEWS_WINDOW_DAYS)).strftime("%m/%d/%Y")
+        queries_to_run = list(SEARCH_QUERIES)
+        if query and query.strip():
+            topic = " ".join(query.split())[:200]
+            queries_to_run.append(
+                f"Current news about {topic}; prioritize credible reporting within the last 14 days "
+                "and include direct relevance to AI, energy, defense, security, space, or the economy where applicable"
+            )
+        per_query_limit = max(1, min(MAX_RESULTS_PER_QUERY, MAX_ARTICLES_PER_SCAN // len(queries_to_run)))
         query_batches = [
-            SEARCH_QUERIES[index:index + MAX_QUERIES_PER_REQUEST]
-            for index in range(0, len(SEARCH_QUERIES), MAX_QUERIES_PER_REQUEST)
+            queries_to_run[index:index + MAX_QUERIES_PER_REQUEST]
+            for index in range(0, len(queries_to_run), MAX_QUERIES_PER_REQUEST)
         ]
         raw_results: list[Any] = []
         try:
@@ -217,7 +223,7 @@ async def scan_news(*, scheduled: bool = False) -> dict[str, Any]:
                         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                         json={
                             "query": queries,
-                            "max_results": MAX_RESULTS_PER_QUERY,
+                            "max_results": per_query_limit,
                             "search_type": "fast",
                             "search_after_date_filter": after_date,
                             "search_context_size": "low",
@@ -264,27 +270,51 @@ async def scan_news(*, scheduled: bool = False) -> dict[str, Any]:
                      last_seen_at=excluded.last_seen_at""",
                 list(clean_items.values()),
             )
-            connection.execute("DELETE FROM news_items WHERE first_seen_at < ?", ((now_pacific() - timedelta(days=90)).isoformat(),))
+            cutoff_time = now_pacific() - timedelta(days=NEWS_WINDOW_DAYS)
+            cutoff_date = cutoff_time.date().isoformat()
+            cutoff_timestamp = cutoff_time.isoformat()
+            connection.execute(
+                """DELETE FROM news_items
+                   WHERE (published_at != '' AND substr(published_at,1,10) < ?)
+                      OR (published_at = '' AND last_seen_at < ?)""",
+                (cutoff_date, cutoff_timestamp),
+            )
+            connection.execute(
+                """DELETE FROM news_items
+                   WHERE url NOT IN (
+                       SELECT url FROM news_items
+                       ORDER BY last_seen_at DESC,
+                                COALESCE(NULLIF(published_at,''), last_seen_at) DESC
+                       LIMIT ?
+                   )""",
+                (MAX_ARTICLES_PER_SCAN,),
+            )
             connection.execute("INSERT OR REPLACE INTO news_meta(key,value) VALUES('last_scan_at',?)", (seen_at,))
             connection.execute("INSERT OR REPLACE INTO news_meta(key,value) VALUES('last_scan_count',?)", (str(len(clean_items)),))
             connection.commit()
             total = connection.execute("SELECT COUNT(*) AS n FROM news_items").fetchone()["n"]
 
-        return {"status": "complete", "last_scan_at": seen_at, "added": added, "total": total}
+        return {
+            "status": "complete",
+            "last_scan_at": seen_at,
+            "added": added,
+            "retrieved": len(clean_items),
+            "total": total,
+        }
 
 
 @router.get("")
 async def get_news(
     peak: str | None = Query(default=None, max_length=20),
     q: str | None = Query(default=None, max_length=120),
-    days: int = Query(default=14, ge=1, le=90),
+    days: int = Query(default=NEWS_WINDOW_DAYS, ge=1, le=NEWS_WINDOW_DAYS),
 ):
     cutoff_time = now_pacific() - timedelta(days=days)
     cutoff = cutoff_time.isoformat()
     cutoff_date = cutoff_time.date().isoformat()
-    query = """SELECT url,title,source,published_at,snippet,peak,first_seen_at FROM news_items
+    query = """SELECT url,title,source,published_at,snippet,peak,first_seen_at,last_seen_at FROM news_items
                WHERE ((published_at != '' AND substr(published_at,1,10) >= ?)
-                  OR (published_at = '' AND first_seen_at >= ?))"""
+                  OR (published_at = '' AND last_seen_at >= ?))"""
     params: list[Any] = [cutoff_date, cutoff]
     if peak and peak not in {"All", "All Peaks"}:
         query += " AND peak = ?"
@@ -293,7 +323,8 @@ async def get_news(
         query += " AND (title LIKE ? OR snippet LIKE ? OR source LIKE ?)"
         term = f"%{q.strip()}%"
         params.extend([term, term, term])
-    query += " ORDER BY COALESCE(NULLIF(published_at,''), first_seen_at) DESC, first_seen_at DESC LIMIT 150"
+    query += " ORDER BY last_seen_at DESC, COALESCE(NULLIF(published_at,''), first_seen_at) DESC LIMIT ?"
+    params.append(MAX_ARTICLES_PER_SCAN)
     with closing(connect_db()) as connection:
         rows = [dict(row) for row in connection.execute(query, params)]
         meta = {row["key"]: row["value"] for row in connection.execute("SELECT key,value FROM news_meta")}
@@ -306,13 +337,13 @@ async def get_news(
         "last_scan_count": int(meta.get("last_scan_count", "0")),
         "configured": bool(os.getenv("PERPLEXITY_API_KEY")),
         "days": days,
-        "limit": 150,
+        "limit": MAX_ARTICLES_PER_SCAN,
     }
 
 
 @router.post("/scan")
-async def scan_now():
-    return await scan_news()
+async def scan_now(q: str | None = Query(default=None, max_length=200)):
+    return await scan_news(query=q)
 
 
 @router.post("/translate")
