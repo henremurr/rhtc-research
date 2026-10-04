@@ -373,3 +373,11 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 .screener-table tbody td:nth-child(12),
 .screener-table tbody td:nth-child(13),
 .screener-table tbody td:nth-child(14){text-align:right}
+
+.screener-table thead th:nth-child(6),
+.screener-table thead th:nth-child(9),
+.screener-table thead th:nth-child(10),
+.screener-table thead th:nth-child(11),
+.screener-table thead th:nth-child(12),
+.screener-table thead th:nth-child(13),
+.screener-table thead th:nth-child(14){text-align:right}
