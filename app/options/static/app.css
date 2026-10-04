@@ -436,3 +436,19 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 .news-search-form{display:flex;align-items:center;gap:7px}.news-search-form .searchbox{width:190px}.news-search-submit{min-height:32px;padding:6px 10px;border:1px solid #e2e6ea;border-radius:5px;background:#fff;color:#586575;font:600 10px var(--sans);cursor:pointer}.news-search-submit:hover{border-color:#c8b27c;color:#725a2e;background:#fbf9f4}.news-search-submit:disabled{opacity:.55;cursor:wait}.news-item-meta .news-retrieved{margin-left:auto}
 :root[data-theme="dark"] .news-search-submit{background:#1c2530;border-color:#3a4654;color:#d3dbe4}:root[data-theme="dark"] .news-search-submit:hover{background:#292b2d;border-color:#aa8b4a;color:#efd690}
 @media(max-width:760px){.news-search-form{flex:1;min-width:min(100%,260px)}.news-search-form .searchbox{width:auto;flex:1}.news-item-meta .news-retrieved{margin-left:0}}
+
+/* Keep each symbol's details on one line with compact icon-only actions. */
+.symbol-list{overflow-x:auto}
+.symbol-entry:not(.editing){display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:9px;min-width:640px;min-height:40px;padding:5px 4px}
+.symbol-entry:not(.editing) .symbol-description{display:grid;grid-template-columns:minmax(58px,.55fr) minmax(105px,.9fr) minmax(125px,1.15fr) minmax(140px,1.3fr);align-items:center;gap:10px;min-width:0}
+.symbol-entry:not(.editing) .symbol-description>*{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.symbol-entry:not(.editing) .symbol-description b{font-size:10px}
+.symbol-entry:not(.editing) .symbol-description small{font-size:9px}
+.symbol-entry:not(.editing) .symbol-actions{align-items:center;gap:5px}
+.symbol-actions button.icon-button{display:grid;place-items:center;width:30px;height:30px;padding:0}
+.symbol-actions button.icon-button svg{width:15px;height:15px;fill:currentColor}
+.symbol-actions button.icon-button.danger svg{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.symbol-actions button.icon-button:focus-visible{outline:2px solid #b9944a;outline-offset:2px}
+:root[data-theme="dark"] .symbol-entry:not(.editing) .symbol-description b{color:#dce4ed}
+:root[data-theme="dark"] .symbol-entry:not(.editing) .symbol-description small{color:#9caaba}
+@media(max-width:800px){.symbol-entry:not(.editing){min-width:620px}.symbol-entry:not(.editing) .symbol-description{grid-template-columns:minmax(52px,.5fr) minmax(95px,.8fr) minmax(115px,1fr) minmax(130px,1.2fr);gap:7px}.symbol-actions button.icon-button{width:28px;height:28px}}
