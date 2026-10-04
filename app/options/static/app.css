@@ -500,3 +500,11 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 .symbol-entry.editing input,.symbol-entry.editing select{width:100%;min-width:0}
 .symbol-entry.editing button{white-space:nowrap}
 @media(max-width:900px){.symbol-add-form{grid-template-columns:75px 120px 85px 72px 120px 100px 72px 95px 36px;overflow-x:auto}.symbol-list{overflow-x:auto}}
+
+/* Give long-term call edit controls the same dark surface as other manager inputs. */
+:root[data-theme="dark"] .symbol-edit-lt-call,
+:root[data-theme="dark"] .symbol-edit-lt-qty,
+:root[data-theme="dark"] .symbol-edit-lt-premium{background:#111a24;color:#dce4ed;border-color:#394654}
+:root[data-theme="dark"] .symbol-edit-lt-call:focus,
+:root[data-theme="dark"] .symbol-edit-lt-qty:focus,
+:root[data-theme="dark"] .symbol-edit-lt-premium:focus{border-color:#b9a16a;box-shadow:0 0 0 2px #b9a16a22}
