@@ -5,7 +5,7 @@
   <title>RHTC Options Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/options/static/app.css?v=tighten-analyze-table-gap-20261004">
+  <link rel="stylesheet" href="/options/static/app.css?v=news-refresh-150-20261004">
 </head>
 <body>
 <div class="shell">
@@ -32,9 +32,9 @@
       <section id="news-view" class="news-view" hidden>
         <div class="page-head"><div><div class="eyebrow">THREE PEAKS · DAILY RESEARCH SCAN</div><h1>RHTC News Feed</h1><p class="subhead">New developments across AI compute, power and fuels, defense and security, and space.</p></div><div class="head-actions"><span class="source-pill news-status" id="news-last-scanned">Checking scan status…</span><button class="refresh-btn" id="scan-news" type="button"><span class="refresh-icon">↻</span> Scan for news</button></div></div>
         <section class="content-card news-card">
-          <div class="table-header"><div><h2>Recent stories</h2><p id="news-count">Loading saved stories…</p></div><div class="table-controls"><label class="review-limit-control"><span>Peak</span><select id="news-peak" aria-label="Filter news by RHTC peak"><option value="All">All Peaks</option><option value="AI/I">AI / Infrastructure</option><option value="EFM/I">Energy / Infrastructure</option><option value="DS/I">Defense / Space</option><option value="Cross-Peak">Cross-Peak</option><option value="Other">Other</option></select></label><label class="searchbox"><span>⌕</span><input id="news-search" type="search" placeholder="Search stories" autocomplete="off"></label></div></div>
+          <div class="table-header"><div><h2>Recent stories</h2><p id="news-count">Loading saved stories…</p></div><div class="table-controls"><label class="review-limit-control"><span>Peak</span><select id="news-peak" aria-label="Filter news by RHTC peak"><option value="All">All Peaks</option><option value="AI/I">AI / Infrastructure</option><option value="EFM/I">Energy / Infrastructure</option><option value="DS/I">Defense / Space</option><option value="Cross-Peak">Cross-Peak</option><option value="Other">Other</option></select></label><form id="news-search-form" class="news-search-form"><label class="searchbox"><span>⌕</span><input id="news-search" type="search" placeholder="Search stories or topic" autocomplete="off"></label><button id="news-search-submit" class="news-search-submit" type="submit">Search web</button></form></div></div>
           <div id="news-items" class="news-items"><p class="loading">Loading recent news…</p></div>
-          <div class="table-footer"><span>Perplexity Search · refreshed daily at 6:00 a.m. Pacific</span><span>Headlines link to original sources. Summaries are source snippets.</span></div>
+          <div class="table-footer"><span>Fresh Perplexity search on request · automatic scan daily at 6:00 a.m. Pacific · 14-day window, up to 150 stories</span><span>Headlines link to original sources. Summaries are source snippets.</span></div>
         </section>
       </section>
     </div>
@@ -57,6 +57,6 @@
 <label class="youtube-review-label"><input id="youtube-review-confirm" type="checkbox"> I reviewed the full MP3, title, description, and selected artwork.</label>
 <div class="youtube-publish-actions"><button id="youtube-publish-btn" type="button" disabled>▶ Publish to YouTube</button><span id="youtube-publish-status" role="status" aria-live="polite"></span></div>
 </section></div></div></div>
-<script src="/options/static/app.js?v=compact-value-slashes-20261004"></script>
+<script src="/options/static/app.js?v=news-refresh-150-20261004"></script>
 </body>
 </html>
