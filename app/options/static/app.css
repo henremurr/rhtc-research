@@ -395,9 +395,9 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
   .screener-table th:nth-child(2),.screener-table td:nth-child(2){width:5%}
   .screener-table th:nth-child(3),.screener-table td:nth-child(3){width:7%}
   .screener-table th:nth-child(4),.screener-table td:nth-child(4){width:6%}
-  .screener-table th:nth-child(5),.screener-table td:nth-child(5){width:6%}
+  .screener-table th:nth-child(5),.screener-table td:nth-child(5){width:5%}
   .screener-table th:nth-child(6),.screener-table td:nth-child(6){width:8%}
-  .screener-table th:nth-child(7),.screener-table td:nth-child(7){width:11%}
+  .screener-table th:nth-child(7),.screener-table td:nth-child(7){width:12%}
   .screener-table th:nth-child(8),.screener-table td:nth-child(8){width:3%}
   .screener-table th:nth-child(9),.screener-table td:nth-child(9){width:4%}
   .screener-table th:nth-child(10),.screener-table td:nth-child(10){width:11%}
@@ -406,6 +406,7 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
   .screener-table th:nth-child(13),.screener-table td:nth-child(13){width:8%}
   .screener-table th:nth-child(14),.screener-table td:nth-child(14){width:9%}
   .screener-table .ticker,.screener-table .contract{min-width:0;max-width:100%;overflow:hidden}
+  .screener-table th:nth-child(7),.screener-table td:nth-child(7){padding-left:10px}
   .screener-table .stock-score-pill,.screener-table .call-score-pill,.screener-table .rhtc-score-pill,.screener-table .peak-chip{max-width:100%;overflow:hidden;text-overflow:ellipsis}
 }
 
