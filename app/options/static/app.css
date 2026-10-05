@@ -634,3 +634,11 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 :root[data-theme="dark"] .infra-source-snippet h4,:root[data-theme="dark"] .infra-source-snippet strong,:root[data-theme="dark"] .infra-source-table th{color:#e3e9f0}
 :root[data-theme="dark"] .infra-source-table th{background:#293542}
 :root[data-theme="dark"] .infra-source-table th,:root[data-theme="dark"] .infra-source-table td{border-color:#394654}
+
+
+/* Show the value of positions in the currently filtered Watchlist Manager rows. */
+.symbol-manager-summary{display:flex;align-items:center;gap:12px;white-space:nowrap;min-width:0}
+.symbol-total-value{display:inline-flex;align-items:center;gap:7px;padding:5px 9px;border:1px solid var(--line);border-radius:4px;background:#f8f9fa;color:var(--muted);font:9px var(--mono)}
+.symbol-total-value b{color:var(--ink);font:500 10px var(--mono)}
+:root[data-theme="dark"] .symbol-total-value{background:#151e28}
+@media(max-width:760px){.symbol-manager-summary{flex:0 0 100%;justify-content:flex-start;gap:12px}.symbols-modal.is-fullscreen .symbol-manager-summary #symbol-count{flex:0 0 auto}}
