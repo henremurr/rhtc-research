@@ -642,3 +642,11 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 .symbol-total-value b{color:var(--ink);font:500 10px var(--mono)}
 :root[data-theme="dark"] .symbol-total-value{background:#151e28}
 @media(max-width:760px){.symbol-manager-summary{flex:0 0 100%;justify-content:flex-start;gap:12px}.symbols-modal.is-fullscreen .symbol-manager-summary #symbol-count{flex:0 0 auto}}
+
+
+/* Keep the Watchlist Manager result/sort status beneath its position rows. */
+.symbol-manager-summary{flex:0 0 auto}
+.symbol-list-status{display:flex;align-items:center;justify-content:flex-end;min-height:24px;margin-top:5px;padding:2px 4px;color:var(--muted);font:9px var(--mono)}
+.symbol-list-status #symbol-count{white-space:nowrap}
+.symbols-modal.is-fullscreen>.symbol-list-status{flex:none}
+@media(max-width:760px){.symbol-manager-summary{flex:0 0 auto}.symbol-list-status{margin-top:7px}}
