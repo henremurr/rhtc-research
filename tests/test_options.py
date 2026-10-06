@@ -135,6 +135,8 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn("sort:'income'", script)
         self.assertIn("selectedFilter==='Account Tracker'", script)
         self.assertIn("sorted by PG", script)
+        self.assertIn("(accountTracker||callsWritten)?comparePgRows(a,b)", script)
+        self.assertIn("if(!pgA)return 1;if(!pgB)return -1", script)
         self.assertIn('<option value="Account Tracker">Account Tracker</option>', page.text)
         self.assertIn('ticker-details-btn', script)
         self.assertNotIn('data-label="Change $"', script)
