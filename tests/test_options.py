@@ -444,7 +444,7 @@ class OptionsRoutesTest(unittest.TestCase):
                 response = self.request("POST", "/options/api/analysis-podcast/audio", json={"title": "MU Deep Analysis", "transcript": transcript})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["content-type"], "audio/mpeg")
-        self.assertIn("RHTC_mu-deep-analysis_Spotify.mp3", response.headers["content-disposition"])
+        self.assertIn("RHTC_mu-deep-analysis_YouTube.mp3", response.headers["content-disposition"])
         self.assertEqual(len(calls), len(chunks))
         self.assertTrue(all(call["model"] == "gpt-4o-mini-tts" and call["response_format"] == "mp3" for call in calls))
         self.assertTrue(all(len(call["input"]) <= 4096 for call in calls))
