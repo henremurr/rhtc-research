@@ -702,3 +702,20 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
   .symbol-entry.editing {min-width:0!important;gap:2px}
   .symbol-entry.editing button {font-size:8px}
 }
+
+
+/* Place the compact PG value between delete and ticker; keep row text single-line. */
+.symbol-entry:not(.editing) {grid-template-columns:30px 5.5ch minmax(0,1fr) 30px!important}
+.symbol-entry:not(.editing) .symbol-description {
+  grid-template-columns:minmax(0,.45fr) minmax(0,1fr) minmax(0,.9fr) minmax(0,1.1fr) minmax(0,1.15fr);
+}
+.symbol-entry:not(.editing)>.symbol-pg-details {
+  display:block;
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:var(--muted);
+  font:13px var(--sans);
+}
+:root[data-theme="dark"] .symbol-entry:not(.editing)>.symbol-pg-details {color:#9caaba}
