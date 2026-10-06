@@ -1,5 +1,5 @@
 const $ = (s) => document.querySelector(s);
-const state = {peak:'All Peaks', query:'', sort:'income', rows:[], source:'demo', mode:'overview', selectedOnly:false, costOnly:false, stockScoreMissingOnly:false, callScoreMissingOnly:false, expirationSet:1, displayLimit:10, watchlist:[], editingSymbol:null, migrationOpen:false, editingEnabled:false, legacyWatchlist:null, chainDescription:''};
+const state = {peak:'All Peaks', query:'', sort:'income', rows:[], source:'demo', mode:'overview', selectedOnly:false, costOnly:false, stockScoreMissingOnly:false, callScoreMissingOnly:false, expirationSet:1, displayLimit:200, watchlist:[], editingSymbol:null, migrationOpen:false, editingEnabled:false, legacyWatchlist:null, chainDescription:''};
 const DTE_WINDOWS=['0–7 DTE','8–14 DTE','15–22 DTE','22–28 DTE','29–35 DTE','36–42 DTE','37–49 DTE','48–56 DTE','57–63 DTE','64–70 DTE','70+ DTE'];
 const WATCHLIST_KEY='rhtc-options-watchlist';
 const peakMeta = {'AI/I':{label:'AI / Infrastructure',cls:'ai'},'EFM/I':{label:'Energy / Infrastructure',cls:'efm'},'DS/I':{label:'Defense / Space',cls:'defense'},'Other':{label:'Outside the Peaks',cls:'other'}};
