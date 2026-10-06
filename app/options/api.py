@@ -325,8 +325,8 @@ def validate_watchlist(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         account = str(item.get("account") or "")
         lt_call = str(item.get("lt_call") or "").strip()
         pg = str(item.get("pg") or "").strip()
-        if len(pg) > 80:
-            raise HTTPException(400, "PG must be 80 characters or fewer.")
+        if len(pg) > 3:
+            raise HTTPException(400, "PG must be 3 characters or fewer.")
         if len(lt_call) > 80:
             raise HTTPException(400, "LT-Call must be 80 characters or fewer.")
         ticker_account = (ticker, account)
