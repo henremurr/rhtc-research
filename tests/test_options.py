@@ -588,8 +588,8 @@ class OptionsRoutesTest(unittest.TestCase):
 
     def test_watchlist_updates_persist_across_requests_and_drive_dashboard_scan(self):
         symbols = [
-            {"symbol": "NEWCO", "peak": "Other", "share_price": None, "quantity": 4},
-            {"symbol": "MU", "peak": "AI/I", "share_price": 128.5, "quantity": 100},
+            {"symbol": "NEWCO", "peak": "Other", "share_price": None, "quantity": 4, "pg": "Project Green"},
+            {"symbol": "MU", "peak": "AI/I", "share_price": 128.5, "quantity": 100, "pg": ""},
         ]
         with patch.dict(os.environ, {"RHTC_WATCHLIST_ADMIN_TOKEN": ""}, clear=False):
             saved = self.request("PUT", "/options/api/watchlist", json={"rows": symbols})
@@ -605,6 +605,8 @@ class OptionsRoutesTest(unittest.TestCase):
         by_symbol = {row["symbol"]: row for row in data["rows"]}
         self.assertEqual((by_symbol["MU"]["share_price"], by_symbol["MU"]["quantity"]), (128.5, 100))
         self.assertEqual((by_symbol["NEWCO"]["share_price"], by_symbol["NEWCO"]["quantity"]), (None, 4))
+        self.assertEqual(reloaded.json()["rows"][0]["pg"], "Project Green")
+        self.assertEqual(reloaded.json()["rows"][1]["pg"], "")
         self.assertEqual(holdings.json()["count"], 1)
         self.assertEqual(holdings.json()["rows"][0]["symbol"], "MU")
         self.assertEqual(
