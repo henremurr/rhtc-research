@@ -1460,7 +1460,7 @@ async def analyze_symbol(data: SymbolAnalysisInput):
     }
 
 
-MAX_SPOTIFY_TRANSCRIPT_CHARS = 11500
+MAX_YOUTUBE_TRANSCRIPT_CHARS = 11500
 MAX_TTS_CHUNK_CHARS = 4000
 
 
@@ -1536,7 +1536,7 @@ async def create_analysis_podcast_transcript(data: AnalysisPodcastTranscriptInpu
     transcript = (getattr(response, "output_text", "") or "").strip()
     if not transcript:
         raise HTTPException(502, "OpenAI returned an empty YouTube transcript. Try again.")
-    if len(transcript) > MAX_SPOTIFY_TRANSCRIPT_CHARS:
+    if len(transcript) > MAX_YOUTUBE_TRANSCRIPT_CHARS:
         raise HTTPException(502, "The transcript exceeded 11,500 characters. Try again to generate a shorter version.")
     return {"episode_title": data.title.strip(), "transcript": transcript, "character_count": len(transcript)}
 
