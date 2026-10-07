@@ -135,7 +135,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertIn("sort:'income'", script)
         self.assertIn("selectedFilter==='Account Tracker'", script)
         self.assertIn("selectedFilter==='Add calls'", script)
-        self.assertIn("addCalls?canAddCoveredCall(r)", script)
+        self.assertIn("addCalls?((r.account||'')!=='Schwab PRCA'&&canAddCoveredCall(r))", script)
         self.assertIn("calls<Math.floor(shares/100)", script)
         self.assertIn('<option value="Add calls">Add calls</option>', page.text)
         self.assertIn("sorted by PG", script)
