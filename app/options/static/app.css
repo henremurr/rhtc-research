@@ -785,7 +785,7 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 
 /* Give the final LT detail column enough width to show contract count and premium. */
 .symbol-entry:not(.editing) .symbol-description {
-  grid-template-columns:minmax(0,.30fr) minmax(0,.60fr) minmax(0,.52fr) minmax(0,.98fr) minmax(0,.48fr) minmax(0,.90fr) minmax(0,1.55fr);
+  grid-template-columns:minmax(0,.30fr) minmax(0,.60fr) minmax(0,.52fr) minmax(0,.98fr) minmax(0,2.93fr);
   gap:clamp(1px,.22vw,3px);
 }
 .symbol-entry:not(.editing) .symbol-description .symbol-lt-details {
@@ -796,7 +796,7 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 }
 @media(max-width:800px) {
   .symbol-entry:not(.editing) .symbol-description {
-    grid-template-columns:minmax(0,.30fr) minmax(0,.60fr) minmax(0,.52fr) minmax(0,.98fr) minmax(0,.48fr) minmax(0,.90fr) minmax(0,1.55fr);
+    grid-template-columns:minmax(0,.30fr) minmax(0,.60fr) minmax(0,.52fr) minmax(0,.98fr) minmax(0,2.93fr);
     gap:1px;
   }
   .symbol-entry:not(.editing) .symbol-description .symbol-lt-details {font-size:8px!important}
@@ -813,3 +813,7 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 
 .symbol-entry:not(.editing) .symbol-description .symbol-lt-call-details,.symbol-entry:not(.editing) .symbol-description .symbol-lt-expy-details{position:relative;padding-right:10px}
 .symbol-entry:not(.editing) .symbol-description .symbol-lt-call-details::after,.symbol-entry:not(.editing) .symbol-description .symbol-lt-expy-details::after{content:'•';position:absolute;right:1px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:10px}
+
+.symbol-entry:not(.editing) .symbol-option-details{display:flex;align-items:center;gap:6px;min-width:0;white-space:nowrap;overflow:hidden}
+.symbol-entry:not(.editing) .symbol-option-details>small{min-width:0;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.symbol-entry:not(.editing) .symbol-option-details>.symbol-lt-details{flex:0 1 auto;overflow:hidden;text-overflow:ellipsis}
