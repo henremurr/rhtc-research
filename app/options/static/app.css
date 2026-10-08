@@ -782,3 +782,22 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
   outline:none;
 }
 .symbol-edit-lt-expy:focus {border-color:#b9a16a;box-shadow:0 0 0 2px #b9a16a22}
+
+/* Give the final LT detail column enough width to show contract count and premium. */
+.symbol-entry:not(.editing) .symbol-description {
+  grid-template-columns:minmax(0,.34fr) minmax(0,.70fr) minmax(0,.62fr) minmax(0,.90fr) minmax(0,.60fr) minmax(0,.62fr) minmax(0,1.55fr);
+  gap:clamp(1px,.22vw,3px);
+}
+.symbol-entry:not(.editing) .symbol-description .symbol-lt-details {
+  overflow:visible;
+  text-overflow:clip;
+  white-space:nowrap;
+  font-size:9px;
+}
+@media(max-width:800px) {
+  .symbol-entry:not(.editing) .symbol-description {
+    grid-template-columns:minmax(0,.34fr) minmax(0,.70fr) minmax(0,.62fr) minmax(0,.90fr) minmax(0,.60fr) minmax(0,.62fr) minmax(0,1.55fr);
+    gap:1px;
+  }
+  .symbol-entry:not(.editing) .symbol-description .symbol-lt-details {font-size:8px!important}
+}
