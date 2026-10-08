@@ -835,3 +835,9 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 :root:not([data-theme="dark"]) .symbol-entry:not(.editing) .symbol-description .symbol-last-price.last-down{color:#c62828!important}
 :root:not([data-theme="dark"]) .symbol-entry:not(.editing) .symbol-description .symbol-last-price.last-up{color:#16803c!important}
 .symbol-entry:not(.editing) .symbol-description{grid-template-columns:minmax(52px,.48fr) minmax(68px,.58fr) minmax(100px,.9fr) minmax(200px,1.55fr) minmax(145px,1.05fr) minmax(250px,2fr)}
+
+
+/* Tighten Watchlist Manager row gaps and give call data the remaining width. */
+.symbol-entry:not(.editing) .symbol-description{grid-template-columns:54px 62px 150px 195px 130px minmax(0,1fr);gap:5px}
+.symbol-entry:not(.editing) .symbol-option-details{gap:4px}
+.symbol-entry:not(.editing) .symbol-description .symbol-lt-call-details,.symbol-entry:not(.editing) .symbol-description .symbol-lt-expy-details{padding-right:8px}
