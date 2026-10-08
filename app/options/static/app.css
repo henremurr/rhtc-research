@@ -820,3 +820,6 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 
 .symbol-entry:not(.editing) .symbol-description small{font-size:9px!important}
 .symbol-entry:not(.editing) .symbol-description .symbol-lt-call-details::after,.symbol-entry:not(.editing) .symbol-description .symbol-lt-expy-details::after{font-size:9px}
+
+.symbol-entry:not(.editing) .symbol-description b,.symbol-entry:not(.editing) .symbol-description small,.symbol-entry:not(.editing)>.symbol-pg-details{font-size:10px!important}
+.symbol-entry:not(.editing) .symbol-description .symbol-lt-call-details::after,.symbol-entry:not(.editing) .symbol-description .symbol-lt-expy-details::after{font-size:10px!important}
