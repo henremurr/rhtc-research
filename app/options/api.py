@@ -168,7 +168,7 @@ def connect_watchlist_db() -> sqlite3.Connection:
     connection = sqlite3.connect(watchlist_db_path(), timeout=15)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA journal_mode=WAL")
-    connection.execute("CREATE TABLE IF NOT EXISTS symbols (position INTEGER PRIMARY KEY, symbol TEXT NOT NULL, peak TEXT NOT NULL, share_price REAL, quantity REAL, call_score REAL, analysis_count INTEGER NOT NULL DEFAULT 0, stock_score INTEGER, stock_rating_label TEXT, lt_call TEXT, lt_qty INTEGER, lt_premium REAL, pg TEXT)")
+    connection.execute("CREATE TABLE IF NOT EXISTS symbols (position INTEGER PRIMARY KEY, symbol TEXT NOT NULL, peak TEXT NOT NULL, share_price REAL, quantity REAL, call_score REAL, analysis_count INTEGER NOT NULL DEFAULT 0, stock_score INTEGER, stock_rating_label TEXT, lt_call TEXT, lt_expy TEXT, lt_qty INTEGER, lt_premium REAL, pg TEXT)")
     columns = {row["name"] for row in connection.execute("PRAGMA table_info(symbols)")}
     if "account" not in columns:
         connection.execute("ALTER TABLE symbols ADD COLUMN account TEXT")
@@ -178,12 +178,24 @@ def connect_watchlist_db() -> sqlite3.Connection:
         connection.execute("ALTER TABLE symbols ADD COLUMN quantity REAL")
     if "lt_call" not in columns:
         connection.execute("ALTER TABLE symbols ADD COLUMN lt_call TEXT")
+    if "lt_expy" not in columns:
+        connection.execute("ALTER TABLE symbols ADD COLUMN lt_expy TEXT")
     if "lt_qty" not in columns:
         connection.execute("ALTER TABLE symbols ADD COLUMN lt_qty INTEGER")
     if "lt_premium" not in columns:
         connection.execute("ALTER TABLE symbols ADD COLUMN lt_premium REAL")
     if "pg" not in columns:
         connection.execute("ALTER TABLE symbols ADD COLUMN pg TEXT")
+    connection.execute("""
+        UPDATE symbols
+        SET lt_expy = substr(lt_call, instr(lt_call, '-') + 1),
+            lt_call = CASE
+                WHEN upper(substr(trim(lt_call), 1, 1)) = 'C'
+                    THEN substr(trim(lt_call), 2, instr(trim(lt_call), '-') - 2)
+                ELSE substr(trim(lt_call), 1, instr(trim(lt_call), '-') - 1)
+            END
+        WHERE instr(lt_call, '-') > 0 AND COALESCE(lt_expy, '') = ''
+    """)
     if "call_score" not in columns:
         if "average_total_score" in columns:
             connection.execute("ALTER TABLE symbols RENAME COLUMN average_total_score TO call_score")
@@ -196,7 +208,7 @@ def connect_watchlist_db() -> sqlite3.Connection:
     if "stock_score" not in columns:
         connection.execute("ALTER TABLE symbols ADD COLUMN stock_score INTEGER")
     if "stock_rating_label" not in columns:
-        connection.execute("ALTER TABLE symbols ADD COLUMN stock_rating_label TEXT, account TEXT")
+        connection.execute("ALTER TABLE symbols ADD COLUMN stock_rating_label TEXT")
     # Migrate the former ticker-only UNIQUE constraint so tickers can appear once per account.
     ticker_unique = False
     for index in connection.execute("PRAGMA index_list(symbols)"):
@@ -212,11 +224,11 @@ def connect_watchlist_db() -> sqlite3.Connection:
     if ticker_unique:
         connection.execute("ALTER TABLE symbols RENAME TO symbols_old")
         connection.execute(
-            "CREATE TABLE symbols (position INTEGER PRIMARY KEY, symbol TEXT NOT NULL, peak TEXT NOT NULL, share_price REAL, quantity REAL, call_score REAL, analysis_count INTEGER NOT NULL DEFAULT 0, stock_score INTEGER, stock_rating_label TEXT, lt_call TEXT, lt_qty INTEGER, lt_premium REAL, account TEXT, pg TEXT)"
+            "CREATE TABLE symbols (position INTEGER PRIMARY KEY, symbol TEXT NOT NULL, peak TEXT NOT NULL, share_price REAL, quantity REAL, call_score REAL, analysis_count INTEGER NOT NULL DEFAULT 0, stock_score INTEGER, stock_rating_label TEXT, lt_call TEXT, lt_expy TEXT, lt_qty INTEGER, lt_premium REAL, account TEXT, pg TEXT)"
         )
         connection.execute(
-            "INSERT INTO symbols(position, symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, lt_call, lt_qty, lt_premium, account, pg) "
-            "SELECT position, symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, lt_call, lt_qty, lt_premium, account, pg FROM symbols_old"
+            "INSERT INTO symbols(position, symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, lt_call, lt_expy, lt_qty, lt_premium, account, pg) "
+            "SELECT position, symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, lt_call, lt_expy, lt_qty, lt_premium, account, pg FROM symbols_old"
         )
         connection.execute("DROP TABLE symbols_old")
     connection.execute(
@@ -236,7 +248,7 @@ def connect_watchlist_db() -> sqlite3.Connection:
 
 def read_watchlist() -> list[dict[str, Any]]:
     with closing(connect_watchlist_db()) as connection:
-        return [dict(row) for row in connection.execute("SELECT symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account, lt_call, lt_qty, lt_premium, pg FROM symbols ORDER BY position")]
+        return [dict(row) for row in connection.execute("SELECT symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account, lt_call, lt_expy, lt_qty, lt_premium, pg FROM symbols ORDER BY position")]
 
 
 def extract_analysis_total_score(analysis: str) -> int | None:
@@ -324,6 +336,11 @@ def validate_watchlist(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         peak = str(item.get("peak", "Other"))
         account = str(item.get("account") or "")
         lt_call = str(item.get("lt_call") or "").strip()
+        lt_expy = str(item.get("lt_expy") or "").strip()
+        if "-" in lt_call and not lt_expy:
+            lt_call, lt_expy = (part.strip() for part in lt_call.split("-", 1))
+        if lt_call.upper().startswith("C"):
+            lt_call = lt_call[1:].strip()
         pg = str(item.get("pg") or "").strip()
         if len(pg) > 3:
             raise HTTPException(400, "PG must be 3 characters or fewer.")
@@ -342,6 +359,7 @@ def validate_watchlist(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "quantity": optional_nonnegative_number(item, "quantity"),
             "account": account or None,
             "lt_call": lt_call,
+            "lt_expy": lt_expy,
             "lt_qty": optional_nonnegative_integer(item, "lt_qty"),
             "lt_premium": optional_nonnegative_number(item, "lt_premium"),
             "pg": pg,
@@ -365,12 +383,12 @@ def replace_watchlist(rows: list[dict[str, Any]]) -> None:
         }
         connection.execute("DELETE FROM symbols")
         connection.executemany(
-            "INSERT INTO symbols(position, symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account, lt_call, lt_qty, lt_premium, pg) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO symbols(position, symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account, lt_call, lt_expy, lt_qty, lt_premium, pg) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
                     i, row["symbol"], row["peak"], row["share_price"], row["quantity"],
                     *scores.get(row["symbol"], (None, 0, None, None)),
-                    row["account"], row["lt_call"], row["lt_qty"], row["lt_premium"], row["pg"],
+                    row["account"], row["lt_call"], row["lt_expy"], row["lt_qty"], row["lt_premium"], row["pg"],
                 )
                 for i, row in enumerate(rows)
             ],
