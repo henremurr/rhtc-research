@@ -841,3 +841,6 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 .symbol-entry:not(.editing) .symbol-description{grid-template-columns:54px 62px 150px 195px 130px minmax(0,1fr);gap:5px}
 .symbol-entry:not(.editing) .symbol-option-details{gap:4px}
 .symbol-entry:not(.editing) .symbol-description .symbol-lt-call-details,.symbol-entry:not(.editing) .symbol-description .symbol-lt-expy-details{padding-right:8px}
+
+.symbol-entry:not(.editing) .symbol-description{grid-template-columns:50px 56px 150px 195px 125px minmax(0,1fr);gap:4px}
+.symbol-entry:not(.editing) .symbol-option-details{gap:3px}
