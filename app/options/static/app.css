@@ -719,3 +719,50 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
   font:13px var(--sans);
 }
 :root[data-theme="dark"] .symbol-entry:not(.editing)>.symbol-pg-details {color:#9caaba}
+
+/* Keep the added LT-Expy field and all Watchlist Manager rows on one line. */
+.symbol-add-form {
+  grid-template-columns:minmax(0,.72fr) minmax(0,1.08fr) minmax(0,.82fr) minmax(0,.72fr) minmax(0,1.05fr) minmax(0,.78fr) minmax(0,.68fr) minmax(0,.68fr) minmax(0,.95fr) 3.5ch 30px;
+  gap:clamp(2px,.35vw,5px);
+  overflow:hidden;
+}
+.symbol-add-form input#new-pg,
+.symbol-add-form label:last-of-type input {width:3.5ch;max-width:3.5ch}
+.symbol-add-form label {letter-spacing:0}
+.symbol-add-form input,.symbol-add-form select {padding:0 3px}
+.symbol-entry:not(.editing) {grid-template-columns:30px 3.5ch minmax(0,1fr) 30px!important}
+.symbol-entry:not(.editing) .symbol-description {
+  grid-template-columns:minmax(0,.42fr) minmax(0,.92fr) minmax(0,.88fr) minmax(0,1.02fr) minmax(0,.92fr) minmax(0,.68fr) minmax(0,.82fr);
+  gap:clamp(2px,.35vw,5px);
+  min-width:0;
+  white-space:nowrap;
+}
+.symbol-entry:not(.editing) .symbol-description>* {
+  min-width:0;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.symbol-entry:not(.editing)>.symbol-pg-details {width:3.5ch}
+.symbol-entry.editing {
+  grid-template-columns:minmax(0,.62fr) minmax(0,1.04fr) minmax(0,.76fr) minmax(0,.7fr) minmax(0,1.02fr) minmax(0,.72fr) minmax(0,.62fr) minmax(0,.64fr) minmax(0,.9fr) 3.5ch 38px 42px;
+  gap:clamp(2px,.3vw,4px);
+  white-space:nowrap;
+  overflow:hidden;
+}
+.symbol-edit-lt-expy {width:100%;min-width:0;box-sizing:border-box}
+:root[data-theme="dark"] .symbol-edit-lt-expy,
+:root[data-theme="dark"] .symbol-edit-lt-call,
+:root[data-theme="dark"] .symbol-edit-lt-qty,
+:root[data-theme="dark"] .symbol-edit-lt-premium {
+  background:#111a24;
+  color:#dce4ed;
+  border-color:#394654;
+}
+@media(max-width:800px) {
+  .symbol-add-form {grid-template-columns:minmax(0,.72fr) minmax(0,1.08fr) minmax(0,.82fr) minmax(0,.72fr) minmax(0,1.05fr) minmax(0,.78fr) minmax(0,.68fr) minmax(0,.68fr) minmax(0,.95fr) 3.5ch 25px;gap:2px;padding:5px}
+  .symbol-add-form input,.symbol-add-form select {height:27px;padding:0 2px;font-size:7px}
+  .symbol-add-form>button#add-symbol {width:25px;min-width:25px;max-width:25px;height:27px}
+  .symbol-entry.editing {grid-template-columns:minmax(0,.62fr) minmax(0,1.04fr) minmax(0,.76fr) minmax(0,.7fr) minmax(0,1.02fr) minmax(0,.72fr) minmax(0,.62fr) minmax(0,.64fr) minmax(0,.9fr) 3.5ch 32px 34px;gap:1px}
+  .symbol-entry.editing button {padding:0 1px;font-size:7px}
+}
