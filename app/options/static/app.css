@@ -801,3 +801,6 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
   }
   .symbol-entry:not(.editing) .symbol-description .symbol-lt-details {font-size:8px!important}
 }
+
+.symbol-order-control{gap:5px}.symbol-order-control .symbol-peak-filter{min-width:88px;width:100px;max-width:100px}
+@media(max-width:800px){.symbol-manager-toolbar{gap:5px}.symbol-manager-toolbar .searchbox{min-width:120px}.symbol-order-control .symbol-peak-filter{min-width:76px;width:82px;max-width:82px}}
