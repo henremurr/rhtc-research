@@ -817,3 +817,6 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 .symbol-entry:not(.editing) .symbol-option-details{display:flex;align-items:center;gap:6px;min-width:0;white-space:nowrap;overflow:hidden}
 .symbol-entry:not(.editing) .symbol-option-details>small{min-width:0;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .symbol-entry:not(.editing) .symbol-option-details>.symbol-lt-details{flex:0 1 auto;overflow:hidden;text-overflow:ellipsis}
+
+.symbol-entry:not(.editing) .symbol-description small{font-size:9px!important}
+.symbol-entry:not(.editing) .symbol-description .symbol-lt-call-details::after,.symbol-entry:not(.editing) .symbol-description .symbol-lt-expy-details::after{font-size:9px}
