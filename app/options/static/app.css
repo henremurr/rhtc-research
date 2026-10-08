@@ -785,7 +785,7 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 
 /* Give the final LT detail column enough width to show contract count and premium. */
 .symbol-entry:not(.editing) .symbol-description {
-  grid-template-columns:minmax(0,.34fr) minmax(0,.70fr) minmax(0,.62fr) minmax(0,.90fr) minmax(0,.60fr) minmax(0,.62fr) minmax(0,1.55fr);
+  grid-template-columns:minmax(0,.30fr) minmax(0,.62fr) minmax(0,.55fr) minmax(0,.82fr) minmax(0,.52fr) minmax(0,.95fr) minmax(0,1.57fr);
   gap:clamp(1px,.22vw,3px);
 }
 .symbol-entry:not(.editing) .symbol-description .symbol-lt-details {
@@ -796,7 +796,7 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 }
 @media(max-width:800px) {
   .symbol-entry:not(.editing) .symbol-description {
-    grid-template-columns:minmax(0,.34fr) minmax(0,.70fr) minmax(0,.62fr) minmax(0,.90fr) minmax(0,.60fr) minmax(0,.62fr) minmax(0,1.55fr);
+    grid-template-columns:minmax(0,.30fr) minmax(0,.62fr) minmax(0,.55fr) minmax(0,.82fr) minmax(0,.52fr) minmax(0,.95fr) minmax(0,1.57fr);
     gap:1px;
   }
   .symbol-entry:not(.editing) .symbol-description .symbol-lt-details {font-size:8px!important}
@@ -804,3 +804,7 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 
 .symbol-order-control{gap:5px}.symbol-order-control .symbol-peak-filter{min-width:88px;width:100px;max-width:100px}
 @media(max-width:800px){.symbol-manager-toolbar{gap:5px}.symbol-manager-toolbar .searchbox{min-width:120px}.symbol-order-control .symbol-peak-filter{min-width:76px;width:82px;max-width:82px}}
+
+.symbol-entry:not(.editing) .symbol-description .symbol-lt-expy-details{font-size:8px;letter-spacing:-.15px}
+.symbol-entry:not(.editing) .symbol-description .symbol-lt-details{font-size:8px;letter-spacing:-.15px}
+.symbol-list{overflow-x:hidden}
