@@ -828,9 +828,10 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 .symbol-entry:not(.editing) .symbol-description .symbol-lt-call-details::after,.symbol-entry:not(.editing) .symbol-description .symbol-lt-expy-details::after{font-size:12px!important}
 
 .symbol-entry:not(.editing) .symbol-description .symbol-holding-details{white-space:nowrap}
-.symbol-entry:not(.editing) .symbol-description .symbol-holding-details .symbol-last-price{white-space:nowrap;margin-left:2px}
-.symbol-entry:not(.editing) .symbol-description .symbol-holding-details .symbol-last-price.last-down{color:#ff5b62!important}
-.symbol-entry:not(.editing) .symbol-description .symbol-holding-details .symbol-last-price.last-up{color:#42e38a!important}
-.symbol-entry:not(.editing) .symbol-description .symbol-holding-details .symbol-last-price.last-flat{color:inherit!important}
-:root:not([data-theme="dark"]) .symbol-entry:not(.editing) .symbol-description .symbol-holding-details .symbol-last-price.last-down{color:#c62828!important}
-:root:not([data-theme="dark"]) .symbol-entry:not(.editing) .symbol-description .symbol-holding-details .symbol-last-price.last-up{color:#16803c!important}
+.symbol-entry:not(.editing) .symbol-description .symbol-last-price{white-space:nowrap}
+.symbol-entry:not(.editing) .symbol-description .symbol-last-price.last-down{color:#ff5b62!important}
+.symbol-entry:not(.editing) .symbol-description .symbol-last-price.last-up{color:#42e38a!important}
+.symbol-entry:not(.editing) .symbol-description .symbol-last-price.last-flat{color:inherit!important}
+:root:not([data-theme="dark"]) .symbol-entry:not(.editing) .symbol-description .symbol-last-price.last-down{color:#c62828!important}
+:root:not([data-theme="dark"]) .symbol-entry:not(.editing) .symbol-description .symbol-last-price.last-up{color:#16803c!important}
+.symbol-entry:not(.editing) .symbol-description{grid-template-columns:minmax(52px,.48fr) minmax(68px,.58fr) minmax(100px,.9fr) minmax(200px,1.55fr) minmax(145px,1.05fr) minmax(250px,2fr)}
