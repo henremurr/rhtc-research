@@ -597,8 +597,8 @@ class OptionsRoutesTest(unittest.TestCase):
 
     def test_watchlist_updates_persist_across_requests_and_drive_dashboard_scan(self):
         symbols = [
-            {"symbol": "NEWCO", "peak": "Other", "share_price": None, "quantity": 4, "pg": "PRJ"},
-            {"symbol": "MU", "peak": "AI/I", "share_price": 128.5, "quantity": 100, "pg": ""},
+            {"symbol": "NEWCO", "peak": "Other", "share_price": None, "quantity": 4, "account": None, "lt_call": "260", "lt_expy": "280616", "lt_qty": 1, "lt_premium": 20.5, "pg": "PRJ"},
+            {"symbol": "MU", "peak": "AI/I", "share_price": 128.5, "quantity": 100, "account": None, "lt_call": "", "lt_expy": "", "lt_qty": None, "lt_premium": None, "pg": ""},
         ]
         with patch.dict(os.environ, {"RHTC_WATCHLIST_ADMIN_TOKEN": ""}, clear=False):
             saved = self.request("PUT", "/options/api/watchlist", json={"rows": symbols})
@@ -615,6 +615,7 @@ class OptionsRoutesTest(unittest.TestCase):
         self.assertEqual((by_symbol["MU"]["share_price"], by_symbol["MU"]["quantity"]), (128.5, 100))
         self.assertEqual((by_symbol["NEWCO"]["share_price"], by_symbol["NEWCO"]["quantity"]), (None, 4))
         self.assertEqual(reloaded.json()["rows"][0]["pg"], "PRJ")
+        self.assertEqual((reloaded.json()["rows"][0]["lt_call"], reloaded.json()["rows"][0]["lt_expy"]), ("260", "280616"))
         self.assertEqual(reloaded.json()["rows"][1]["pg"], "")
         self.assertEqual(holdings.json()["count"], 1)
         self.assertEqual(holdings.json()["rows"][0]["symbol"], "MU")
@@ -638,12 +639,23 @@ class OptionsRoutesTest(unittest.TestCase):
             connection.execute("INSERT INTO app_state VALUES ('watchlist_seeded', '1')")
             connection.execute("INSERT INTO app_state VALUES ('legacy_import_open', '0')")
         old_rows = self.request("GET", "/options/api/watchlist").json()["rows"]
-        self.assertEqual(old_rows, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None, "call_score": None, "analysis_count": 0, "stock_score": None, "stock_rating_label": None}])
+        self.assertEqual(old_rows, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None, "call_score": None, "analysis_count": 0, "stock_score": None, "stock_rating_label": None, "account": None, "lt_call": None, "lt_expy": None, "lt_qty": None, "lt_premium": None, "pg": None}])
         with patch.dict(os.environ, {"RHTC_WATCHLIST_ADMIN_TOKEN": ""}, clear=False):
             saved = self.request("PUT", "/options/api/watchlist", json={"rows": [{"symbol": "MU", "peak": "AI/I", "share_price": "", "quantity": ""}]})
             reloaded = self.request("GET", "/options/api/watchlist").json()["rows"]
         self.assertEqual(saved.status_code, 200)
-        self.assertEqual(reloaded, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None, "call_score": None, "analysis_count": 0, "stock_score": None, "stock_rating_label": None}])
+        self.assertEqual(reloaded, [{"symbol": "MU", "peak": "AI/I", "share_price": None, "quantity": None, "call_score": None, "analysis_count": 0, "stock_score": None, "stock_rating_label": None, "account": None, "lt_call": "", "lt_expy": "", "lt_qty": None, "lt_premium": None, "pg": ""}])
+
+    def test_watchlist_migrates_combined_lt_call_to_strike_and_expiry(self):
+        db_path = os.path.join(self.data_dir.name, "rhtc_symbols.sqlite3")
+        with sqlite3.connect(db_path) as connection:
+            connection.execute("CREATE TABLE symbols (position INTEGER PRIMARY KEY, symbol TEXT NOT NULL UNIQUE, peak TEXT NOT NULL, share_price REAL, quantity REAL, call_score REAL, analysis_count INTEGER NOT NULL DEFAULT 0, stock_score INTEGER, stock_rating_label TEXT, lt_call TEXT, lt_qty INTEGER, lt_premium REAL, account TEXT, pg TEXT)")
+            connection.execute("CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            connection.execute("INSERT INTO symbols(position, symbol, peak, lt_call) VALUES (0, 'MRVL', 'AI/I', 'C260-280616')")
+            connection.execute("INSERT INTO app_state VALUES ('watchlist_seeded', '1')")
+            connection.execute("INSERT INTO app_state VALUES ('legacy_import_open', '0')")
+        row = self.request("GET", "/options/api/watchlist").json()["rows"][0]
+        self.assertEqual((row["lt_call"], row["lt_expy"]), ("260", "280616"))
 
     def test_stock_rating_is_persisted_and_returned_with_opportunity_rows(self):
         with patch.dict(os.environ, {"RHTC_DATA_DIR": self.data_dir.name}, clear=False):
