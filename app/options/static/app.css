@@ -766,3 +766,19 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
   .symbol-entry.editing {grid-template-columns:minmax(0,.62fr) minmax(0,1.04fr) minmax(0,.76fr) minmax(0,.7fr) minmax(0,1.02fr) minmax(0,.72fr) minmax(0,.62fr) minmax(0,.64fr) minmax(0,.9fr) 3.5ch 32px 34px;gap:1px}
   .symbol-entry.editing button {padding:0 1px;font-size:7px}
 }
+
+/* Match LT-Expy's edit input height, border, and type to the other manager fields. */
+.symbol-edit-lt-expy {
+  height:34px;
+  width:100%;
+  min-width:0;
+  box-sizing:border-box;
+  padding:0 6px;
+  border:1px solid #e1e6ea;
+  border-radius:4px;
+  background:white;
+  color:#405064;
+  font:11px var(--sans);
+  outline:none;
+}
+.symbol-edit-lt-expy:focus {border-color:#b9a16a;box-shadow:0 0 0 2px #b9a16a22}
