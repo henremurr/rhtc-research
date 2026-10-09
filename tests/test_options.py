@@ -429,6 +429,8 @@ class OptionsRoutesTest(unittest.TestCase):
                 })
         self.assertEqual(result.status_code, 200)
         self.assertEqual(result.json()["character_count"], len(result.json()["transcript"]))
+        self.assertTrue(result.json()["transcript"].startswith("RHTC Safe Harbor: This episode is for informational and educational purposes only"))
+        self.assertTrue(result.json()["transcript"].startswith("RHTC Safe Harbor: This episode is for informational and educational purposes only, not investment advice"))
         self.assertLessEqual(result.json()["character_count"], 11500)
         self.assertEqual(responses.kwargs["model"], "test-script-model")
         self.assertIn("Source analysis has this verified fact.", responses.kwargs["input"])
