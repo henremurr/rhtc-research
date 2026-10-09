@@ -430,7 +430,7 @@ async function createAnalysisPodcast(){const button=$('#analysis-mp3-btn'),statu
 async function copyAnalysisPodcastTranscript(){const text=$('#analysis-podcast-transcript').value;if(!text)return;try{await navigator.clipboard.writeText(text);toast('YouTube transcript copied.')}catch(error){const field=$('#analysis-podcast-transcript');field.focus();field.select();toast('Select and copy the transcript.')}}
 function preferredYouTubeSeries(story){const combined=(story.title+' '+story.snippet+' '+story.url).toLowerCase();if(/think[ -]?tank|hudson|fdd|heritage|csis|afpi/.test(combined))return'think_tank_watch';if(/pentagon|contract|award|procurement/.test(combined))return'pentagon_contract_watch';return({'AI/I':'ai_infrastructure','EFM/I':'energy_fuels_infrastructure','DS/I':'defense_space_infrastructure','Cross-Peak':'policy_power_news','Other':'policy_power_news'})[story.peak]||'policy_power_news'}
 function youtubeDescription(transcript,story,citationList=activeAnalysisCitations){const citations=citationList.map(item=>item.url).filter(Boolean).slice(0,10);const parts=[transcript.slice(0,2600).trim(),story.url?'Story: '+story.url:'',citations.length?'Additional sources:\n'+citations.join('\n'):'','RHTC Three Peaks analysis. Educational and informational content only; not investment advice.'];return parts.filter(Boolean).join('\n\n').slice(0,5000)}
-async function refreshYouTubeStatus(){const status=$('#youtube-publish-status');status.textContent='Checking YouTube connection…';try{const response=await fetch('/options/api/youtube/status');const data=await response.json();youtubeReady=Boolean(response.ok&&data.configured);if(youtubeReady){status.textContent='YouTube connected. Uploads default to Private; this Google API project may restrict videos to Private until verified.'}else{const missing=(data.missing||[]).join(', ');status.textContent=missing?'Add '+missing+' in Railway Variables to enable uploads.':'MP4 conversion is unavailable in this deployment.'}}catch(error){youtubeReady=false;status.textContent='Could not check YouTube upload readiness.'}updateYouTubePublishButton()}
+async function refreshYouTubeStatus(){const status=$('#youtube-publish-status');status.textContent='Checking YouTube connection…';try{const response=await fetch('/options/api/youtube/status');const data=await response.json();youtubeReady=Boolean(response.ok&&data.configured);if(youtubeReady){status.textContent='YouTube connected. News publishing requests Public visibility; YouTube may keep API uploads Private until this project passes its audit.'}else{const missing=(data.missing||[]).join(', ');status.textContent=missing?'Add '+missing+' in Railway Variables to enable uploads.':'MP4 conversion is unavailable in this deployment.'}}catch(error){youtubeReady=false;status.textContent='Could not check YouTube upload readiness.'}updateYouTubePublishButton()}
 function updateYouTubePublishButton(){const button=$('#youtube-publish-btn');if(button)button.disabled=!youtubeReady||!analysisPodcastAudioBlob||!$('#youtube-review-confirm').checked}
 function setupYouTubePublish(title,subtitle,transcript){const section=$('#youtube-publish-section');if(!activeNewsStory){section.hidden=true;return}section.hidden=false;const story=activeNewsStory;$('#youtube-video-title').value=('RHTC Policy & Power | '+story.title).slice(0,100);$('#youtube-video-description').value=youtubeDescription(transcript,story);$('#youtube-series').value=preferredYouTubeSeries(story);$('#youtube-review-confirm').checked=false;$('#youtube-publish-status').textContent='Review the complete MP3, title, description, and artwork before uploading.';refreshYouTubeStatus()}
 async function publishAnalysisToYouTube(){const button=$('#youtube-publish-btn'),status=$('#youtube-publish-status');if(!analysisPodcastAudioBlob||!activeNewsStory){status.textContent='Create the analysis MP3 first.';return}if(!$('#youtube-review-confirm').checked){status.textContent='Confirm that you reviewed the MP3 and publishing details.';return}const form=new FormData();form.append('audio',analysisPodcastAudioBlob,'RHTC_news_analysis.mp3');form.append('title',$('#youtube-video-title').value.trim());form.append('description',$('#youtube-video-description').value.trim());form.append('series',$('#youtube-series').value);form.append('privacy_status',$('#youtube-privacy').value);button.disabled=true;button.textContent='Converting and uploading…';status.textContent='Creating the branded MP4 and uploading it to YouTube…';try{const response=await fetch('/options/api/youtube/publish',{method:'POST',body:form});const data=await response.json();if(!response.ok)throw Error(data.detail||'YouTube upload failed.');status.innerHTML='Uploaded as '+safe(data.privacy_status)+': <a href="'+safe(data.url)+'" target="_blank" rel="noopener noreferrer">Open on YouTube</a>';toast('YouTube upload complete.')}catch(error){status.textContent=error.message||'YouTube upload failed.'}finally{button.textContent='▶ Publish to YouTube';updateYouTubePublishButton()}}
@@ -501,23 +501,28 @@ async function publishNewsStory(card,button){
     if(!mp3.size)throw Error('The MP3 file was empty.');
 
     stage='MP4 creation and YouTube upload';
-    status.textContent='MP3 ready. Creating the themed MP4 and uploading privately to YouTube…';
+    status.textContent='MP3 ready. Creating the themed MP4 and uploading to YouTube as Public…';
     const form=new FormData();
     form.append('audio',mp3,'RHTC_'+podcastFileSlug(story.title)+'_YouTube.mp3');
     form.append('title',videoTitle);
     form.append('description',youtubeDescription(transcript,story,analysisData.citations||[]));
     form.append('series',preferredYouTubeSeries(story));
-    form.append('privacy_status','private');
+    form.append('privacy_status','public');
     const uploadResponse=await fetch('/options/api/youtube/publish',{method:'POST',body:form});
     if(!uploadResponse.ok)throw Error(await readApiError(uploadResponse,'YouTube upload failed.'));
     const uploadData=await uploadResponse.json();
     if(!uploadData.url)throw Error('YouTube did not return a video link.');
-    status.innerHTML='Published privately: <a href="'+safe(uploadData.url)+'" target="_blank" rel="noopener noreferrer">Open on YouTube</a>';
+    const actualPrivacy=String(uploadData.privacy_status||'private').toLowerCase();
+    if(actualPrivacy==='public'){
+      status.innerHTML='Published publicly: <a href="'+safe(uploadData.url)+'" target="_blank" rel="noopener noreferrer">Open on YouTube</a>';
+    }else{
+      status.innerHTML='Upload completed, but YouTube kept it '+safe(actualPrivacy)+'. This API project may need to pass YouTube’s audit before API uploads can be public. <a href="'+safe(uploadData.url)+'" target="_blank" rel="noopener noreferrer">Open on YouTube</a>';
+    }
     status.hidden=false;
-    button.textContent='✓ Published';
+    button.textContent='✓ Upload complete';
     button.disabled=true;
     button.dataset.published='true';
-    toast('YouTube upload complete · private');
+    toast(actualPrivacy==='public'?'YouTube upload complete · public':'YouTube upload complete · '+actualPrivacy);
   }catch(error){
     status.textContent=stage+' failed: '+(error.message||'Try again.');
     if(stage==='MP4 creation and YouTube upload')status.textContent+=' Check YouTube Studio before retrying if the upload result is unclear.';
