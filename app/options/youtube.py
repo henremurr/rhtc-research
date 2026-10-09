@@ -180,11 +180,20 @@ async def start_youtube_upload(client: httpx.AsyncClient, token: str, video_path
                 except Exception:
                     message = ""
                 raise HTTPException(502, f"YouTube upload failed: {message or 'the upload did not complete.'}")
-            video_id = response.json().get("id")
+            try:
+                upload_data = response.json()
+            except ValueError as exc:
+                raise HTTPException(502, "YouTube returned an unreadable upload response.") from exc
+            video_id = upload_data.get("id")
+            status_data = upload_data.get("status")
+            if isinstance(status_data, dict):
+                actual_privacy_status = str(status_data.get("privacyStatus") or privacy_status).lower()
+            else:
+                actual_privacy_status = privacy_status
             break
     if not video_id:
         raise HTTPException(502, "YouTube did not confirm the uploaded video.")
-    return {"video_id": str(video_id), "url": f"https://www.youtube.com/watch?v={video_id}", "privacy_status": privacy_status}
+    return {"video_id": str(video_id), "url": f"https://www.youtube.com/watch?v={video_id}", "privacy_status": actual_privacy_status}
 
 
 @router.post("/publish")
@@ -193,7 +202,7 @@ async def publish_video(
     title: str = Form(..., min_length=1, max_length=100),
     description: str = Form("", max_length=5000),
     series: str = Form("policy_power_news"),
-    privacy_status: str = Form("private"),
+    privacy_status: str = Form("public"),
 ) -> dict[str, Any]:
     if privacy_status not in {"private", "unlisted", "public"}:
         raise HTTPException(400, "Choose Private, Unlisted, or Public visibility.")
