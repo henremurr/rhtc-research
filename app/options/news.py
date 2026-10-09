@@ -5,7 +5,7 @@ import logging
 import os
 import sqlite3
 from contextlib import closing
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -21,9 +21,7 @@ router = APIRouter(prefix="/api/news", tags=["news"])
 SEARCH_URL = "https://api.perplexity.ai/search"
 PACIFIC = ZoneInfo("America/Los_Angeles")
 SCAN_LOCK = asyncio.Lock()
-NEWS_WINDOW_DAYS = 14
 DetectorFactory.seed = 0
-MAX_ARTICLES_PER_SCAN = 150
 MAX_RESULTS_PER_QUERY = 20
 MAX_QUERIES_PER_REQUEST = 5
 
@@ -201,15 +199,14 @@ async def scan_news(*, scheduled: bool = False, query: str | None = None) -> dic
         if not api_key:
             raise HTTPException(503, "News search is not configured. Add PERPLEXITY_API_KEY to the Railway service variables.")
 
-        after_date = (now_pacific() - timedelta(days=NEWS_WINDOW_DAYS)).strftime("%m/%d/%Y")
         queries_to_run = list(SEARCH_QUERIES)
         if query and query.strip():
             topic = " ".join(query.split())[:200]
             queries_to_run.append(
-                f"Current news about {topic}; prioritize credible reporting within the last 14 days "
+                f"Current news about {topic}; prioritize credible reporting "
                 "and include direct relevance to AI, energy, defense, security, space, or the economy where applicable"
             )
-        per_query_limit = max(1, min(MAX_RESULTS_PER_QUERY, MAX_ARTICLES_PER_SCAN // len(queries_to_run)))
+        per_query_limit = MAX_RESULTS_PER_QUERY
         query_batches = [
             queries_to_run[index:index + MAX_QUERIES_PER_REQUEST]
             for index in range(0, len(queries_to_run), MAX_QUERIES_PER_REQUEST)
@@ -225,7 +222,6 @@ async def scan_news(*, scheduled: bool = False, query: str | None = None) -> dic
                             "query": queries,
                             "max_results": per_query_limit,
                             "search_type": "fast",
-                            "search_after_date_filter": after_date,
                             "search_context_size": "low",
                         },
                     )
@@ -252,8 +248,6 @@ async def scan_news(*, scheduled: bool = False, query: str | None = None) -> dic
                 cleaned = clean_result(raw, seen_at)
                 if cleaned:
                     clean_items[cleaned["url"]] = cleaned
-                    if len(clean_items) >= MAX_ARTICLES_PER_SCAN:
-                        break
 
         with closing(connect_db()) as connection:
             existing_urls: set[str] = set()
@@ -269,25 +263,6 @@ async def scan_news(*, scheduled: bool = False, query: str | None = None) -> dic
                      published_at=excluded.published_at, snippet=excluded.snippet, peak=excluded.peak,
                      last_seen_at=excluded.last_seen_at""",
                 list(clean_items.values()),
-            )
-            cutoff_time = now_pacific() - timedelta(days=NEWS_WINDOW_DAYS)
-            cutoff_date = cutoff_time.date().isoformat()
-            cutoff_timestamp = cutoff_time.isoformat()
-            connection.execute(
-                """DELETE FROM news_items
-                   WHERE (published_at != '' AND substr(published_at,1,10) < ?)
-                      OR (published_at = '' AND last_seen_at < ?)""",
-                (cutoff_date, cutoff_timestamp),
-            )
-            connection.execute(
-                """DELETE FROM news_items
-                   WHERE url NOT IN (
-                       SELECT url FROM news_items
-                       ORDER BY last_seen_at DESC,
-                                COALESCE(NULLIF(published_at,''), last_seen_at) DESC
-                       LIMIT ?
-                   )""",
-                (MAX_ARTICLES_PER_SCAN,),
             )
             connection.execute("INSERT OR REPLACE INTO news_meta(key,value) VALUES('last_scan_at',?)", (seen_at,))
             connection.execute("INSERT OR REPLACE INTO news_meta(key,value) VALUES('last_scan_count',?)", (str(len(clean_items)),))
@@ -307,15 +282,9 @@ async def scan_news(*, scheduled: bool = False, query: str | None = None) -> dic
 async def get_news(
     peak: str | None = Query(default=None, max_length=20),
     q: str | None = Query(default=None, max_length=120),
-    days: int = Query(default=NEWS_WINDOW_DAYS, ge=1, le=NEWS_WINDOW_DAYS),
 ):
-    cutoff_time = now_pacific() - timedelta(days=days)
-    cutoff = cutoff_time.isoformat()
-    cutoff_date = cutoff_time.date().isoformat()
-    query = """SELECT url,title,source,published_at,snippet,peak,first_seen_at,last_seen_at FROM news_items
-               WHERE ((published_at != '' AND substr(published_at,1,10) >= ?)
-                  OR (published_at = '' AND last_seen_at >= ?))"""
-    params: list[Any] = [cutoff_date, cutoff]
+    query = """SELECT url,title,source,published_at,snippet,peak,first_seen_at,last_seen_at FROM news_items"""
+    params: list[Any] = []
     if peak and peak not in {"All", "All Peaks"}:
         query += " AND peak = ?"
         params.append(peak)
@@ -323,8 +292,7 @@ async def get_news(
         query += " AND (title LIKE ? OR snippet LIKE ? OR source LIKE ?)"
         term = f"%{q.strip()}%"
         params.extend([term, term, term])
-    query += " ORDER BY last_seen_at DESC, COALESCE(NULLIF(published_at,''), first_seen_at) DESC LIMIT ?"
-    params.append(MAX_ARTICLES_PER_SCAN)
+    query += " ORDER BY last_seen_at DESC, COALESCE(NULLIF(published_at,''), first_seen_at) DESC"
     with closing(connect_db()) as connection:
         rows = [dict(row) for row in connection.execute(query, params)]
         meta = {row["key"]: row["value"] for row in connection.execute("SELECT key,value FROM news_meta")}
@@ -336,8 +304,6 @@ async def get_news(
         "last_scan_at": meta.get("last_scan_at"),
         "last_scan_count": int(meta.get("last_scan_count", "0")),
         "configured": bool(os.getenv("PERPLEXITY_API_KEY")),
-        "days": days,
-        "limit": MAX_ARTICLES_PER_SCAN,
     }
 
 
