@@ -429,7 +429,7 @@ async function readApiError(response,fallback){try{const data=await response.jso
 async function createAnalysisPodcast(){const button=$('#analysis-mp3-btn'),status=$('#analysis-podcast-status'),title=$('#symbol-analysis-title').textContent.trim(),subtitle=$('#symbol-analysis-subtitle').textContent.trim(),analysis=$('#symbol-analysis-body').innerText.trim();if(!analysis){status.textContent='Wait for the analysis to finish, then try again.';return}resetAnalysisPodcast();button.disabled=true;button.textContent='Creating YouTube transcript + MP3…';status.textContent='Writing a YouTube-ready spoken transcript…';try{const scriptResponse=await fetch('/options/api/analysis-podcast/transcript',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,subtitle,analysis})});if(!scriptResponse.ok)throw Error(await readApiError(scriptResponse,'Transcript generation failed.'));const scriptData=await scriptResponse.json();const transcript=String(scriptData.transcript||'').trim();if(!transcript)throw Error('OpenAI returned an empty transcript.');$('#analysis-podcast-transcript').value=transcript;analysisPodcastTextUrl=URL.createObjectURL(new Blob([transcript],{type:'text/plain;charset=utf-8'}));const slug=podcastFileSlug(title),transcriptLink=$('#analysis-download-transcript');transcriptLink.href=analysisPodcastTextUrl;transcriptLink.download='RHTC_'+slug+'_YouTube_Transcript.txt';$('#analysis-podcast-result').hidden=false;status.textContent='Transcript ready ('+transcript.length.toLocaleString()+' characters). Creating the MP3…';const audioResponse=await fetch('/options/api/analysis-podcast/audio',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,transcript})});if(!audioResponse.ok)throw Error(await readApiError(audioResponse,'MP3 generation failed.'));const mp3=await audioResponse.blob();if(!mp3.size)throw Error('The MP3 file was empty. Try again.');analysisPodcastAudioBlob=mp3;analysisPodcastAudioUrl=URL.createObjectURL(mp3);$('#analysis-podcast-audio').src=analysisPodcastAudioUrl;const mp3Link=$('#analysis-download-mp3');mp3Link.href=analysisPodcastAudioUrl;mp3Link.download='RHTC_'+slug+'_YouTube.mp3';mp3Link.hidden=false;setupYouTubePublish(title,subtitle,transcript);status.textContent='Ready to review or publish. Download the transcript and MP3 below.'}catch(error){status.textContent=error.message||'Could not create the YouTube assets. Try again.'}finally{button.disabled=false;button.textContent='🎙 Create YouTube Transcript + MP3'}}
 async function copyAnalysisPodcastTranscript(){const text=$('#analysis-podcast-transcript').value;if(!text)return;try{await navigator.clipboard.writeText(text);toast('YouTube transcript copied.')}catch(error){const field=$('#analysis-podcast-transcript');field.focus();field.select();toast('Select and copy the transcript.')}}
 function preferredYouTubeSeries(story){const combined=(story.title+' '+story.snippet+' '+story.url).toLowerCase();if(/think[ -]?tank|hudson|fdd|heritage|csis|afpi/.test(combined))return'think_tank_watch';if(/pentagon|contract|award|procurement/.test(combined))return'pentagon_contract_watch';return({'AI/I':'ai_infrastructure','EFM/I':'energy_fuels_infrastructure','DS/I':'defense_space_infrastructure','Cross-Peak':'policy_power_news','Other':'policy_power_news'})[story.peak]||'policy_power_news'}
-function youtubeDescription(transcript,story){const citations=activeAnalysisCitations.map(item=>item.url).filter(Boolean).slice(0,10);const parts=[transcript.slice(0,2600).trim(),story.url?'Story: '+story.url:'',citations.length?'Additional sources:\n'+citations.join('\n'):'','RHTC Three Peaks analysis. Educational and informational content only; not investment advice.'];return parts.filter(Boolean).join('\n\n').slice(0,5000)}
+function youtubeDescription(transcript,story,citationList=activeAnalysisCitations){const citations=citationList.map(item=>item.url).filter(Boolean).slice(0,10);const parts=[transcript.slice(0,2600).trim(),story.url?'Story: '+story.url:'',citations.length?'Additional sources:\n'+citations.join('\n'):'','RHTC Three Peaks analysis. Educational and informational content only; not investment advice.'];return parts.filter(Boolean).join('\n\n').slice(0,5000)}
 async function refreshYouTubeStatus(){const status=$('#youtube-publish-status');status.textContent='Checking YouTube connection…';try{const response=await fetch('/options/api/youtube/status');const data=await response.json();youtubeReady=Boolean(response.ok&&data.configured);if(youtubeReady){status.textContent='YouTube connected. Uploads default to Private; this Google API project may restrict videos to Private until verified.'}else{const missing=(data.missing||[]).join(', ');status.textContent=missing?'Add '+missing+' in Railway Variables to enable uploads.':'MP4 conversion is unavailable in this deployment.'}}catch(error){youtubeReady=false;status.textContent='Could not check YouTube upload readiness.'}updateYouTubePublishButton()}
 function updateYouTubePublishButton(){const button=$('#youtube-publish-btn');if(button)button.disabled=!youtubeReady||!analysisPodcastAudioBlob||!$('#youtube-review-confirm').checked}
 function setupYouTubePublish(title,subtitle,transcript){const section=$('#youtube-publish-section');if(!activeNewsStory){section.hidden=true;return}section.hidden=false;const story=activeNewsStory;$('#youtube-video-title').value=('RHTC Policy & Power | '+story.title).slice(0,100);$('#youtube-video-description').value=youtubeDescription(transcript,story);$('#youtube-series').value=preferredYouTubeSeries(story);$('#youtube-review-confirm').checked=false;$('#youtube-publish-status').textContent='Review the complete MP3, title, description, and artwork before uploading.';refreshYouTubeStatus()}
@@ -459,7 +459,74 @@ async function analyzeNewsStory(card,button){
   }catch(error){body.textContent=error.message.includes('OPENAI_API_KEY')?'News analysis is not enabled on the server yet. Add OPENAI_API_KEY to Railway Variables, then redeploy.':error.message;status.textContent='Analysis unavailable'}
   finally{button.disabled=false}
 }
-function renderNews(items){if(activeNewsSpeech)stopNewsSpeech(false);const container=$('#news-items');$('#news-count').textContent=items.length?`${items.length} ${items.length===1?'story':'stories'} · all stored stories`:'No matching stories.';$('#count-news').textContent=items.length?String(items.length):'0';if(!items.length){container.innerHTML='<p class="news-empty">No stories match these filters yet. The daily scan runs at 6:00 a.m. Pacific; use Scan for news to search now.</p>';return}container.innerHTML=items.map(item=>{const url=/^https?:\/\//i.test(item.url||'')?item.url:'#';const language=String(item.language||'en').toLowerCase().split('-')[0];const translateButton=language!=='en'?'<button class="news-read-btn news-translate-btn" type="button" data-news-action="translate" title="Translate the title and excerpt to English">Translate to English</button>':'';return `<article class="news-item" data-news-url="${safe(url)}" data-news-title="${safe(item.title||'')}" data-news-peak="${safe(item.peak||'Other')}" data-news-snippet="${safe(item.snippet||'')}" data-news-published-at="${safe(item.published_at||item.first_seen_at||'')}"><div class="news-item-meta">${newsPeakChip(item.peak)}<span class="news-source">${safe(item.source||'Source')}</span><span>Published ${safe(newsDate(item.published_at))}</span><time class="news-retrieved">Retrieved ${safe(newsTimestamp(item.last_seen_at||item.first_seen_at))}</time></div><h3><a href="${safe(url)}" target="_blank" rel="noopener noreferrer">${safe(item.title)}</a></h3><p class="news-excerpt">${safe(item.snippet||'No source excerpt was returned.')}</p><div class="news-item-actions"><button class="news-read-btn" type="button" data-news-action="read">🔊 Read excerpt</button><button class="news-stop-btn" type="button" data-news-action="stop" aria-label="Stop reading this excerpt" hidden>Stop</button><button class="news-analyze-btn" type="button" data-news-action="analyze">✦ Analyze RHTC impact</button>${translateButton}</div><p class="news-translation" aria-live="polite" hidden></p></article>`}).join('');updateNewsSpeechControls()}
+function renderNews(items){if(activeNewsSpeech)stopNewsSpeech(false);const container=$('#news-items');$('#news-count').textContent=items.length?`${items.length} ${items.length===1?'story':'stories'} · all stored stories`:'No matching stories.';$('#count-news').textContent=items.length?String(items.length):'0';if(!items.length){container.innerHTML='<p class="news-empty">No stories match these filters yet. The daily scan runs at 6:00 a.m. Pacific; use Scan for news to search now.</p>';return}container.innerHTML=items.map(item=>{const url=/^https?:\/\//i.test(item.url||'')?item.url:'#';const language=String(item.language||'en').toLowerCase().split('-')[0];const translateButton=language!=='en'?'<button class="news-read-btn news-translate-btn" type="button" data-news-action="translate" title="Translate the title and excerpt to English">Translate to English</button>':'';return `<article class="news-item" data-news-url="${safe(url)}" data-news-title="${safe(item.title||'')}" data-news-peak="${safe(item.peak||'Other')}" data-news-snippet="${safe(item.snippet||'')}" data-news-published-at="${safe(item.published_at||item.first_seen_at||'')}"><div class="news-item-meta">${newsPeakChip(item.peak)}<span class="news-source">${safe(item.source||'Source')}</span><span>Published ${safe(newsDate(item.published_at))}</span><time class="news-retrieved">Retrieved ${safe(newsTimestamp(item.last_seen_at||item.first_seen_at))}</time></div><h3><a href="${safe(url)}" target="_blank" rel="noopener noreferrer">${safe(item.title)}</a></h3><p class="news-excerpt">${safe(item.snippet||'No source excerpt was returned.')}</p><div class="news-item-actions"><button class="news-read-btn" type="button" data-news-action="read">🔊 Read excerpt</button><button class="news-stop-btn" type="button" data-news-action="stop" aria-label="Stop reading this excerpt" hidden>Stop</button><button class="news-analyze-btn" type="button" data-news-action="analyze">✦ Analyze RHTC impact</button><button class="news-publish-btn" type="button" data-news-action="publish">▶ Publish</button>${translateButton}</div><p class="news-publish-status" role="status" aria-live="polite" hidden></p><p class="news-translation" aria-live="polite" hidden></p></article>`}).join('');updateNewsSpeechControls()}
+
+async function publishNewsStory(card,button){
+  const status=card.querySelector('.news-publish-status');
+  const story={
+    title:card.dataset.newsTitle||card.querySelector('h3 a')?.textContent||'News story',
+    url:card.dataset.newsUrl||'',
+    snippet:card.dataset.newsSnippet||'',
+    peak:card.dataset.newsPeak||'Other',
+    published_at:card.dataset.newsPublishedAt||'',
+    source:card.querySelector('.news-source')?.textContent||'',
+  };
+  if(!story.url||story.url==='#'){toast('This story has no valid source link.');return}
+  let stage='News analysis';
+  button.disabled=true;
+  status.hidden=false;
+  status.textContent='Analyzing RHTC impact…';
+  try{
+    const analysisResponse=await fetch('/options/api/news/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(story)});
+    if(!analysisResponse.ok)throw Error(await readApiError(analysisResponse,'News analysis failed.'));
+    const analysisData=await analysisResponse.json();
+    const analysis=String(analysisData.analysis||'').trim();
+    if(!analysis)throw Error('No analysis was returned.');
+
+    const videoTitle=('RHTC Policy & Power | '+story.title).slice(0,100);
+    const subtitle=story.peak+' · '+(story.published_at?'Published '+story.published_at:'Current news')+' · '+story.source;
+    stage='Transcript creation';
+    status.textContent='Analysis complete. Creating the spoken transcript…';
+    const scriptResponse=await fetch('/options/api/analysis-podcast/transcript',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:videoTitle,subtitle,analysis})});
+    if(!scriptResponse.ok)throw Error(await readApiError(scriptResponse,'Transcript generation failed.'));
+    const scriptData=await scriptResponse.json();
+    const transcript=String(scriptData.transcript||'').trim();
+    if(!transcript)throw Error('The transcript was empty.');
+
+    stage='MP3 creation';
+    status.textContent='Transcript ready. Creating the narrated MP3…';
+    const audioResponse=await fetch('/options/api/analysis-podcast/audio',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:videoTitle,transcript})});
+    if(!audioResponse.ok)throw Error(await readApiError(audioResponse,'MP3 generation failed.'));
+    const mp3=await audioResponse.blob();
+    if(!mp3.size)throw Error('The MP3 file was empty.');
+
+    stage='MP4 creation and YouTube upload';
+    status.textContent='MP3 ready. Creating the themed MP4 and uploading privately to YouTube…';
+    const form=new FormData();
+    form.append('audio',mp3,'RHTC_'+podcastFileSlug(story.title)+'_YouTube.mp3');
+    form.append('title',videoTitle);
+    form.append('description',youtubeDescription(transcript,story,analysisData.citations||[]));
+    form.append('series',preferredYouTubeSeries(story));
+    form.append('privacy_status','private');
+    const uploadResponse=await fetch('/options/api/youtube/publish',{method:'POST',body:form});
+    if(!uploadResponse.ok)throw Error(await readApiError(uploadResponse,'YouTube upload failed.'));
+    const uploadData=await uploadResponse.json();
+    if(!uploadData.url)throw Error('YouTube did not return a video link.');
+    status.innerHTML='Published privately: <a href="'+safe(uploadData.url)+'" target="_blank" rel="noopener noreferrer">Open on YouTube</a>';
+    status.hidden=false;
+    button.textContent='✓ Published';
+    button.disabled=true;
+    button.dataset.published='true';
+    toast('YouTube upload complete · private');
+  }catch(error){
+    status.textContent=stage+' failed: '+(error.message||'Try again.');
+    if(stage==='MP4 creation and YouTube upload')status.textContent+=' Check YouTube Studio before retrying if the upload result is unclear.';
+    status.hidden=false;
+    button.disabled=false;
+    button.textContent='↻ Retry Publish';
+  }
+}
+
 async function translateNewsStory(card,button){
   const panel=card.querySelector(".news-translation");
   if(!panel)return;
@@ -632,7 +699,7 @@ document.querySelectorAll('.nav-item').forEach(el=>el.addEventListener('click',(
 $('#scan-news').addEventListener('click',()=>scanNews());$('#news-search-form').addEventListener('submit',event=>{event.preventDefault();scanNews($('#news-search').value.trim())});$('#news-peak').addEventListener('change',()=>loadNews());let newsSearchTimer;$('#news-search').addEventListener('input',()=>{clearTimeout(newsSearchTimer);newsSearchTimer=setTimeout(()=>loadNews({quiet:true}),220)});
 $('#analysis-read-btn').addEventListener('click',toggleAnalysisSpeech);$('#analysis-stop-btn').addEventListener('click',()=>stopAnalysisSpeech());
 $('#analysis-mp3-btn').addEventListener('click',createAnalysisPodcast);$('#analysis-copy-transcript').addEventListener('click',copyAnalysisPodcastTranscript);$('#youtube-publish-btn').addEventListener('click',publishAnalysisToYouTube);$('#youtube-review-confirm').addEventListener('change',updateYouTubePublishButton);
-$('#news-items').addEventListener('click',event=>{const button=event.target.closest('[data-news-action]');if(!button)return;const card=button.closest('.news-item');if(!card)return;if(button.dataset.newsAction==='read')toggleNewsSpeech(card);else if(button.dataset.newsAction==='stop')stopNewsSpeech();else if(button.dataset.newsAction==='analyze')analyzeNewsStory(card,button);else if(button.dataset.newsAction==='translate')translateNewsStory(card,button)});
+$('#news-items').addEventListener('click',event=>{const button=event.target.closest('[data-news-action]');if(!button)return;const card=button.closest('.news-item');if(!card)return;if(button.dataset.newsAction==='read')toggleNewsSpeech(card);else if(button.dataset.newsAction==='stop')stopNewsSpeech();else if(button.dataset.newsAction==='analyze')analyzeNewsStory(card,button);else if(button.dataset.newsAction==='publish')publishNewsStory(card,button);else if(button.dataset.newsAction==='translate')translateNewsStory(card,button)});
 $('#auto-reload').addEventListener('change',e=>setAutoReload(e.target.value));try{setAutoReload(localStorage.getItem('rhtc-options-auto-reload')||'0',false)}catch(e){setAutoReload('0',false)};$('#refresh').addEventListener('click',()=>loadRows({ai:true,snapshot:true}));$('#review-limit').addEventListener('change',e=>{state.displayLimit=Number(e.target.value)||200;renderRows()});$('#max-spend').addEventListener('change',e=>{const spend=parseMaxSpend(e.target.value);if(Number.isFinite(spend))e.target.value=formatMaxSpend(spend);loadRows({ai:false,snapshot:false})});$('#sort').addEventListener('change',e=>{state.sort=e.target.value;loadRows({ai:false,snapshot:false})});let searchTimer;$('#search').addEventListener('input',e=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.query=e.target.value.trim();loadRows({ai:false,snapshot:false})},220)});
 $('#market-clock').textContent=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date())+' ET';
 initializeWatchlist();
