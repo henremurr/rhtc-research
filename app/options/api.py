@@ -1575,7 +1575,7 @@ async def create_analysis_podcast_audio(data: AnalysisPodcastAudioInput):
         raise HTTPException(400, "The YouTube transcript is empty.")
     try:
         from openai import AsyncOpenAI
-        client = AsyncOpenAI(api_key=key, timeout=240, max_retries=0)
+        client = AsyncOpenAI(api_key=key, timeout=240, max_retries=2)
         audio_parts: list[bytes] = []
         for chunk in chunks:
             audio = await client.audio.speech.create(
