@@ -222,6 +222,7 @@ async def scan_news(*, scheduled: bool = False, query: str | None = None) -> dic
                             "query": queries,
                             "max_results": per_query_limit,
                             "search_type": "fast",
+                            "search_recency_filter": "day",
                             "search_context_size": "low",
                         },
                     )
