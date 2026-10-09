@@ -1561,7 +1561,7 @@ async def create_analysis_podcast_transcript(data: AnalysisPodcastTranscriptInpu
     transcript = (getattr(response, "output_text", "") or "").strip()
     if not transcript:
         raise HTTPException(502, "OpenAI returned an empty YouTube transcript. Try again.")
-    transcript = f"{RHTC_SAFE_HARBOR}\\n\\n{transcript}"
+    transcript = f"{RHTC_SAFE_HARBOR}\n\n{transcript}"
     if len(transcript) > MAX_YOUTUBE_TRANSCRIPT_CHARS:
         raise HTTPException(502, "The transcript exceeded 11,500 characters including the RHTC safe-harbor statement. Try again to generate a shorter version.")
     return {"episode_title": data.title.strip(), "transcript": transcript, "character_count": len(transcript)}
