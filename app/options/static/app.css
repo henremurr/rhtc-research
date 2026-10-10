@@ -1040,3 +1040,12 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
     line-height:1.6!important;
   }
 }
+
+
+/* News view keeps the view switcher and removes screener-only controls. */
+body.news-mode .workspace-toolbar-heading .action-row-title,
+body.news-mode .workspace-toolbar-heading .summary-actions,
+body.news-mode #options-toolbar-filters{
+  display:none!important;
+}
+body.news-mode .workspace-toolbar-heading{gap:8px}
