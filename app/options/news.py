@@ -34,6 +34,13 @@ class NewsTranslationInput(BaseModel):
     snippet: str = Field(default="", max_length=3000)
 
 
+class NewsPublishedInput(BaseModel):
+    url: str = Field(min_length=8, max_length=2000)
+    video_id: str = Field(min_length=1, max_length=100)
+    video_url: str = Field(min_length=8, max_length=500)
+    privacy_status: str = Field(default="private", max_length=20)
+
+
 def detect_news_language(title: str, snippet: str) -> str:
     text = f"{title} {snippet}".strip()
     if len(text) < 20:
@@ -116,14 +123,29 @@ def connect_db() -> sqlite3.Connection:
             snippet TEXT NOT NULL DEFAULT '',
             peak TEXT NOT NULL DEFAULT 'Other',
             first_seen_at TEXT NOT NULL,
-            last_seen_at TEXT NOT NULL
+            last_seen_at TEXT NOT NULL,
+            youtube_published INTEGER NOT NULL DEFAULT 0,
+            youtube_video_id TEXT NOT NULL DEFAULT '',
+            youtube_url TEXT NOT NULL DEFAULT '',
+            youtube_published_at TEXT NOT NULL DEFAULT '',
+            youtube_privacy_status TEXT NOT NULL DEFAULT ''
         )"""
     )
+    existing_columns = {row["name"] for row in connection.execute("PRAGMA table_info(news_items)")}
+    for column, declaration in (
+        ("youtube_published", "INTEGER NOT NULL DEFAULT 0"),
+        ("youtube_video_id", "TEXT NOT NULL DEFAULT ''"),
+        ("youtube_url", "TEXT NOT NULL DEFAULT ''"),
+        ("youtube_published_at", "TEXT NOT NULL DEFAULT ''"),
+        ("youtube_privacy_status", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if column not in existing_columns:
+            connection.execute(f"ALTER TABLE news_items ADD COLUMN {column} {declaration}")
     connection.execute("CREATE TABLE IF NOT EXISTS news_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
     version = connection.execute("SELECT value FROM news_meta WHERE key='url_normalization_version'").fetchone()
     if not version or version["value"] != "1":
         rows = [dict(row) for row in connection.execute("SELECT * FROM news_items ORDER BY first_seen_at, last_seen_at")]
-        merged: dict[str, dict[str, str]] = {}
+        merged: dict[str, dict[str, Any]] = {}
         for row in rows:
             canonical_url = canonical_news_url(row["url"]) or row["url"]
             row["url"] = canonical_url[:2000]
@@ -138,10 +160,16 @@ def connect_db() -> sqlite3.Connection:
                     existing[key] = row[key]
             existing["first_seen_at"] = first_seen
             existing["last_seen_at"] = last_seen
+            if row.get("youtube_published") and (
+                not existing.get("youtube_published")
+                or row.get("youtube_published_at", "") > existing.get("youtube_published_at", "")
+            ):
+                for key in ("youtube_published", "youtube_video_id", "youtube_url", "youtube_published_at", "youtube_privacy_status"):
+                    existing[key] = row[key]
         connection.execute("DELETE FROM news_items")
         connection.executemany(
-            "INSERT INTO news_items(url,title,source,published_at,snippet,peak,first_seen_at,last_seen_at) "
-            "VALUES(:url,:title,:source,:published_at,:snippet,:peak,:first_seen_at,:last_seen_at)",
+            "INSERT INTO news_items(url,title,source,published_at,snippet,peak,first_seen_at,last_seen_at,youtube_published,youtube_video_id,youtube_url,youtube_published_at,youtube_privacy_status) "
+            "VALUES(:url,:title,:source,:published_at,:snippet,:peak,:first_seen_at,:last_seen_at,:youtube_published,:youtube_video_id,:youtube_url,:youtube_published_at,:youtube_privacy_status)",
             list(merged.values()),
         )
         connection.execute("INSERT OR REPLACE INTO news_meta(key,value) VALUES('url_normalization_version','1')")
@@ -287,7 +315,7 @@ async def get_news(
     peak: str | None = Query(default=None, max_length=20),
     q: str | None = Query(default=None, max_length=120),
 ):
-    query = """SELECT url,title,source,published_at,snippet,peak,first_seen_at,last_seen_at FROM news_items WHERE 1=1"""
+    query = """SELECT url,title,source,published_at,snippet,peak,first_seen_at,last_seen_at,youtube_published,youtube_video_id,youtube_url,youtube_published_at,youtube_privacy_status FROM news_items WHERE 1=1"""
     params: list[Any] = []
     if peak and peak not in {"All", "All Peaks"}:
         query += " AND peak = ?"
@@ -311,12 +339,42 @@ async def get_news(
     }
 
 
+@router.post("/published")
+async def mark_news_published(data: NewsPublishedInput) -> dict[str, Any]:
+    """Persist a confirmed YouTube upload on its stored news story."""
+    if data.privacy_status not in {"private", "unlisted", "public"}:
+        raise HTTPException(400, "Invalid YouTube privacy status.")
+    url = canonical_news_url(data.url)
+    if not url:
+        raise HTTPException(400, "A valid story URL is required.")
+    published_at = now_pacific().isoformat()
+    with closing(connect_db()) as connection:
+        result = connection.execute(
+            """UPDATE news_items
+               SET youtube_published=1, youtube_video_id=?, youtube_url=?,
+                   youtube_published_at=?, youtube_privacy_status=?
+               WHERE url=?""",
+            (data.video_id, data.video_url, published_at, data.privacy_status, url),
+        )
+        if result.rowcount == 0:
+            raise HTTPException(404, "The story is no longer in the stored news feed.")
+        connection.commit()
+    return {
+        "status": "saved",
+        "url": url,
+        "youtube_video_id": data.video_id,
+        "youtube_url": data.video_url,
+        "youtube_published_at": published_at,
+        "youtube_privacy_status": data.privacy_status,
+    }
+
+
 @router.post("/deduplicate")
 async def deduplicate_news() -> dict[str, Any]:
     """Remove exact headline/date duplicates while retaining the most complete copy."""
     with closing(connect_db()) as connection:
         rows = [dict(row) for row in connection.execute(
-            "SELECT url,title,published_at,snippet,first_seen_at,last_seen_at FROM news_items"
+            "SELECT url,title,published_at,snippet,first_seen_at,last_seen_at,youtube_published,youtube_video_id,youtube_url,youtube_published_at,youtube_privacy_status FROM news_items"
         )]
         groups: dict[tuple[str, str], list[dict[str, str]]] = {}
         for row in rows:
@@ -343,9 +401,22 @@ async def deduplicate_news() -> dict[str, Any]:
             keep = max(group, key=lambda item: (len(item.get("snippet") or ""), item["last_seen_at"]))
             first_seen = min(item["first_seen_at"] for item in group)
             last_seen = max(item["last_seen_at"] for item in group)
+            published_copy = max(
+                (item for item in group if item.get("youtube_published")),
+                key=lambda item: item.get("youtube_published_at", ""),
+                default=keep,
+            )
             connection.execute(
-                "UPDATE news_items SET first_seen_at=?, last_seen_at=? WHERE url=?",
-                (first_seen, last_seen, keep["url"]),
+                "UPDATE news_items SET first_seen_at=?, last_seen_at=?, youtube_published=?, youtube_video_id=?, youtube_url=?, youtube_published_at=?, youtube_privacy_status=? WHERE url=?",
+                (
+                    first_seen, last_seen,
+                    int(bool(published_copy.get("youtube_published"))),
+                    published_copy.get("youtube_video_id", ""),
+                    published_copy.get("youtube_url", ""),
+                    published_copy.get("youtube_published_at", ""),
+                    published_copy.get("youtube_privacy_status", ""),
+                    keep["url"],
+                ),
             )
             for item in group:
                 if item["url"] != keep["url"]:
