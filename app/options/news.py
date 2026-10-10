@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import html
+import re
+import unicodedata
 import logging
 import os
 import sqlite3
@@ -305,6 +308,58 @@ async def get_news(
         "last_scan_at": meta.get("last_scan_at"),
         "last_scan_count": int(meta.get("last_scan_count", "0")),
         "configured": bool(os.getenv("PERPLEXITY_API_KEY")),
+    }
+
+
+@router.post("/deduplicate")
+async def deduplicate_news() -> dict[str, Any]:
+    """Remove exact headline/date duplicates while retaining the most complete copy."""
+    with closing(connect_db()) as connection:
+        rows = [dict(row) for row in connection.execute(
+            "SELECT url,title,published_at,snippet,first_seen_at,last_seen_at FROM news_items"
+        )]
+        groups: dict[tuple[str, str], list[dict[str, str]]] = {}
+        for row in rows:
+            title = unicodedata.normalize("NFKC", html.unescape(row["title"] or "")).casefold()
+            title_key = " ".join(re.sub(r"[^\w\s]", " ", title).split())
+            if len(title_key) < 8:
+                continue
+            published = (row.get("published_at") or "").strip()
+            published_day = ""
+            if published:
+                try:
+                    published_day = datetime.fromisoformat(published.replace("Z", "+00:00")).date().isoformat()
+                except ValueError:
+                    match = re.match(r"^(\d{4}-\d{2}-\d{2})", published)
+                    published_day = match.group(1) if match else published
+            groups.setdefault((title_key, published_day), []).append(row)
+
+        removed = 0
+        duplicate_groups = 0
+        for group in groups.values():
+            if len(group) < 2:
+                continue
+            duplicate_groups += 1
+            keep = max(group, key=lambda item: (len(item.get("snippet") or ""), item["last_seen_at"]))
+            first_seen = min(item["first_seen_at"] for item in group)
+            last_seen = max(item["last_seen_at"] for item in group)
+            connection.execute(
+                "UPDATE news_items SET first_seen_at=?, last_seen_at=? WHERE url=?",
+                (first_seen, last_seen, keep["url"]),
+            )
+            for item in group:
+                if item["url"] != keep["url"]:
+                    connection.execute("DELETE FROM news_items WHERE url=?", (item["url"],))
+                    removed += 1
+
+        connection.commit()
+        remaining = connection.execute("SELECT COUNT(*) AS n FROM news_items").fetchone()["n"]
+    return {
+        "status": "complete",
+        "removed": removed,
+        "duplicate_groups": duplicate_groups,
+        "remaining": remaining,
+        "matching": "normalized headline and publication date",
     }
 
 
