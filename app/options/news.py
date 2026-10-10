@@ -284,7 +284,7 @@ async def get_news(
     peak: str | None = Query(default=None, max_length=20),
     q: str | None = Query(default=None, max_length=120),
 ):
-    query = """SELECT url,title,source,published_at,snippet,peak,first_seen_at,last_seen_at FROM news_items"""
+    query = """SELECT url,title,source,published_at,snippet,peak,first_seen_at,last_seen_at FROM news_items WHERE 1=1"""
     params: list[Any] = []
     if peak and peak not in {"All", "All Peaks"}:
         query += " AND peak = ?"
