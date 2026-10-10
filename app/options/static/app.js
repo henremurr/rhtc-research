@@ -710,3 +710,7 @@ $('#market-clock').textContent=new Intl.DateTimeFormat('en-US',{timeZone:'Americ
 initializeWatchlist();
 loadNews({quiet:true});
 $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/options/auth/logout',{method:'POST',credentials:'same-origin'})}finally{location.replace('/options/login')}});
+
+
+// The menu keeps the source guide and freshly generated, printable PDF one tap away.
+(()=>{const toggle=document.getElementById('guide-menu-toggle'),menu=document.getElementById('guide-menu');if(!toggle||!menu)return;const close=()=>{menu.hidden=true;toggle.setAttribute('aria-expanded','false')};toggle.addEventListener('click',event=>{event.stopPropagation();const opening=menu.hidden;menu.hidden=!opening;toggle.setAttribute('aria-expanded',String(opening))});menu.addEventListener('click',event=>{if(event.target.closest('a'))close()});document.addEventListener('click',event=>{if(!event.target.closest('.guide-menu-wrap'))close()});document.addEventListener('keydown',event=>{if(event.key==='Escape'){close();toggle.focus()}})})();

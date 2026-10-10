@@ -43,6 +43,7 @@ On phones, the page is designed to scroll as a single page. Full-screen controls
 | --- | --- |
 | Screener logo | Opens the Income Engine / covered-call screen |
 | News logo | Opens the RHTC News Feed and hides Income Engine controls |
+| Guide menu (☰) | Opens guide, update, PDF viewing/printing, and download actions |
 | Theme button | Toggles dark and light themes |
 | Log out | Ends the signed-in session |
 
