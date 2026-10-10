@@ -967,3 +967,64 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
     max-height:180px;
   }
 }
+
+
+/* Safari mobile fallback: prevent flex sizing or nested scroll regions from clipping analysis. */
+@media(max-width:760px){
+  #symbol-analysis-modal.open{
+    display:block!important;
+    overflow-x:hidden!important;
+    overflow-y:auto!important;
+    overscroll-behavior:contain;
+    -webkit-overflow-scrolling:touch;
+    align-items:initial!important;
+    padding: max(8px,env(safe-area-inset-top,0px)) 10px max(8px,env(safe-area-inset-bottom,0px))!important;
+  }
+  #symbol-analysis-modal.open>.analysis-modal,
+  #symbol-analysis-modal.open>.analysis-modal.is-fullscreen{
+    position:relative!important;
+    inset:auto!important;
+    display:block!important;
+    box-sizing:border-box!important;
+    width:100%!important;
+    max-width:680px!important;
+    height:auto!important;
+    min-height:0!important;
+    max-height:none!important;
+    overflow:visible!important;
+    flex:none!important;
+    margin:0 auto!important;
+    transform:none!important;
+  }
+  #symbol-analysis-modal.open .analysis-body{
+    position:static!important;
+    display:flow-root!important;
+    box-sizing:border-box!important;
+    width:100%!important;
+    height:auto!important;
+    min-height:0!important;
+    max-height:none!important;
+    flex:none!important;
+    overflow:visible!important;
+    contain:none!important;
+    transform:none!important;
+  }
+  #symbol-analysis-modal.open .analysis-sources-wrap,
+  #symbol-analysis-modal.open .analysis-podcast-controls,
+  #symbol-analysis-modal.open .analysis-podcast-result,
+  #symbol-analysis-modal.open .youtube-publish-section{
+    position:static!important;
+    inset:auto!important;
+    float:none!important;
+    clear:both!important;
+    transform:none!important;
+  }
+  #symbol-analysis-modal.open .analysis-modal-controls{
+    position:sticky!important;
+    top:max(8px,env(safe-area-inset-top,0px))!important;
+    z-index:30!important;
+    width:max-content!important;
+    height:44px!important;
+    margin:0 0 12px auto!important;
+  }
+}
