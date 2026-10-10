@@ -1028,3 +1028,15 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
     margin:0 0 12px auto!important;
   }
 }
+
+
+/* Give the transcript editor enough room to read longer scripts on a phone. */
+@media(max-width:600px){
+  #analysis-podcast-transcript{
+    height:min(50vh,480px)!important;
+    min-height:300px!important;
+    max-height:480px!important;
+    font-size:13px!important;
+    line-height:1.6!important;
+  }
+}
