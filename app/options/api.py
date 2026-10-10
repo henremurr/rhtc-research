@@ -91,7 +91,7 @@ def render_dashboard_login_page(base_path: str, configured: bool) -> str:
     )
     return f'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Sign in · RHTC Options</title><style>
+<title>Sign in · RHTC Options</title><link rel="icon" href="/favicon.ico" sizes="any"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><link rel="apple-touch-icon-precomposed" href="/apple-touch-icon-precomposed.png"><style>
 :root{{color-scheme:dark;--bg:#0c0e0f;--card:#0c0e0fee;--ink:#e7ecf2;--muted:#b1bac6;--gold:#d4b66b;--line:#526071}}
 *{{box-sizing:border-box}}body{{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:flex-start;background:#080909 url("{base_path}/static/rhtc-signin-background.jpeg?v=2") center/cover no-repeat;color:var(--ink);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:clamp(20px,7vw,120px)}}
 .card{{width:min(420px,100%);padding:32px;border:1px solid #92774499;border-radius:14px;background:var(--card);box-shadow:0 20px 58px #00000088;backdrop-filter:blur(10px) saturate(115%);-webkit-backdrop-filter:blur(10px) saturate(115%)}}

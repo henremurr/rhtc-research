@@ -50,6 +50,32 @@ async def root() -> dict[str, str]:
     return {"status": "running", "service": "RHTC Research API", "version": "1.0.0"}
 
 
+APP_ICON_DIR = Path(__file__).parent / "options" / "static"
+
+
+def app_icon(filename: str, media_type: str) -> FileResponse:
+    return FileResponse(
+        APP_ICON_DIR / filename,
+        media_type=media_type,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+@app.get("/favicon.ico")
+async def favicon():
+    return app_icon("favicon.ico", "image/x-icon")
+
+
+@app.get("/apple-touch-icon.png")
+async def apple_touch_icon():
+    return app_icon("apple-touch-icon.png", "image/png")
+
+
+@app.get("/apple-touch-icon-precomposed.png")
+async def apple_touch_icon_precomposed():
+    return app_icon("apple-touch-icon-precomposed.png", "image/png")
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {
