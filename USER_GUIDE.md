@@ -160,7 +160,7 @@ Each story shows its peak, source, published date, retrieval time, headline, and
 | **Translate to English** | Appears for a detected non-English story and reveals an English translation |
 | **Analyze RHTC impact** | Opens a sourced analysis of the story’s potential impact on watchlist companies and the Three Peaks |
 | **Publish** | Runs the automated analysis, transcript, audio, and YouTube upload flow; see the publishing warning below |
-| **Publish to X** | Publishes the article headline, Three Peaks label, source link, and RHTC hashtags to X; a checkmark prevents accidental duplicate posts |
+| **Post on X** | Posts the article headline, Three Peaks label, source link, and RHTC hashtags on X; a checkmark prevents accidental duplicate posts |
 
 News search and analysis require the relevant server API keys. The story list is saved in the application database. The page displays all stories still stored there and has no date cutoff in the feed view.
 
@@ -189,7 +189,7 @@ A story’s **Publish** button runs analysis, transcript generation, MP3 creatio
 
 Publishing requires the YouTube OAuth settings and MP4 conversion support to be configured on the server. The upload accepts MP3 audio up to 100 MB. API credentials belong in the hosting environment, not in the browser or this repository. Google may restrict uploads to Private until its project audit is complete. Uploaded video links and actual visibility are reported when the upload finishes.
 
-Publishing to X requires an X Developer app with **Read and write** permission, funded API credits, and these Railway Variables: `X_API_KEY`, `X_API_SECRET`, `X_ACCESS_TOKEN`, and `X_ACCESS_TOKEN_SECRET`. If permissions are changed in the X Developer Console, regenerate the access token and secret afterward. The feed records the confirmed Post ID and disables the article's X button after a successful publication.
+Posting on X requires an X Developer app with **Read and write** permission, funded API credits, and these Railway Variables: `X_API_KEY`, `X_API_SECRET`, `X_ACCESS_TOKEN`, and `X_ACCESS_TOKEN_SECRET`. If permissions are changed in the X Developer Console, regenerate the access token and secret afterward. The feed records the confirmed Post ID and disables the article's X button after a successful post.
 
 Transcript and audio generation use OpenAI API credits; news analysis uses current web search. API usage may incur separate charges.
 
