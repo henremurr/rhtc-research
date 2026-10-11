@@ -41,6 +41,12 @@ class NewsPublishedInput(BaseModel):
     privacy_status: str = Field(default="private", max_length=20)
 
 
+class NewsXPublishedInput(BaseModel):
+    url: str = Field(min_length=8, max_length=2000)
+    post_id: str = Field(min_length=1, max_length=100)
+    post_url: str = Field(min_length=8, max_length=500)
+
+
 def detect_news_language(title: str, snippet: str) -> str:
     text = f"{title} {snippet}".strip()
     if len(text) < 20:
@@ -128,7 +134,11 @@ def connect_db() -> sqlite3.Connection:
             youtube_video_id TEXT NOT NULL DEFAULT '',
             youtube_url TEXT NOT NULL DEFAULT '',
             youtube_published_at TEXT NOT NULL DEFAULT '',
-            youtube_privacy_status TEXT NOT NULL DEFAULT ''
+            youtube_privacy_status TEXT NOT NULL DEFAULT '',
+            x_published INTEGER NOT NULL DEFAULT 0,
+            x_post_id TEXT NOT NULL DEFAULT '',
+            x_post_url TEXT NOT NULL DEFAULT '',
+            x_published_at TEXT NOT NULL DEFAULT ''
         )"""
     )
     existing_columns = {row["name"] for row in connection.execute("PRAGMA table_info(news_items)")}
@@ -138,6 +148,10 @@ def connect_db() -> sqlite3.Connection:
         ("youtube_url", "TEXT NOT NULL DEFAULT ''"),
         ("youtube_published_at", "TEXT NOT NULL DEFAULT ''"),
         ("youtube_privacy_status", "TEXT NOT NULL DEFAULT ''"),
+        ("x_published", "INTEGER NOT NULL DEFAULT 0"),
+        ("x_post_id", "TEXT NOT NULL DEFAULT ''"),
+        ("x_post_url", "TEXT NOT NULL DEFAULT ''"),
+        ("x_published_at", "TEXT NOT NULL DEFAULT ''"),
     ):
         if column not in existing_columns:
             connection.execute(f"ALTER TABLE news_items ADD COLUMN {column} {declaration}")
@@ -315,7 +329,7 @@ async def get_news(
     peak: str | None = Query(default=None, max_length=20),
     q: str | None = Query(default=None, max_length=120),
 ):
-    query = """SELECT url,title,source,published_at,snippet,peak,first_seen_at,last_seen_at,youtube_published,youtube_video_id,youtube_url,youtube_published_at,youtube_privacy_status FROM news_items WHERE 1=1"""
+    query = """SELECT url,title,source,published_at,snippet,peak,first_seen_at,last_seen_at,youtube_published,youtube_video_id,youtube_url,youtube_published_at,youtube_privacy_status,x_published,x_post_id,x_post_url,x_published_at FROM news_items WHERE 1=1"""
     params: list[Any] = []
     if peak and peak not in {"All", "All Peaks"}:
         query += " AND peak = ?"
@@ -366,6 +380,32 @@ async def mark_news_published(data: NewsPublishedInput) -> dict[str, Any]:
         "youtube_url": data.video_url,
         "youtube_published_at": published_at,
         "youtube_privacy_status": data.privacy_status,
+    }
+
+
+@router.post("/x-published")
+async def mark_news_x_published(data: NewsXPublishedInput) -> dict[str, Any]:
+    """Persist a confirmed X Post on its stored news story."""
+    url = canonical_news_url(data.url)
+    if not url:
+        raise HTTPException(400, "A valid story URL is required.")
+    published_at = now_pacific().isoformat()
+    with closing(connect_db()) as connection:
+        result = connection.execute(
+            """UPDATE news_items
+               SET x_published=1, x_post_id=?, x_post_url=?, x_published_at=?
+               WHERE url=?""",
+            (data.post_id, data.post_url, published_at, url),
+        )
+        if result.rowcount == 0:
+            raise HTTPException(404, "The story is no longer in the stored news feed.")
+        connection.commit()
+    return {
+        "status": "saved",
+        "url": url,
+        "x_post_id": data.post_id,
+        "x_post_url": data.post_url,
+        "x_published_at": published_at,
     }
 
 
