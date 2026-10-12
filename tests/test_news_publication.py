@@ -52,6 +52,45 @@ class NewsPublicationRegressionTest(unittest.TestCase):
                 ":x_published,:x_post_id,:x_post_url,:x_published_at)", values,
             )
 
+    def test_peak_assignment_can_be_changed(self):
+        url = "https://example.com/peak-story"
+        self.insert_story(url, peak="Other")
+        result = asyncio.run(news.update_news_peak(news.NewsPeakInput(url=url, peak="AI/I")))
+        self.assertEqual(result["peak"], "AI/I")
+        with news.connect_db() as connection:
+            row = connection.execute("SELECT peak FROM news_items WHERE url=?", (url,)).fetchone()
+        self.assertEqual(row["peak"], "AI/I")
+
+    def test_peak_assignment_rejects_unknown_peak(self):
+        self.insert_story("https://example.com/invalid-peak")
+        with self.assertRaises(news.HTTPException) as error:
+            asyncio.run(news.update_news_peak(news.NewsPeakInput(url="https://example.com/invalid-peak", peak="Unknown")))
+        self.assertEqual(error.exception.status_code, 400)
+
+    def test_unpublished_story_can_be_deleted(self):
+        url = "https://example.com/unpublished-story"
+        self.insert_story(url)
+        result = asyncio.run(news.delete_news_story(news.NewsDeleteInput(url=url)))
+        self.assertEqual(result["status"], "deleted")
+        with news.connect_db() as connection:
+            row = connection.execute("SELECT url FROM news_items WHERE url=?", (url,)).fetchone()
+        self.assertIsNone(row)
+
+    def test_published_story_cannot_be_deleted(self):
+        for suffix, metadata in (
+            ("youtube", {"youtube_published": 1}),
+            ("x", {"x_published": 1}),
+        ):
+            with self.subTest(service=suffix):
+                url = f"https://example.com/published-{suffix}"
+                self.insert_story(url, **metadata)
+                with self.assertRaises(news.HTTPException) as error:
+                    asyncio.run(news.delete_news_story(news.NewsDeleteInput(url=url)))
+                self.assertEqual(error.exception.status_code, 409)
+                with news.connect_db() as connection:
+                    row = connection.execute("SELECT url FROM news_items WHERE url=?", (url,)).fetchone()
+                self.assertIsNotNone(row)
+
     def test_deduplicate_preserves_x_publication_metadata_from_removed_copy(self):
         keep_url = "https://example.com/story?source=short"
         remove_url = "https://example.net/story?source=long"

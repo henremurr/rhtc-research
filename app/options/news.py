@@ -47,6 +47,18 @@ class NewsXPublishedInput(BaseModel):
     post_url: str = Field(min_length=8, max_length=500)
 
 
+class NewsPeakInput(BaseModel):
+    url: str = Field(min_length=8, max_length=2000)
+    peak: str = Field(min_length=1, max_length=20)
+
+
+class NewsDeleteInput(BaseModel):
+    url: str = Field(min_length=8, max_length=2000)
+
+
+NEWS_PEAKS = {"AI/I", "EFM/I", "DS/I", "Cross-Peak", "Other"}
+
+
 def detect_news_language(title: str, snippet: str) -> str:
     text = f"{title} {snippet}".strip()
     if len(text) < 20:
@@ -357,6 +369,45 @@ async def get_news(
         "last_scan_count": int(meta.get("last_scan_count", "0")),
         "configured": bool(os.getenv("PERPLEXITY_API_KEY")),
     }
+
+
+@router.patch("/peak")
+async def update_news_peak(data: NewsPeakInput) -> dict[str, Any]:
+    """Change the assigned RHTC peak for one stored story."""
+    if data.peak not in NEWS_PEAKS:
+        raise HTTPException(400, "Choose a valid RHTC peak.")
+    url = canonical_news_url(data.url)
+    if not url:
+        raise HTTPException(400, "A valid story URL is required.")
+    with closing(connect_db()) as connection:
+        result = connection.execute("UPDATE news_items SET peak=? WHERE url=?", (data.peak, url))
+        if result.rowcount == 0:
+            raise HTTPException(404, "The story is no longer in the stored news feed.")
+        connection.commit()
+    return {"status": "updated", "url": url, "peak": data.peak}
+
+
+@router.post("/delete")
+async def delete_news_story(data: NewsDeleteInput) -> dict[str, Any]:
+    """Delete a story only while its YouTube and X publication records are both unset."""
+    url = canonical_news_url(data.url)
+    if not url:
+        raise HTTPException(400, "A valid story URL is required.")
+    with closing(connect_db()) as connection:
+        result = connection.execute(
+            "DELETE FROM news_items WHERE url=? AND youtube_published=0 AND x_published=0",
+            (url,),
+        )
+        if result.rowcount == 0:
+            story = connection.execute(
+                "SELECT youtube_published, x_published FROM news_items WHERE url=?",
+                (url,),
+            ).fetchone()
+            if story is None:
+                raise HTTPException(404, "The story is no longer in the stored news feed.")
+            raise HTTPException(409, "Published stories cannot be deleted.")
+        connection.commit()
+    return {"status": "deleted", "url": url}
 
 
 @router.post("/published")
