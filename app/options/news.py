@@ -180,10 +180,16 @@ def connect_db() -> sqlite3.Connection:
             ):
                 for key in ("youtube_published", "youtube_video_id", "youtube_url", "youtube_published_at", "youtube_privacy_status"):
                     existing[key] = row[key]
+            if row.get("x_published") and (
+                not existing.get("x_published")
+                or row.get("x_published_at", "") > existing.get("x_published_at", "")
+            ):
+                for key in ("x_published", "x_post_id", "x_post_url", "x_published_at"):
+                    existing[key] = row[key]
         connection.execute("DELETE FROM news_items")
         connection.executemany(
-            "INSERT INTO news_items(url,title,source,published_at,snippet,peak,first_seen_at,last_seen_at,youtube_published,youtube_video_id,youtube_url,youtube_published_at,youtube_privacy_status) "
-            "VALUES(:url,:title,:source,:published_at,:snippet,:peak,:first_seen_at,:last_seen_at,:youtube_published,:youtube_video_id,:youtube_url,:youtube_published_at,:youtube_privacy_status)",
+            "INSERT INTO news_items(url,title,source,published_at,snippet,peak,first_seen_at,last_seen_at,youtube_published,youtube_video_id,youtube_url,youtube_published_at,youtube_privacy_status,x_published,x_post_id,x_post_url,x_published_at) "
+            "VALUES(:url,:title,:source,:published_at,:snippet,:peak,:first_seen_at,:last_seen_at,:youtube_published,:youtube_video_id,:youtube_url,:youtube_published_at,:youtube_privacy_status,:x_published,:x_post_id,:x_post_url,:x_published_at)",
             list(merged.values()),
         )
         connection.execute("INSERT OR REPLACE INTO news_meta(key,value) VALUES('url_normalization_version','1')")
@@ -414,7 +420,7 @@ async def deduplicate_news() -> dict[str, Any]:
     """Remove exact headline/date duplicates while retaining the most complete copy."""
     with closing(connect_db()) as connection:
         rows = [dict(row) for row in connection.execute(
-            "SELECT url,title,published_at,snippet,first_seen_at,last_seen_at,youtube_published,youtube_video_id,youtube_url,youtube_published_at,youtube_privacy_status FROM news_items"
+            "SELECT url,title,published_at,snippet,first_seen_at,last_seen_at,youtube_published,youtube_video_id,youtube_url,youtube_published_at,youtube_privacy_status,x_published,x_post_id,x_post_url,x_published_at FROM news_items"
         )]
         groups: dict[tuple[str, str], list[dict[str, str]]] = {}
         for row in rows:
@@ -446,8 +452,13 @@ async def deduplicate_news() -> dict[str, Any]:
                 key=lambda item: item.get("youtube_published_at", ""),
                 default=keep,
             )
+            x_published_copy = max(
+                (item for item in group if item.get("x_published")),
+                key=lambda item: item.get("x_published_at", ""),
+                default=keep,
+            )
             connection.execute(
-                "UPDATE news_items SET first_seen_at=?, last_seen_at=?, youtube_published=?, youtube_video_id=?, youtube_url=?, youtube_published_at=?, youtube_privacy_status=? WHERE url=?",
+                "UPDATE news_items SET first_seen_at=?, last_seen_at=?, youtube_published=?, youtube_video_id=?, youtube_url=?, youtube_published_at=?, youtube_privacy_status=?, x_published=?, x_post_id=?, x_post_url=?, x_published_at=? WHERE url=?",
                 (
                     first_seen, last_seen,
                     int(bool(published_copy.get("youtube_published"))),
@@ -455,6 +466,10 @@ async def deduplicate_news() -> dict[str, Any]:
                     published_copy.get("youtube_url", ""),
                     published_copy.get("youtube_published_at", ""),
                     published_copy.get("youtube_privacy_status", ""),
+                    int(bool(x_published_copy.get("x_published"))),
+                    x_published_copy.get("x_post_id", ""),
+                    x_published_copy.get("x_post_url", ""),
+                    x_published_copy.get("x_published_at", ""),
                     keep["url"],
                 ),
             )
