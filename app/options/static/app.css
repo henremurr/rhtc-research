@@ -1066,3 +1066,6 @@ body.news-mode .workspace-toolbar-heading{gap:8px}
 .guide-submenu a{justify-content:flex-start;padding:10px 11px;font-size:13px}
 .guide-submenu[hidden]{display:none!important}
 @media(max-width:700px){.guide-menu-toggle{width:40px;height:40px}}
+
+
+.news-peak-change-btn,.news-delete-btn{min-height:32px;padding:6px 10px;border:1px solid #65717e;border-radius:5px;background:#1c2530;color:#dbe3ec;font:600 10px var(--sans);cursor:pointer}.news-peak-change-btn:hover{border-color:#b5964f;background:#302a20;color:#efd690}.news-delete-btn{border-color:#8a5454;background:#2d2023;color:#f2b8b8}.news-delete-btn:hover{border-color:#bd6868;background:#43282b;color:#ffd0d0}.news-delete-btn:disabled{opacity:.48;cursor:not-allowed}.news-peak-select{min-height:32px;max-width:150px;padding:5px 8px;border:1px solid #78663d;border-radius:5px;background:#202a35;color:#e0e6ed;font:600 10px var(--sans)}.news-peak-change-btn:focus-visible,.news-delete-btn:focus-visible,.news-peak-select:focus-visible{outline:2px solid #b9944a;outline-offset:2px}:root:not([data-theme="dark"]) .news-peak-change-btn,:root:not([data-theme="dark"]) .news-peak-select{background:#fff;color:#586575;border-color:#d5dbe2}:root:not([data-theme="dark"]) .news-delete-btn{background:#fff7f7;color:#8f4242;border-color:#d4a1a1}@media(max-width:600px){.news-peak-select{max-width:100%;flex:1}}
