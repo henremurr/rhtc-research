@@ -107,6 +107,22 @@ def render_video(audio_path: Path, artwork_path: Path, output_path: Path) -> Non
         raise HTTPException(422, f"MP4 conversion failed: {detail}")
 
 
+async def set_custom_thumbnail(client: httpx.AsyncClient, token: str, video_id: str, artwork_path: Path) -> bool:
+    try:
+        response = await client.post(
+            "https://www.googleapis.com/upload/youtube/v3/thumbnails/set",
+            params={"videoId": video_id},
+            content=artwork_path.read_bytes(),
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "image/jpeg",
+            },
+        )
+    except httpx.HTTPError:
+        return False
+    return response.status_code in (200, 201)
+
+
 async def start_youtube_upload(client: httpx.AsyncClient, token: str, video_path: Path, title: str, description: str, series_name: str, privacy_status: str) -> dict[str, Any]:
     size = video_path.stat().st_size
     metadata = {
@@ -229,4 +245,5 @@ async def publish_video(
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
             token = await refresh_access_token(client)
             result = await start_youtube_upload(client, token, video_path, title.strip(), description.strip(), SERIES_ARTWORKS[series][0], privacy_status)
+            result["thumbnail_set"] = await set_custom_thumbnail(client, token, result["video_id"], artwork_path)
     return {**result, "title": title.strip(), "series": SERIES_ARTWORKS[series][0]}
