@@ -7,7 +7,7 @@ import os
 import secrets
 import time
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -85,7 +85,10 @@ async def publish_to_x(data: XPublishInput) -> dict[str, str]:
     if missing:
         raise HTTPException(503, "X publishing is not configured. Add " + ", ".join(missing) + " to Railway Variables.")
     if not data.url.lower().startswith(("https://", "http://")):
-        raise HTTPException(400, "A valid article URL is required.")
+        raise HTTPException(400, "A valid YouTube video URL is required.")
+    hostname = (urlparse(data.url).hostname or "").lower()
+    if hostname != "youtube.com" and not hostname.endswith(".youtube.com") and hostname != "youtu.be":
+        raise HTTPException(400, "Publish the RHTC YouTube video first. X posts must link to its YouTube URL.")
     text = compose_x_post(data.title, data.url, data.peak)
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(
