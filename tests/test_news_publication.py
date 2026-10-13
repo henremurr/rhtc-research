@@ -150,6 +150,38 @@ class NewsPublicationRegressionTest(unittest.TestCase):
         self.assertEqual(rows[0]["x_post_id"], "1900123456789")
         self.assertEqual(rows[0]["youtube_video_id"], "youtube123")
 
+
+    def test_publication_filter_only_counts_complete_youtube_and_x_workflow(self):
+        self.insert_story(
+            "https://example.com/published",
+            youtube_published=1,
+            youtube_video_id="video123",
+            youtube_url="https://www.youtube.com/watch?v=video123",
+            youtube_published_at="2026-10-12T10:00:00-07:00",
+            youtube_privacy_status="public",
+            x_published=1,
+            x_post_id="1900123456789",
+            x_post_url="https://x.com/i/web/status/1900123456789",
+            x_published_at="2026-10-12T10:01:00-07:00",
+        )
+        self.insert_story(
+            "https://example.com/youtube-only",
+            youtube_published=1,
+            youtube_video_id="video456",
+            youtube_url="https://www.youtube.com/watch?v=video456",
+            youtube_privacy_status="public",
+        )
+        self.insert_story("https://example.com/not-published")
+
+        published = asyncio.run(news.get_news(peak=None, q=None, publication="Published"))
+        not_published = asyncio.run(news.get_news(peak=None, q=None, publication="Not published"))
+
+        self.assertEqual([item["url"] for item in published["items"]], ["https://example.com/published"])
+        self.assertEqual(
+            {item["url"] for item in not_published["items"]},
+            {"https://example.com/youtube-only", "https://example.com/not-published"},
+        )
+
     def test_saved_x_record_is_the_status_returned_for_page_reload(self):
         self.insert_story("https://example.com/story")
         request = news.NewsXPublishedInput(
