@@ -346,12 +346,19 @@ async def scan_news(*, scheduled: bool = False, query: str | None = None) -> dic
 async def get_news(
     peak: str | None = Query(default=None, max_length=20),
     q: str | None = Query(default=None, max_length=120),
+    publication: str | None = Query(default=None, max_length=20),
 ):
     query = """SELECT url,title,source,published_at,snippet,peak,first_seen_at,last_seen_at,youtube_published,youtube_video_id,youtube_url,youtube_published_at,youtube_privacy_status,x_published,x_post_id,x_post_url,x_published_at FROM news_items WHERE 1=1"""
     params: list[Any] = []
     if peak and peak not in {"All", "All Peaks"}:
         query += " AND peak = ?"
         params.append(peak)
+    if publication == "Published":
+        query += " AND youtube_published = 1 AND x_published = 1"
+    elif publication == "Not published":
+        query += " AND NOT (youtube_published = 1 AND x_published = 1)"
+    elif publication not in {None, "All"}:
+        raise HTTPException(400, "Choose a valid publication filter.")
     if q and q.strip():
         query += " AND (title LIKE ? OR snippet LIKE ? OR source LIKE ?)"
         term = f"%{q.strip()}%"
