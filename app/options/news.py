@@ -346,7 +346,7 @@ async def scan_news(*, scheduled: bool = False, query: str | None = None) -> dic
 async def get_news(
     peak: str | None = Query(default=None, max_length=20),
     q: str | None = Query(default=None, max_length=120),
-    publication: str | None = Query(default=None, max_length=20),
+    publication: str | None = None,
 ):
     query = """SELECT url,title,source,published_at,snippet,peak,first_seen_at,last_seen_at,youtube_published,youtube_video_id,youtube_url,youtube_published_at,youtube_privacy_status,x_published,x_post_id,x_post_url,x_published_at FROM news_items WHERE 1=1"""
     params: list[Any] = []
