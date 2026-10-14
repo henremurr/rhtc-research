@@ -77,16 +77,16 @@ class NewsAnalysisInput(BaseModel):
     published_at: str = Field(default="", max_length=40)
 
 SEARCH_QUERIES = [
-    "current developments across the RHTC Three Peaks thesis: AI compute, power, fuels and minerals, defense and security, and space",
-    "latest AI compute, semiconductors, GPUs, data centers, networking, memory, and hyperscaler investment news",
-    "latest electricity, grid, generation, nuclear fission and fusion, tritium and fusion fuel supply, advanced reactors, uranium, HALEU, oil, natural gas, LNG, fuels, and critical minerals news",
-    "latest US defense, Pentagon procurement, missiles, munitions, military technology, and security news",
-    "latest space, satellite, launch, Space Force, NASA, and national security space developments",
-    "recent geopolitical developments, conflicts, sanctions, trade controls, shipping chokepoints, and supply-chain disruptions",
-    "recent US economic news: Federal Reserve, interest rates, inflation, employment, GDP, Treasury yields, fiscal policy, trade, and manufacturing",
-    "recent global economic news: central banks, growth, inflation, currency, trade, commodities, and industrial supply chains",
-    "recent policy, legislative, and regulatory decisions affecting AI infrastructure, electricity, energy, minerals, defense, and space",
-    "recent CSIS, Hudson, FDD, Heritage, and other think-tank reports on AI, energy security, defense, geopolitics, and space",
+    "RHTC AI/I chain: semiconductor inputs and manufacturing, GPUs and accelerators, HBM and memory, networking, servers, hyperscalers, AI compute, and data-center construction",
+    "RHTC AI-to-power chain: data-center and AI electricity demand, generation capacity, grid interconnection, transmission, substations, transformers, storage, power contracts, and shortages",
+    "RHTC energy and fuel chain: electricity generation, nuclear fission and fusion, tritium and fusion fuel supply, advanced reactors, uranium, HALEU, enrichment, natural gas, LNG, oil, and other fuels",
+    "RHTC minerals-to-infrastructure chain: critical minerals, copper, rare earths, mining, refining, processing, batteries, grid equipment, pipelines, and energy infrastructure supply chains",
+    "RHTC infrastructure-to-defense chain: power-grid and data-center resilience, cyber and physical threats, military energy needs, defense industrial base, shipbuilding, aircraft, missiles, munitions, drones, and military technology",
+    "RHTC space chain: semiconductors and AI for satellites, launch vehicles, satellite constellations, space communications, positioning and navigation, sensing and intelligence, Space Force procurement, and launch infrastructure",
+    "Three Peaks cross-chain developments linking AI compute, electricity, fuels and minerals, critical infrastructure, defense and security, and space; include upstream causes and downstream effects",
+    "Recent US policy, legislation, regulation, and public investment affecting AI infrastructure, electricity and grids, nuclear and fusion, critical minerals, defense procurement, cybersecurity, and space",
+    "Recent geopolitical and economic developments affecting Three Peaks supply chains: export controls, sanctions, conflict, shipping chokepoints, trade, industrial capacity, commodities, and strategic competition",
+    "Recent CSIS, Hudson, FDD, Heritage, and other think-tank analysis connecting AI infrastructure, energy security, fuels and minerals, defense, geopolitics, and space",
 ]
 
 PEAK_TERMS = {
