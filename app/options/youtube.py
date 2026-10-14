@@ -11,6 +11,8 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
+from app.options.news import NewsPublishedInput, mark_news_published
+
 router = APIRouter(prefix="/api/youtube", tags=["youtube"])
 BASE = Path(__file__).parent
 ARTWORK_DIR = BASE / "static" / "youtube-artwork"
@@ -219,6 +221,7 @@ async def publish_video(
     description: str = Form("", max_length=5000),
     series: str = Form("policy_power_news"),
     privacy_status: str = Form("public"),
+    story_url: str = Form("", max_length=2000),
 ) -> dict[str, Any]:
     if privacy_status not in {"private", "unlisted", "public"}:
         raise HTTPException(400, "Choose Private, Unlisted, or Public visibility.")
@@ -245,5 +248,15 @@ async def publish_video(
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
             token = await refresh_access_token(client)
             result = await start_youtube_upload(client, token, video_path, title.strip(), description.strip(), SERIES_ARTWORKS[series][0], privacy_status)
+            if story_url.strip():
+                # Record the confirmed YouTube ID before sending it back to the
+                # browser. A lost browser response must not make a successful
+                # upload look unpublished or invite a duplicate upload.
+                await mark_news_published(NewsPublishedInput(
+                    url=story_url,
+                    video_id=result["video_id"],
+                    video_url=result["url"],
+                    privacy_status=result["privacy_status"],
+                ))
             result["thumbnail_set"] = await set_custom_thumbnail(client, token, result["video_id"], artwork_path)
     return {**result, "title": title.strip(), "series": SERIES_ARTWORKS[series][0]}

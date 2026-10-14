@@ -54,12 +54,29 @@ class NewsPublicationRegressionTest(unittest.TestCase):
 
     def test_peak_assignment_can_be_changed(self):
         url = "https://example.com/peak-story"
-        self.insert_story(url, peak="Other")
+        self.insert_story(
+            url,
+            peak="Other",
+            youtube_published=1,
+            youtube_video_id="video123",
+            youtube_url="https://www.youtube.com/watch?v=video123",
+            youtube_privacy_status="public",
+            x_published=1,
+            x_post_id="1900123456789",
+            x_post_url="https://x.com/i/web/status/1900123456789",
+        )
         result = asyncio.run(news.update_news_peak(news.NewsPeakInput(url=url, peak="AI/I")))
         self.assertEqual(result["peak"], "AI/I")
         with news.connect_db() as connection:
-            row = connection.execute("SELECT peak FROM news_items WHERE url=?", (url,)).fetchone()
+            row = connection.execute(
+                "SELECT peak,youtube_published,youtube_video_id,x_published,x_post_id FROM news_items WHERE url=?",
+                (url,),
+            ).fetchone()
         self.assertEqual(row["peak"], "AI/I")
+        self.assertEqual(row["youtube_published"], 1)
+        self.assertEqual(row["youtube_video_id"], "video123")
+        self.assertEqual(row["x_published"], 1)
+        self.assertEqual(row["x_post_id"], "1900123456789")
 
     def test_peak_assignment_rejects_unknown_peak(self):
         self.insert_story("https://example.com/invalid-peak")
@@ -221,13 +238,16 @@ class NewsPublicationRegressionTest(unittest.TestCase):
             script = source.read()
 
         self.assertIn("const X_PENDING_STORAGE_KEY='rhtc_x_publish_pending_v1'", script)
-        self.assertIn("if(pending?.stage==='saved'){await savePendingXPost(card,pending);return}", script)
+        self.assertIn("if(pending?.stage==='saved'){return await savePendingXPost(card,pending)}", script)
         save_function = script.split("async function savePendingXPost", 1)[1].split("function restorePendingXPost", 1)[0]
         self.assertIn("/options/api/news/x-published", save_function)
         self.assertNotIn("/options/api/x/publish", save_function)
         self.assertIn("container.querySelectorAll('.news-item').forEach(restorePendingXPost)", script)
         self.assertIn("xPublished=Boolean(Number(item.x_published))", script)
-        self.assertIn("if(pending){restorePendingXPost(card);return}", script)
+        self.assertIn("if(pending){restorePendingXPost(card);return false}", script)
+        self.assertIn("form.append('story_url',story.url)", script)
+        self.assertIn("await publishNewsStoryToX(refreshed,refreshedButton)", script)
+        self.assertIn("toast('X post confirmed and saved.')", script)
 
 
 if __name__ == "__main__":

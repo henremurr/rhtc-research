@@ -521,7 +521,7 @@ function unlockXRetry(card){const sourceUrl=card.dataset.newsUrl||'';if(!sourceU
 async function publishNewsStoryToX(card,button){
   const status=card.querySelector('.news-publish-status');
   const sourceUrl=card.dataset.newsUrl||'',youtubeUrl=card.dataset.newsYoutubeUrl||'';
-  const story={title:card.dataset.newsTitle||card.querySelector('h3 a')?.textContent||'News story',url:youtubeUrl,peak:card.dataset.newsPeak||'Other'};
+  const story={title:card.dataset.newsTitle||card.querySelector('h3 a')?.textContent||'News story',url:youtubeUrl,peak:card.dataset.newsPeak||'Other',story_url:sourceUrl};
   if(!sourceUrl||sourceUrl==='#'){toast('This story has no valid source link.');return false}
   if(card.dataset.newsXPublished==='true'){updateNewsPublishControl(card);return true}
   if(!/^https?:\/\//i.test(youtubeUrl)||String(card.dataset.newsYoutubePrivacy||'').toLowerCase()==='private'){status.hidden=false;status.textContent='Publish this story publicly or unlisted to YouTube first so X can link to the RHTC video.';return false}
@@ -534,7 +534,21 @@ async function publishNewsStoryToX(card,button){
     const data=await response.json();
     const confirmed={stage:'saved',post_id:data.post_id,post_url:data.url};if(!writePendingXPost(sourceUrl,confirmed)){button.disabled=true;button.textContent='X result unknown';status.textContent='X returned a Post ID, but this browser could not save it. Check your X profile before retrying.';return false}
     return await savePendingXPost(card,confirmed);
-  }catch(error){button.disabled=true;button.textContent='X result unknown';status.textContent=(error.message||'X publishing did not return a confirmed result.')+' Check your X profile before retrying; this story is blocked to prevent a duplicate.';return false}
+  }catch(error){
+    // The server now persists X's confirmed Post ID before replying. Refresh
+    // the feed after a browser/network error so that saved result is recovered.
+    try{
+      await loadNews({quiet:true});
+      const refreshed=[...document.querySelectorAll('.news-item')].find(item=>item.dataset.newsUrl===sourceUrl);
+      if(refreshed?.dataset.newsXPublished==='true'){
+        clearPendingXPost(sourceUrl);
+        updateNewsPublishControl(refreshed);
+        toast('X post confirmed and saved.');
+        return true;
+      }
+    }catch{}
+    button.disabled=true;button.textContent='X result unknown';status.textContent=(error.message||'X publishing did not return a confirmed result.')+' Check your X profile before retrying; this story is blocked to prevent a duplicate.';return false
+  }
 }
 async function publishNewsStory(card,button){
   const status=card.querySelector('.news-publish-status');
@@ -585,6 +599,7 @@ async function publishNewsStory(card,button){
     form.append('description',youtubeDescription(transcript,story,analysisData.citations||[]));
     form.append('series',preferredYouTubeSeries(story));
     form.append('privacy_status','public');
+    form.append('story_url',story.url);
     const uploadResponse=await fetch('/options/api/youtube/publish',{method:'POST',body:form});
     if(!uploadResponse.ok)throw Error(await readApiError(uploadResponse,'YouTube upload failed.'));
     const uploadData=await uploadResponse.json();
@@ -605,6 +620,24 @@ async function publishNewsStory(card,button){
       status.hidden=false;updateNewsPublishControl(card);
     }
   }catch(error){
+    if(stage==='MP4 creation and YouTube upload'||stage==='Save YouTube publication status'){
+      // The upload route records its video ID server-side before responding.
+      // Re-read that record before offering another upload; if it exists,
+      // resume the X step using the refreshed card instead of uploading twice.
+      try{
+        await loadNews({quiet:true});
+        const refreshed=[...document.querySelectorAll('.news-item')].find(item=>item.dataset.newsUrl===story.url);
+        if(refreshed?.dataset.newsYoutubePublished==='true'){
+          const refreshedButton=refreshed.querySelector('.news-publish-btn');
+          if(refreshed.dataset.newsXPublished!=='true'&&refreshedButton&&!refreshedButton.disabled){
+            await publishNewsStoryToX(refreshed,refreshedButton);
+          }else if(refreshed.dataset.newsXPublished==='true'){
+            toast('YouTube and X publication records confirmed.');
+          }
+          return;
+        }
+      }catch{}
+    }
     status.textContent=stage+' failed: '+(error.message||'Try again.');
     if(stage==='MP4 creation and YouTube upload')status.textContent+=' Check YouTube Studio before retrying if the upload result is unclear.';
     status.hidden=false;
