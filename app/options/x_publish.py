@@ -13,6 +13,8 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from app.options.news import NewsXPublishedInput, mark_news_x_published
+
 router = APIRouter(prefix="/api/x", tags=["x"])
 CREATE_POST_URL = "https://api.x.com/2/tweets"
 X_SETTINGS = ("X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_TOKEN_SECRET")
@@ -22,6 +24,7 @@ class XPublishInput(BaseModel):
     title: str = Field(min_length=1, max_length=500)
     url: str = Field(min_length=8, max_length=2000)
     peak: str = Field(default="Other", max_length=30)
+    story_url: str = Field(default="", max_length=2000)
 
 
 def missing_x_settings() -> list[str]:
@@ -107,4 +110,13 @@ async def publish_to_x(data: XPublishInput) -> dict[str, str]:
         post_id = str(response.json()["data"]["id"])
     except (KeyError, TypeError, ValueError) as exc:
         raise HTTPException(502, "X accepted the request but returned no Post ID.") from exc
-    return {"post_id": post_id, "url": f"https://x.com/i/web/status/{post_id}", "text": text}
+    post_url = f"https://x.com/i/web/status/{post_id}"
+    if data.story_url.strip():
+        # Save the confirmed Post ID on the server before replying, so a lost
+        # browser response can be recovered without posting to X again.
+        await mark_news_x_published(NewsXPublishedInput(
+            url=data.story_url,
+            post_id=post_id,
+            post_url=post_url,
+        ))
+    return {"post_id": post_id, "url": post_url, "text": text}
