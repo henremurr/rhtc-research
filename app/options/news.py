@@ -79,7 +79,7 @@ class NewsAnalysisInput(BaseModel):
 SEARCH_QUERIES = [
     "current developments across the RHTC Three Peaks thesis: AI compute, power, fuels and minerals, defense and security, and space",
     "latest AI compute, semiconductors, GPUs, data centers, networking, memory, and hyperscaler investment news",
-    "latest electricity, grid, generation, nuclear, uranium, oil, natural gas, LNG, fuels, and critical minerals news",
+    "latest electricity, grid, generation, nuclear fission and fusion, tritium and fusion fuel supply, advanced reactors, uranium, HALEU, oil, natural gas, LNG, fuels, and critical minerals news",
     "latest US defense, Pentagon procurement, missiles, munitions, military technology, and security news",
     "latest space, satellite, launch, Space Force, NASA, and national security space developments",
     "recent geopolitical developments, conflicts, sanctions, trade controls, shipping chokepoints, and supply-chain disruptions",
