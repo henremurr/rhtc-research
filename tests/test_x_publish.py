@@ -32,7 +32,10 @@ def test_x_settings_and_oauth_header():
 
 
 def test_successful_x_publish_returns_the_created_post_without_repeating_request():
+    from unittest.mock import AsyncMock
+
     requests = []
+    saved = AsyncMock()
 
     class FakeResponse:
         status_code = 201
@@ -63,12 +66,17 @@ def test_successful_x_publish_returns_the_created_post_without_repeating_request
     with patch.dict(os.environ, credentials, clear=False):
         with patch.object(x_publish.httpx, "AsyncClient", FakeClient):
             with patch.object(x_publish, "oauth1_header", return_value="OAuth test"):
-                result = asyncio.run(x_publish.publish_to_x(x_publish.XPublishInput(
-                    title="A major contract",
-                    url="https://example.com/story",
-                    peak="DS/I",
-                )))
+                with patch.object(x_publish, "mark_news_x_published", new=saved):
+                    result = asyncio.run(x_publish.publish_to_x(x_publish.XPublishInput(
+                        title="A major contract",
+                        url="https://www.youtube.com/watch?v=video123",
+                        peak="DS/I",
+                        story_url="https://example.com/story",
+                    )))
 
     assert result["post_id"] == "1900123456789"
     assert result["url"] == "https://x.com/i/web/status/1900123456789"
     assert len(requests) == 1
+    saved.assert_awaited_once()
+    assert saved.await_args.args[0].url == "https://example.com/story"
+    assert saved.await_args.args[0].post_id == "1900123456789"
