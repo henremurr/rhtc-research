@@ -1132,6 +1132,10 @@ class SummaryInput(BaseModel):
     rows: list[dict[str, Any]] = Field(default_factory=list, max_length=200)
 
 
+class TickerNewsInput(BaseModel):
+    symbol: str = Field(min_length=1, max_length=10)
+
+
 class StockAnalysisInput(BaseModel):
     symbol: str = Field(min_length=1, max_length=10)
     quote: dict[str, Any] = Field(default_factory=dict)
@@ -1380,6 +1384,63 @@ async def analyze_stock(data: StockAnalysisInput):
         "summary": summary, "details": details, "citations": citations,
         "mode": "openai",
     }
+
+
+@app.post("/api/ticker-news")
+async def search_ticker_news(data: TickerNewsInput):
+    symbol = data.symbol.strip().upper()
+    if not SYMBOL_PATTERN.fullmatch(symbol):
+        raise HTTPException(400, "Enter a valid ticker symbol.")
+    key = os.getenv("OPENAI_API_KEY")
+    if not key:
+        raise HTTPException(503, "Ticker news search is unavailable. Configure OPENAI_API_KEY in the server settings.")
+
+    prompt = (
+        f"Find current news events specifically about the publicly traded company identified by ticker {symbol}. "
+        "Verify the company name and ticker match. Focus on news published in the past 30 days, giving priority "
+        "to the most recent 7 days. Include only material company-specific developments such as earnings, guidance, "
+        "contracts, products, management, financing, regulatory actions, litigation, or major operational events. "
+        "Exclude generic sector commentary and unrelated companies with similar names. Summarize up to five distinct "
+        "items, each with its publication date, what happened, and why it may matter. Clearly state when no material "
+        "recent items are found. Distinguish reported facts from analysis. Use citations for every item and keep the "
+        "answer concise."
+    )
+    try:
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=key, timeout=75, max_retries=0)
+        response = await client.responses.create(
+            model=os.getenv("OPENAI_ANALYSIS_MODEL", os.getenv("OPENAI_MODEL", "gpt-5-mini")),
+            tools=[{"type": "web_search"}],
+            reasoning={"effort": "low"},
+            instructions=(
+                "You are a current-news researcher. Use web search to find current, verifiable company-specific "
+                "news. Do not fabricate dates, events, or sources. Keep the response brief and cite material claims."
+            ),
+            input=prompt,
+            max_output_tokens=2400,
+            max_tool_calls=5,
+            store=False,
+        )
+    except Exception as exc:
+        raise HTTPException(502, openai_error_message(exc)) from exc
+
+    citations: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
+    for item in getattr(response, "output", []) or []:
+        for content in getattr(item, "content", []) or []:
+            for annotation in getattr(content, "annotations", []) or []:
+                if getattr(annotation, "type", "") != "url_citation":
+                    continue
+                citation = getattr(annotation, "url_citation", None)
+                url = getattr(citation, "url", "") if citation else ""
+                title = getattr(citation, "title", "") if citation else ""
+                if url.startswith("https://") and url not in seen_urls:
+                    citations.append({"title": title or url, "url": url})
+                    seen_urls.add(url)
+    summary = (getattr(response, "output_text", "") or "").strip()
+    if not summary:
+        raise HTTPException(502, "The ticker news search returned no readable results. Please try again.")
+    return {"symbol": symbol, "summary": summary, "citations": citations, "mode": "openai_web_search"}
 
 
 @app.post("/api/symbol-analysis")

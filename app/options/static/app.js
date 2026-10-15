@@ -198,6 +198,23 @@ async function analyzeStockQuote(){
     button.disabled=false;button.textContent='✦ Analyze stock';
   }
 }
+async function searchTickerNews(){
+  const symbol=window.stockQuoteContext?.symbol;
+  const button=$('#ticker-news-btn'),results=$('#ticker-news-results'),content=$('#ticker-news-content'),sources=$('#ticker-news-sources');
+  if(!symbol)return;
+  button.disabled=true;button.textContent='Searching…';results.hidden=true;
+  try{
+    const response=await fetch('/options/api/ticker-news',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol})});
+    const data=await response.json();
+    if(!response.ok)throw Error(data.detail||'Ticker news search failed.');
+    content.innerHTML=renderAnalysis(data.summary||'No current news summary was returned.');
+    sources.innerHTML=(data.citations||[]).map(citation=>'<li><a href="'+safe(citation.url)+'" target="_blank" rel="noopener noreferrer">'+safe(citation.title||citation.url)+'</a></li>').join('');
+    results.hidden=false;
+  }catch(error){
+    content.textContent=error.message.includes('OPENAI_API_KEY')?'News search is not enabled. Add OPENAI_API_KEY to Railway Variables, then redeploy.':error.message;
+    sources.innerHTML='';results.hidden=false;
+  }finally{button.disabled=false;button.textContent='⌕ Search ticker news'}
+}
 async function analyzeCallQuote(){
   const context=window.stockQuoteContext||{},call=context.call||{},symbol=context.symbol;
   const button=$('#call-analyze-btn'),status=$('#call-analysis-status'),results=$('#call-analysis-results');
@@ -235,6 +252,7 @@ async function viewChain(symbol){
   window.stockQuoteContext=null;
   $('#stock-analyze-btn').disabled=true;$('#stock-analysis-status').textContent='Uses current-source research and OpenAI API credits.';
   $('#stock-analysis-results').hidden=true;$('#stock-analysis-summary').innerHTML='';$('#stock-analysis-details').innerHTML='';$('#stock-analysis-sources').innerHTML='';
+  $('#ticker-news-btn').disabled=true;$('#ticker-news-btn').textContent='⌕ Search ticker news';$('#ticker-news-results').hidden=true;$('#ticker-news-content').innerHTML='';$('#ticker-news-sources').innerHTML='';
   $('#call-analyze-btn').disabled=true;$('#call-analyze-btn').textContent='✦ Analyze call';$('#call-analysis-status').textContent='Uses current-source research and OpenAI API credits.';$('#call-analysis-results').hidden=true;$('#call-analysis-details').innerHTML='';$('#call-analysis-sources').innerHTML='';
   quoteBox.innerHTML='<div class="loading">Retrieving stock quote…</div>';
   detail.innerHTML='<div class="loading">Retrieving covered-call data…</div>';
@@ -248,6 +266,7 @@ async function viewChain(symbol){
     if(!responses[0].ok)throw Error(quote.detail||'Stock quote unavailable.');
     window.stockQuoteContext={symbol,quote};
     $('#stock-analyze-btn').disabled=false;
+    $('#ticker-news-btn').disabled=false;
     const sourceLabel=quote.source==='demo'?'Illustrative demo values · Not live market data':quote.source==='tradier_sandbox'?'Tradier sandbox quote · May be delayed':'Tradier stock quote';
     $('#detail-title').textContent=quote.description?symbol+' · '+quote.description:symbol+' stock quote and covered-call screen';
     $('#detail-subtitle').textContent=sourceLabel;
