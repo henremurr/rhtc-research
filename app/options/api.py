@@ -974,7 +974,7 @@ async def update_watchlist(data: WatchlistUpdate):
 
 @app.get("/api/opportunities")
 async def opportunities(
-    peak: str = "All Peaks", q: str = "", sort: str = "income",
+    peak: str = "All Peaks", q: str = "", sort: str = "income", account: str | None = None,
     limit: int = Query(default=25, ge=1, le=200),
     expiration_set: int = Query(default=1, ge=1, le=11),
     holdings_only: bool = False,
@@ -985,6 +985,8 @@ async def opportunities(
     seen_symbols: set[str] = set()
     for item in universe:
         if peak != "All Peaks" and item["peak"] != peak:
+            continue
+        if account and not str(item.get("account") or "").startswith(account):
             continue
         if q.upper() not in item["symbol"]:
             continue
