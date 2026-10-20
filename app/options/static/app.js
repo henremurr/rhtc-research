@@ -71,11 +71,12 @@ function renderRows(){
   }else if(state.sort==='income'){
     rows.sort((a,b)=>{const ai=incomeForRow(a),bi=incomeForRow(b);if(ai===null)return bi===null?0:1;if(bi===null)return -1;return bi-ai});
   }
-  rows=rows.filter(r=>!r.error);
   if(!rows.length){$('#rows').innerHTML=`<tr><td colspan="14" class="empty">${state.mode==='history'?'No saved snapshots on this browser yet. Refresh quotes to start a local history.':'No symbols with call data match the selected filters.'}</td></tr>`;$('#showing').textContent='0 rows';return}
   const orderedRows=state.mode==='history'?rows.slice().reverse().slice(0,180):rows;const subset=orderedRows.slice(0,Number(state.displayLimit)||200);
   $('#rows').innerHTML=subset.map(r=>{
-    const error=r.error,yieldVal=Number(r.premium_yield||0),qtyValue=error?null:quantityForPrice(r.price),qty=qtyValue===null?'—':qtyValue.toLocaleString(),income=incomeForRow(r),incomeClass=income===null?'income-neutral':income>parseMaxSpend($('#max-spend').value)*.02?'income-high':'income-neutral';
+    const error=r.error;
+    if(error)return `<tr class="option-error-row"><td data-label="Ticker"><span class="ticker">${safe(r.symbol)}</span></td><td data-label="Peak">${peakChip(r.peak)}</td><td colspan="12" class="error-text">Options data unavailable: ${safe(error)}</td></tr>`;
+    const yieldVal=Number(r.premium_yield||0),qtyValue=error?null:quantityForPrice(r.price),qty=qtyValue===null?'—':qtyValue.toLocaleString(),income=incomeForRow(r),incomeClass=income===null?'income-neutral':income>parseMaxSpend($('#max-spend').value)*.02?'income-high':'income-neutral';
     const stockScore=Number.isInteger(Number(r.stock_score))&&Number(r.stock_score)>=1&&Number(r.stock_score)<=5?Number(r.stock_score):null;
     const stockLabel=r.stock_rating_label||({1:'Avoid',2:'Sell',3:'Watch',4:'Grow',5:'Bargain'}[stockScore]||'');
     const stockScoreClass=stockScore===null?'':`analysis-score-${stockScore}`;
