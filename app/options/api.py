@@ -986,8 +986,16 @@ async def opportunities(
     for item in universe:
         if peak != "All Peaks" and item["peak"] != peak:
             continue
-        if account and not str(item.get("account") or "").startswith(account):
+        item_account = str(item.get("account") or "")
+        if account == "No account" and item_account:
             continue
+        if account and account != "No account":
+            # Preserve legacy family filters while supporting exact Watchlist Manager accounts.
+            if account in {"Fidelity", "Schwab", "Vanguard"}:
+                if not item_account.startswith(account):
+                    continue
+            elif item_account != account:
+                continue
         if q.upper() not in item["symbol"]:
             continue
         if holdings_only and item.get("share_price") is None and item.get("quantity") is None:

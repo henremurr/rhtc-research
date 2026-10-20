@@ -33,7 +33,7 @@ function updateStorageNote(){const note=$('#symbol-storage-status');note.textCon
 async function initializeWatchlist(){try{const response=await fetch('/options/api/watchlist');if(!response.ok)throw Error('Watchlist unavailable');const data=await response.json();state.watchlist=data.rows;state.migrationOpen=Boolean(data.migration_open);state.editingEnabled=Boolean(data.editing_enabled);try{const saved=JSON.parse(localStorage.getItem(WATCHLIST_KEY)||'null');if(state.migrationOpen&&Array.isArray(saved))state.legacyWatchlist=saved}catch(e){}updateWatchlistCounts();updateStorageNote()}catch(e){toast('Could not load the shared RHTC symbol list.');state.watchlist=[];updateWatchlistCounts()}loadRows({ai:true,snapshot:false})}
 function setSymbolError(message=''){$('#symbol-error').textContent=message}
 function hasHoldingDetails(r){const hasDetail=value=>value!==null&&value!==undefined&&value!==''&&Number.isFinite(Number(value));return hasDetail(r.share_price)||hasDetail(r.quantity)}
-function belongsToAccountGroup(symbol,group){if(!group||group==='all')return true;const prefixes={Fidelity:'Fidelity',Schwab:'Schwab',Vanguard:'Vanguard'};const prefix=prefixes[group];return Boolean(prefix&&state.watchlist.some(item=>item.symbol===symbol&&hasHoldingDetails(item)&&String(item.account||'').startsWith(prefix)))}
+function belongsToAccountGroup(symbol,account){if(!account||account==='all')return true;return state.watchlist.some(item=>item.symbol===symbol&&hasHoldingDetails(item)&&(account==='No account'?!item.account:String(item.account||'')===account||(['Fidelity','Schwab','Vanguard'].includes(account)&&String(item.account||'').startsWith(account))))}
 function isMissingStockScore(r){const score=Number(r.stock_score);return !Number.isInteger(score)||score<1||score>5}
 function isMissingCallScore(r){return r.call_score===null||r.call_score===undefined||!Number.isFinite(Number(r.call_score))}
 function combinedRhtcScore(r){const stock=Number(r.stock_score),call=r.call_score===null||r.call_score===undefined?null:Number(r.call_score);return Number.isInteger(stock)&&stock>=1&&stock<=5&&call!==null&&Number.isFinite(call)&&call>=0&&call<=5?stock+call:null}
@@ -71,11 +71,12 @@ function renderRows(){
   }else if(state.sort==='income'){
     rows.sort((a,b)=>{const ai=incomeForRow(a),bi=incomeForRow(b);if(ai===null)return bi===null?0:1;if(bi===null)return -1;return bi-ai});
   }
-  rows=rows.filter(r=>!r.error);
   if(!rows.length){$('#rows').innerHTML=`<tr><td colspan="14" class="empty">${state.mode==='history'?'No saved snapshots on this browser yet. Refresh quotes to start a local history.':'No symbols with call data match the selected filters.'}</td></tr>`;$('#showing').textContent='0 rows';return}
   const orderedRows=state.mode==='history'?rows.slice().reverse().slice(0,180):rows;const subset=orderedRows.slice(0,Number(state.displayLimit)||200);
   $('#rows').innerHTML=subset.map(r=>{
-    const error=r.error,yieldVal=Number(r.premium_yield||0),qtyValue=error?null:quantityForPrice(r.price),qty=qtyValue===null?'—':qtyValue.toLocaleString(),income=incomeForRow(r),incomeClass=income===null?'income-neutral':income>parseMaxSpend($('#max-spend').value)*.02?'income-high':'income-neutral';
+    const error=r.error;
+    if(error)return `<tr class="option-error-row"><td data-label="Ticker"><span class="ticker">${safe(r.symbol)}</span></td><td data-label="Peak">${peakChip(r.peak)}</td><td colspan="12" class="error-text">Options data unavailable: ${safe(error)}</td></tr>`;
+    const yieldVal=Number(r.premium_yield||0),qtyValue=error?null:quantityForPrice(r.price),qty=qtyValue===null?'—':qtyValue.toLocaleString(),income=incomeForRow(r),incomeClass=income===null?'income-neutral':income>parseMaxSpend($('#max-spend').value)*.02?'income-high':'income-neutral';
     const stockScore=Number.isInteger(Number(r.stock_score))&&Number(r.stock_score)>=1&&Number(r.stock_score)<=5?Number(r.stock_score):null;
     const stockLabel=r.stock_rating_label||({1:'Avoid',2:'Sell',3:'Watch',4:'Grow',5:'Bargain'}[stockScore]||'');
     const stockScoreClass=stockScore===null?'':`analysis-score-${stockScore}`;
