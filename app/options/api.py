@@ -732,7 +732,14 @@ class Tradier:
                     break
             if row is None:
                 reason = f"No listed expiration in {label} window" if not eligible else f"No out-of-the-money call found in {label} window"
-                rows.append({"symbol": symbol, "peak": peak, "dte_window": label, "error": reason, "source": "error"})
+                rows.append({
+                    "symbol": symbol, "description": quote.get("description"), "peak": peak,
+                    "price": price,
+                    "change": parse_number(quote.get("change"), price - parse_number(quote.get("prevclose"), price)),
+                    "change_pct": parse_number(quote.get("change_percentage")),
+                    "dte_window": label, "error": reason, "source": "error",
+                    "quote_time": quote.get("trade_date") or quote.get("ask_date") or "provider timestamp unavailable",
+                })
             else:
                 row["dte_window"] = label
                 rows.append(row)
@@ -740,10 +747,7 @@ class Tradier:
 
     async def one(self, symbol: str, peak: str, expiration_set: int = 1) -> dict[str, Any]:
         rows = await self.option_sets(symbol, peak, only_set=expiration_set)
-        row = rows[0]
-        if row.get("error"):
-            raise ValueError(row["error"])
-        return row
+        return rows[0]
 
     async def close(self) -> None:
         await self.client.aclose()
@@ -1041,8 +1045,7 @@ async def opportunities(
     if max_last is not None:
         rows = [
             row for row in rows
-            if not row.get("error")
-            and row.get("price") is not None
+            if row.get("price") is not None
             and math.isfinite(parse_number(row.get("price"), math.nan))
             and parse_number(row.get("price"), math.nan) <= max_last
         ]

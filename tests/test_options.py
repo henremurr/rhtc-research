@@ -36,6 +36,29 @@ class OptionsRoutesTest(unittest.TestCase):
                     return await client.request(method, path, **kwargs)
         return asyncio.run(run())
 
+    def test_options_unavailable_row_keeps_underlying_stock_quote(self):
+        async def fake_get(provider, path, params=None):
+            if path == "/markets/quotes":
+                return {"quotes": {"quote": {"symbol": "XTND", "description": "XTEND", "last": 2.04,
+                                                "change": -0.08, "change_percentage": -3.77, "prevclose": 2.12}}}
+            if path == "/markets/options/expirations":
+                return {"expirations": {"date": []}}
+            raise AssertionError(f"Unexpected Tradier endpoint: {path}")
+
+        async def run():
+            with patch.object(Tradier, "get", fake_get):
+                provider = Tradier("test-token")
+                row = await provider.one("XTND", "DS/I", expiration_set=1)
+                await provider.close()
+            return row
+
+        row = asyncio.run(run())
+        self.assertEqual(row["symbol"], "XTND")
+        self.assertEqual(row["price"], 2.04)
+        self.assertEqual(row["change"], -0.08)
+        self.assertEqual(row["change_pct"], -3.77)
+        self.assertIn("No listed expiration", row["error"])
+
     def test_dashboard_requires_sign_in_for_pages_and_apis(self):
         page = self.request("GET", "/options/", authenticated=False)
         self.assertEqual(page.status_code, 303)
