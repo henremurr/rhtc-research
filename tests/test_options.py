@@ -600,26 +600,32 @@ class OptionsRoutesTest(unittest.TestCase):
         symbols = [
             {"symbol": "NEWCO", "peak": "Other", "share_price": None, "quantity": 4, "account": None, "lt_call": "260", "lt_expy": "280616", "lt_qty": 1, "lt_premium": 20.5, "pg": "PRJ"},
             {"symbol": "MU", "peak": "AI/I", "share_price": 128.5, "quantity": 100, "account": None, "lt_call": "", "lt_expy": "", "lt_qty": None, "lt_premium": None, "pg": ""},
+            {"symbol": "ZERO", "peak": "Other", "share_price": 10, "quantity": 0, "account": "Fidelity Brokerage"},
+            {"symbol": "PRICE", "peak": "Other", "share_price": 10, "quantity": None, "account": "Fidelity IRA"},
         ]
         with patch.dict(os.environ, {"RHTC_WATCHLIST_ADMIN_TOKEN": ""}, clear=False):
             saved = self.request("PUT", "/options/api/watchlist", json={"rows": symbols})
             response = self.request("GET", "/options/api/opportunities?limit=200")
-            holdings = self.request("GET", "/options/api/opportunities?holdings_only=true&limit=1")
+            holdings = self.request("GET", "/options/api/opportunities?holdings_only=true&limit=200")
+            zero_quantity_account = self.request("GET", "/options/api/opportunities?account=Fidelity%20Brokerage&limit=200")
+            missing_quantity_account = self.request("GET", "/options/api/opportunities?account=Fidelity%20IRA&limit=200")
             chain = self.request("GET", "/options/api/chain/NEWCO")
             reloaded = self.request("GET", "/options/api/watchlist")
         self.assertEqual(saved.status_code, 200)
         self.assertEqual(response.status_code, 200)
         data = response.json()
-        self.assertEqual(data["total"], 2)
-        self.assertEqual({row["symbol"] for row in data["rows"]}, {"MU", "NEWCO"})
+        self.assertEqual(data["total"], 4)
+        self.assertEqual({row["symbol"] for row in data["rows"]}, {"MU", "NEWCO", "ZERO", "PRICE"})
         by_symbol = {row["symbol"]: row for row in data["rows"]}
         self.assertEqual((by_symbol["MU"]["share_price"], by_symbol["MU"]["quantity"]), (128.5, 100))
         self.assertEqual((by_symbol["NEWCO"]["share_price"], by_symbol["NEWCO"]["quantity"]), (None, 4))
         self.assertEqual(reloaded.json()["rows"][0]["pg"], "PRJ")
         self.assertEqual((reloaded.json()["rows"][0]["lt_call"], reloaded.json()["rows"][0]["lt_expy"]), ("260", "280616"))
         self.assertEqual(reloaded.json()["rows"][1]["pg"], "")
-        self.assertEqual(holdings.json()["count"], 1)
-        self.assertEqual(holdings.json()["rows"][0]["symbol"], "MU")
+        self.assertEqual(holdings.json()["count"], 2)
+        self.assertEqual({row["symbol"] for row in holdings.json()["rows"]}, {"MU", "NEWCO"})
+        self.assertEqual(zero_quantity_account.json()["count"], 0)
+        self.assertEqual(missing_quantity_account.json()["count"], 0)
         self.assertEqual(
             reloaded.json()["rows"],
             [{**row, "call_score": None, "analysis_count": 0, "stock_score": None, "stock_rating_label": None} for row in symbols],
