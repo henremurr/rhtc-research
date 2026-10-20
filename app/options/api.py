@@ -998,8 +998,12 @@ async def opportunities(
                 continue
         if q.upper() not in item["symbol"]:
             continue
-        if holdings_only and item.get("share_price") is None and item.get("quantity") is None:
-            continue
+        if holdings_only or account:
+            try:
+                if float(item.get("quantity") or 0) <= 0:
+                    continue
+            except (TypeError, ValueError):
+                continue
         if item["symbol"] in seen_symbols:
             continue
         seen_symbols.add(item["symbol"])
