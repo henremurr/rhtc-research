@@ -1,5 +1,5 @@
 const $ = (s) => document.querySelector(s);
-const state = {peak:'All Peaks', query:'', sort:'rhtc_score', rows:[], source:'demo', mode:'overview', selectedOnly:false, costOnly:false, accountFilter:'all', stockScoreMissingOnly:false, callScoreMissingOnly:false, expirationSet:1, displayLimit:200, watchlist:[], editingSymbol:null, migrationOpen:false, editingEnabled:false, legacyWatchlist:null, chainDescription:''};
+const state = {peak:'All Peaks', query:'', sort:'rhtc_score', rows:[], source:'demo', mode:'overview', selectedOnly:false, costOnly:false, accountFilter:'all', stockScoreMissingOnly:false, callScoreMissingOnly:false, expirationSet:1, displayLimit:300, watchlist:[], editingSymbol:null, migrationOpen:false, editingEnabled:false, legacyWatchlist:null, chainDescription:''};
 const DTE_WINDOWS=['0–7 DTE','8–14 DTE','15–22 DTE','22–28 DTE','29–35 DTE','36–42 DTE','37–49 DTE','48–56 DTE','57–63 DTE','64–70 DTE','70+ DTE'];
 const WATCHLIST_KEY='rhtc-options-watchlist';
 const watchlistLastQuoteCache=new Map(),watchlistLastQuotePending=new Set();
@@ -72,7 +72,7 @@ function renderRows(){
     rows.sort((a,b)=>{const ai=incomeForRow(a),bi=incomeForRow(b);if(ai===null)return bi===null?0:1;if(bi===null)return -1;return bi-ai});
   }
   if(!rows.length){$('#rows').innerHTML=`<tr><td colspan="14" class="empty">${state.mode==='history'?'No saved snapshots on this browser yet. Refresh quotes to start a local history.':'No symbols match the selected filters.'}</td></tr>`;$('#showing').textContent='0 rows';return}
-  const orderedRows=state.mode==='history'?rows.slice().reverse().slice(0,180):rows;const subset=orderedRows.slice(0,Number(state.displayLimit)||200);
+  const orderedRows=state.mode==='history'?rows.slice().reverse().slice(0,180):rows;const subset=orderedRows.slice(0,Number(state.displayLimit)||300);
   $('#rows').innerHTML=subset.map(r=>{
     const error=r.error,yieldVal=Number(r.premium_yield||0),qtyValue=Number(r.price)>0?quantityForPrice(r.price):null,qty=qtyValue===null?'—':qtyValue.toLocaleString(),income=incomeForRow(r),incomeClass=income===null?'income-neutral':income>parseMaxSpend($('#max-spend').value)*.02?'income-high':'income-neutral';
     const stockScore=Number.isInteger(Number(r.stock_score))&&Number(r.stock_score)>=1&&Number(r.stock_score)<=5?Number(r.stock_score):null;
@@ -362,10 +362,13 @@ async function analyzeDisplayedSymbols(){
   button.disabled=true;stockButton.disabled=true;
   button.title='Runs a current-source analysis for each displayed covered call and uses OpenAI API credits.';
   try{
-    for(let index=0;index<symbols.length;index++){
-      const symbol=symbols[index],row=state.rows.find(item=>item.symbol===symbol);
+    const batchSize=200,batchCount=Math.ceil(symbols.length/batchSize);
+    for(let batchIndex=0;batchIndex<batchCount;batchIndex++){
+      const batch=symbols.slice(batchIndex*batchSize,(batchIndex+1)*batchSize);
+      for(const symbol of batch){
+        const row=state.rows.find(item=>item.symbol===symbol);
       button.textContent=`Analyzing call ${completed+1}/${symbols.length}…`;
-      progress.textContent=`Completed ${completed} of ${symbols.length} · analyzing ${symbol}`;
+      progress.textContent=`Batch ${batchIndex+1}/${batchCount} · completed ${completed} of ${symbols.length} · analyzing ${symbol}`;
       try{
         if(!row)throw Error('Ticker is no longer in the loaded screen');
         const response=await fetch('/options/api/symbol-analysis',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol,screen:analysisScreenForRow(row)})});
@@ -382,6 +385,7 @@ async function analyzeDisplayedSymbols(){
       }catch(error){skipped.push(`${symbol}: ${error.message}`)}finally{
         completed++;
         progress.textContent=`Completed ${completed} of ${symbols.length}`;
+      }
       }
     }
     progress.textContent=skipped.length?`Updated ${updated}/${symbols.length} · ${skipped.length} skipped`:`Updated ${updated}/${symbols.length} call scores`;
@@ -401,9 +405,12 @@ async function analyzeDisplayedStocks(){
   let updated=0,completed=0;
   button.disabled=true;callButton.disabled=true;progress.title='';
   try{
-    for(const symbol of symbols){
+    const batchSize=200,batchCount=Math.ceil(symbols.length/batchSize);
+    for(let batchIndex=0;batchIndex<batchCount;batchIndex++){
+      const batch=symbols.slice(batchIndex*batchSize,(batchIndex+1)*batchSize);
+      for(const symbol of batch){
       button.textContent=`Analyzing stock ${completed+1}/${symbols.length}…`;
-      progress.textContent=`Completed ${completed} of ${symbols.length} · analyzing ${symbol}`;
+      progress.textContent=`Batch ${batchIndex+1}/${batchCount} · completed ${completed} of ${symbols.length} · analyzing ${symbol}`;
       try{
         const quoteResponse=await fetch('/options/api/quote/'+encodeURIComponent(symbol));
         const quote=await quoteResponse.json();
@@ -423,6 +430,7 @@ async function analyzeDisplayedStocks(){
       }catch(error){skipped.push(`${symbol}: ${error.message}`)}finally{
         completed++;
         progress.textContent=`Completed ${completed} of ${symbols.length}`;
+      }
       }
     }
     progress.textContent=skipped.length?`Updated ${updated}/${symbols.length} · ${skipped.length} skipped`:`Updated Stock / 5 for ${updated}/${symbols.length} displayed stocks`;
@@ -855,7 +863,7 @@ $('#scan-news').addEventListener('click',()=>scanNews());$('#dedupe-news').addEv
 $('#analysis-read-btn').addEventListener('click',toggleAnalysisSpeech);$('#analysis-stop-btn').addEventListener('click',()=>stopAnalysisSpeech());
 $('#analysis-mp3-btn').addEventListener('click',createAnalysisPodcast);$('#analysis-copy-transcript').addEventListener('click',copyAnalysisPodcastTranscript);$('#youtube-publish-btn').addEventListener('click',publishAnalysisToYouTube);$('#youtube-review-confirm').addEventListener('change',updateYouTubePublishButton);
 $('#news-items').addEventListener('click',event=>{const button=event.target.closest('[data-news-action]');if(!button)return;const card=button.closest('.news-item');if(!card)return;if(button.dataset.newsAction==='read')toggleNewsSpeech(card);else if(button.dataset.newsAction==='stop')stopNewsSpeech();else if(button.dataset.newsAction==='analyze')analyzeNewsStory(card,button);else if(button.dataset.newsAction==='publish')publishNewsStory(card,button);else if(button.dataset.newsAction==='retry-x')unlockXRetry(card);else if(button.dataset.newsAction==='translate')translateNewsStory(card,button);else if(button.dataset.newsAction==='change-peak'){const select=card.querySelector('.news-peak-select');select.hidden=!select.hidden;if(!select.hidden)select.focus()}else if(button.dataset.newsAction==='delete-story')deleteNewsStory(card,button)});
-$('#news-items').addEventListener('change',event=>{const select=event.target.closest('.news-peak-select');if(select)changeNewsPeak(select.closest('.news-item'),select)});$('#auto-reload').addEventListener('change',e=>setAutoReload(e.target.value));try{setAutoReload(localStorage.getItem('rhtc-options-auto-reload')||'0',false)}catch(e){setAutoReload('0',false)};$('#refresh').addEventListener('click',()=>loadRows({ai:true,snapshot:true}));$('#review-limit').addEventListener('change',e=>{state.displayLimit=Number(e.target.value)||200;renderRows()});$('#max-spend').addEventListener('change',e=>{const spend=parseMaxSpend(e.target.value);if(Number.isFinite(spend))e.target.value=formatMaxSpend(spend);loadRows({ai:false,snapshot:false})});$('#sort').addEventListener('change',e=>{state.sort=e.target.value;loadRows({ai:false,snapshot:false})});let searchTimer;$('#search').addEventListener('input',e=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.query=e.target.value.trim();loadRows({ai:false,snapshot:false})},220)});
+$('#news-items').addEventListener('change',event=>{const select=event.target.closest('.news-peak-select');if(select)changeNewsPeak(select.closest('.news-item'),select)});$('#auto-reload').addEventListener('change',e=>setAutoReload(e.target.value));try{setAutoReload(localStorage.getItem('rhtc-options-auto-reload')||'0',false)}catch(e){setAutoReload('0',false)};$('#refresh').addEventListener('click',()=>loadRows({ai:true,snapshot:true}));$('#review-limit').addEventListener('change',e=>{state.displayLimit=Number(e.target.value)||300;renderRows()});$('#max-spend').addEventListener('change',e=>{const spend=parseMaxSpend(e.target.value);if(Number.isFinite(spend))e.target.value=formatMaxSpend(spend);loadRows({ai:false,snapshot:false})});$('#sort').addEventListener('change',e=>{state.sort=e.target.value;loadRows({ai:false,snapshot:false})});let searchTimer;$('#search').addEventListener('input',e=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.query=e.target.value.trim();loadRows({ai:false,snapshot:false})},220)});
 $('#market-clock').textContent=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date())+' ET';
 initializeWatchlist();
 loadNews({quiet:true});
