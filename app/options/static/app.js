@@ -325,6 +325,10 @@ async function viewChain(symbol){
     toast(symbol+': '+error.message);
   }
 }
+function hasAnalyzableCallData(row){
+  const hasNumber=value=>value!==null&&value!==undefined&&value!==''&&Number.isFinite(Number(value));
+  return Boolean(row)&&!row.error&&hasNumber(row.strike)&&Number(row.strike)>0&&String(row.expiry||'').trim()!==''&&hasNumber(row.bid)&&hasNumber(row.ask);
+}
 function analysisScreenForRow(row){
   const screen=Object.fromEntries(['price','change','change_pct','strike','expiry','dte','bid','ask','premium_yield','delta','iv','open_interest','volume','bid_size','ask_size','quote_time','source'].filter(key=>row[key]!==undefined).map(key=>[key,row[key]]));
   screen.contract=contractLabel(row);
@@ -409,9 +413,18 @@ function closeStockReportViewer(){
 
 async function analyzeDisplayedSymbols(){
   const button=$('#analyze-displayed-btn'),stockButton=$('#analyze-displayed-stocks-btn'),progress=$('#batch-analysis-status');
-  const symbols=[...new Set([...document.querySelectorAll('#rows .ticker-details-btn')].map(el=>el.textContent.trim()).filter(Boolean))];
-  if(!symbols.length){toast('There are no displayed calls to analyze.');return}
-  const skipped=[];
+  const displayedSymbols=[...new Set([...document.querySelectorAll('#rows .ticker-details-btn')].map(el=>el.textContent.trim()).filter(Boolean))];
+  const rowsBySymbol=new Map(state.rows.map(row=>[row.symbol,row]));
+  const unavailable=displayedSymbols.filter(symbol=>!hasAnalyzableCallData(rowsBySymbol.get(symbol)));
+  const symbols=displayedSymbols.filter(symbol=>hasAnalyzableCallData(rowsBySymbol.get(symbol)));
+  if(!symbols.length){
+    const message=unavailable.length?`Skipped ${unavailable.length} displayed symbols because option data is unavailable.`:'There are no displayed calls to analyze.';
+    progress.textContent=message;
+    progress.title=unavailable.map(symbol=>`${symbol}: option data unavailable`).join('\n');
+    toast(message);
+    return;
+  }
+  const skipped=unavailable.map(symbol=>`${symbol}: option data unavailable`);
   let updated=0,completed=0;
   button.disabled=true;stockButton.disabled=true;
   button.title='Runs a current-source analysis for each displayed covered call and uses OpenAI API credits.';
@@ -420,31 +433,33 @@ async function analyzeDisplayedSymbols(){
     for(let batchIndex=0;batchIndex<batchCount;batchIndex++){
       const batch=symbols.slice(batchIndex*batchSize,(batchIndex+1)*batchSize);
       for(const symbol of batch){
-        const row=state.rows.find(item=>item.symbol===symbol);
-      button.textContent=`Analyzing call ${completed+1}/${symbols.length}…`;
-      progress.textContent=`Batch ${batchIndex+1}/${batchCount} · completed ${completed} of ${symbols.length} · analyzing ${symbol}`;
-      try{
-        if(!row)throw Error('Ticker is no longer in the loaded screen');
-        const response=await fetch('/options/api/symbol-analysis',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol,screen:analysisScreenForRow(row)})});
-        const data=await response.json();
-        if(!response.ok)throw Error(data.detail||'Analysis request failed');
-        if(data.total_score===null||data.total_score===undefined||data.call_score===null||data.call_score===undefined||!Number.isFinite(Number(data.call_score))){
-          skipped.push(`${symbol}: no scorecard returned`);
-          continue;
+        const row=rowsBySymbol.get(symbol);
+        button.textContent=`Analyzing call ${completed+1}/${symbols.length}…`;
+        progress.textContent=`Batch ${batchIndex+1}/${batchCount} · completed ${completed} of ${symbols.length} · analyzing ${symbol}`;
+        try{
+          const response=await fetch('/options/api/symbol-analysis',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol,screen:analysisScreenForRow(row)})});
+          const data=await response.json();
+          if(!response.ok)throw Error(data.detail||'Analysis request failed');
+          if(data.total_score===null||data.total_score===undefined||data.call_score===null||data.call_score===undefined||!Number.isFinite(Number(data.call_score))){
+            skipped.push(`${symbol}: no scorecard returned`);
+            continue;
+          }
+          state.rows=state.rows.map(item=>item.symbol===symbol?{...item,call_score:Number(data.call_score)}:item);
+          state.watchlist=state.watchlist.map(item=>item.symbol===symbol?{...item,call_score:Number(data.call_score),analysis_count:data.analysis_count}:item);
+          updated++;
+          renderRows();
+        }catch(error){skipped.push(`${symbol}: ${error.message}`)}finally{
+          completed++;
+          progress.textContent=`Completed ${completed} of ${symbols.length}`;
         }
-        state.rows=state.rows.map(item=>item.symbol===symbol?{...item,call_score:Number(data.call_score)}:item);
-        state.watchlist=state.watchlist.map(item=>item.symbol===symbol?{...item,call_score:Number(data.call_score),analysis_count:data.analysis_count}:item);
-        updated++;
-        renderRows();
-      }catch(error){skipped.push(`${symbol}: ${error.message}`)}finally{
-        completed++;
-        progress.textContent=`Completed ${completed} of ${symbols.length}`;
-      }
       }
     }
-    progress.textContent=skipped.length?`Updated ${updated}/${symbols.length} · ${skipped.length} skipped`:`Updated ${updated}/${symbols.length} call scores`;
+    const unavailableText=unavailable.length?` · ${unavailable.length} unavailable skipped`:'';
+    const failedCount=skipped.length-unavailable.length;
+    const failedText=failedCount>0?` · ${failedCount} analysis skipped`:'';
+    progress.textContent=`Updated ${updated}/${symbols.length}${unavailableText}${failedText}`;
     progress.title=skipped.join('\n');
-    toast(skipped.length?`Updated ${updated} scores; ${skipped.length} skipped. See status for details.`:`Updated Call score for ${updated} displayed calls.`);
+    toast(unavailable.length||failedCount?`Updated ${updated} call scores; ${skipped.length} skipped.`:`Updated Call score for ${updated} displayed calls.`);
   }finally{
     button.disabled=false;stockButton.disabled=false;
     button.textContent='Analyze calls';
