@@ -448,8 +448,11 @@ async function analyzeDisplayedStocks(){
         const response=await fetch('/options/api/stock-analysis',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol,quote})});
         const data=await response.json();
         if(!response.ok)throw Error(data.detail||'Stock analysis request failed');
+        state.rows=state.rows.map(item=>item.symbol===symbol?{...item,stock_report_count:Number(data.report_count)||1}:item);
+        state.watchlist=state.watchlist.map(item=>item.symbol===symbol?{...item,stock_report_count:Number(data.report_count)||1}:item);
         const rating=Number(data.rating),label=labels[rating]||data.rating_label;
         if(!Number.isInteger(rating)||rating<1||rating>5||!label){
+          renderRows();
           skipped.push(`${symbol}: no valid stock rating returned`);
           continue;
         }
