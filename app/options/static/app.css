@@ -1075,3 +1075,23 @@ body.news-mode .workspace-toolbar-heading{gap:8px}
 #ticker-news-content ol{padding-left:28px;list-style-position:outside}
 #ticker-news-content ol>li::marker{color:#80652e;font-weight:700}
 :root[data-theme="dark"] #ticker-news-content ol>li::marker{color:#f0d78d}
+
+/* Saved stock analysis report history */
+.stock-report-history-btn{border:1px solid #d9dee5;border-radius:4px;background:#f8f9fa;color:#667487;padding:3px 5px;font:500 8px var(--sans);white-space:nowrap;cursor:pointer}
+.stock-report-history-btn:hover:not(:disabled){border-color:#c6ae78;color:#80652e;background:#fff}
+.stock-report-history-btn:disabled{opacity:.42;cursor:not-allowed}
+:root[data-theme="dark"] .stock-report-history-btn{border-color:#465260;background:#202a35;color:#bbc5d1}
+:root[data-theme="dark"] .stock-report-history-btn:hover:not(:disabled){border-color:#9b8351;color:#f0d78d;background:#252f3b}
+.stock-report-modal{gap:8px}
+.stock-report-modal>h2{margin-bottom:0}
+.stock-report-quote{margin:0!important;color:#8994a0!important;font:10px/1.5 var(--mono)!important}
+.stock-report-navigation{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid #e8ebee;border-bottom:1px solid #e8ebee}
+.stock-report-navigation button{min-height:34px;padding:6px 12px;border:1px solid #d9dee5;border-radius:5px;background:#fff;color:#465467;font:600 11px var(--sans);cursor:pointer}
+.stock-report-navigation button:disabled{opacity:.4;cursor:not-allowed}
+.stock-report-section{min-width:0}
+.stock-report-section>h3{margin:8px 0;color:#748090;font:600 10px var(--mono);letter-spacing:.7px;text-transform:uppercase}
+.stock-report-body{max-height:none!important;overflow:visible!important}
+:root[data-theme="dark"] .stock-report-navigation{border-color:#3b4654}
+:root[data-theme="dark"] .stock-report-navigation button{border-color:#465260;background:#202a35;color:#d1dae4}
+:root[data-theme="dark"] .stock-report-section>h3{color:#bdab7a}
+@media(max-width:760px){.stock-report-history-btn{font-size:7px;padding:3px}.stock-report-navigation button{min-height:38px}}
