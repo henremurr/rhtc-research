@@ -239,6 +239,19 @@ def connect_watchlist_db() -> sqlite3.Connection:
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_symbols_symbol_account "
         "ON symbols(symbol, COALESCE(account, ''))"
     )
+    connection.execute("""CREATE TABLE IF NOT EXISTS stock_analysis_reports (
+        report_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        symbol TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        rating INTEGER,
+        rating_label TEXT,
+        summary TEXT NOT NULL,
+        details TEXT NOT NULL,
+        citations_json TEXT NOT NULL,
+        quote_json TEXT NOT NULL,
+        analysis_text TEXT NOT NULL
+    )""")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_stock_analysis_reports_symbol_created ON stock_analysis_reports(symbol, created_at DESC, report_id DESC)")
     connection.execute("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
     connection.execute("INSERT OR IGNORE INTO app_state(key, value) VALUES ('watchlist_seeded', '0')")
     seeded = connection.execute("SELECT value FROM app_state WHERE key = 'watchlist_seeded'").fetchone()
@@ -252,7 +265,7 @@ def connect_watchlist_db() -> sqlite3.Connection:
 
 def read_watchlist() -> list[dict[str, Any]]:
     with closing(connect_watchlist_db()) as connection:
-        return [dict(row) for row in connection.execute("SELECT symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account, lt_call, lt_expy, lt_qty, lt_premium, pg FROM symbols ORDER BY position")]
+        return [dict(row) for row in connection.execute("SELECT symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account, lt_call, lt_expy, lt_qty, lt_premium, pg, (SELECT COUNT(*) FROM stock_analysis_reports r WHERE r.symbol = symbols.symbol) AS stock_report_count FROM symbols ORDER BY position")]
 
 
 def extract_analysis_total_score(analysis: str) -> int | None:
@@ -302,6 +315,37 @@ def record_stock_rating(symbol: str, rating: int, rating_label: str) -> bool:
         )
         connection.commit()
         return cursor.rowcount > 0
+
+
+def save_stock_analysis_report(
+    symbol: str,
+    rating: int | None,
+    rating_label: str | None,
+    summary: str,
+    details: str,
+    citations: list[dict[str, str]],
+    quote: dict[str, Any],
+    analysis: str,
+) -> dict[str, Any]:
+    created_at = utc_now().isoformat()
+    with closing(connect_watchlist_db()) as connection:
+        cursor = connection.execute(
+            "INSERT INTO stock_analysis_reports(symbol, created_at, rating, rating_label, summary, details, citations_json, quote_json, analysis_text) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                symbol, created_at, rating, rating_label, summary, details,
+                json.dumps(citations, ensure_ascii=False, allow_nan=False, separators=(",", ":")),
+                json.dumps(quote, ensure_ascii=False, allow_nan=False, separators=(",", ":")),
+                analysis,
+            ),
+        )
+        report_id = int(cursor.lastrowid)
+        report_count = int(connection.execute(
+            "SELECT COUNT(*) FROM stock_analysis_reports WHERE symbol = ?",
+            (symbol,),
+        ).fetchone()[0])
+        connection.commit()
+    return {"report_id": report_id, "created_at": created_at, "report_count": report_count}
 
 
 def optional_nonnegative_number(item: dict[str, Any], field: str) -> int | float | None:
@@ -1041,6 +1085,7 @@ async def opportunities(
         row["call_score"] = holding.get("call_score")
         row["stock_score"] = holding.get("stock_score")
         row["stock_rating_label"] = holding.get("stock_rating_label")
+        row["stock_report_count"] = int(holding.get("stock_report_count") or 0)
         row["coverage_status"] = "Needs review" if row.get("open_interest", 0) < 25 else "Liquid enough to review"
     if max_last is not None:
         rows = [
@@ -1309,6 +1354,45 @@ def split_stock_analysis_sections(analysis: str) -> tuple[str, str]:
         details = text[summary_heading.end():].strip() if summary_heading else text
     return summary, details
 
+@app.get("/api/stock-analysis/reports/{symbol}")
+async def get_stock_analysis_report(symbol: str, offset: int = Query(default=0, ge=0)):
+    symbol = symbol.strip().upper()
+    if not SYMBOL_PATTERN.fullmatch(symbol):
+        raise HTTPException(400, "Enter a valid ticker symbol.")
+    with closing(connect_watchlist_db()) as connection:
+        count = int(connection.execute(
+            "SELECT COUNT(*) FROM stock_analysis_reports WHERE symbol = ?",
+            (symbol,),
+        ).fetchone()[0])
+        if count == 0:
+            raise HTTPException(404, f"No saved stock analysis reports exist for {symbol}.")
+        report = connection.execute(
+            "SELECT report_id, symbol, created_at, rating, rating_label, summary, details, citations_json, quote_json, analysis_text "
+            "FROM stock_analysis_reports WHERE symbol = ? "
+            "ORDER BY created_at DESC, report_id DESC LIMIT 1 OFFSET ?",
+            (symbol, offset),
+        ).fetchone()
+    if not report:
+        raise HTTPException(404, "There are no more reports in that direction.")
+    record = dict(report)
+    return {
+        "symbol": symbol,
+        "report_count": count,
+        "offset": offset,
+        "report": {
+            "report_id": record["report_id"],
+            "created_at": record["created_at"],
+            "rating": record["rating"],
+            "rating_label": record["rating_label"],
+            "summary": record["summary"],
+            "details": record["details"],
+            "citations": json.loads(record["citations_json"] or "[]"),
+            "quote": json.loads(record["quote_json"] or "{}"),
+            "analysis": record["analysis_text"],
+        },
+    }
+
+
 @app.post("/api/stock-analysis")
 async def analyze_stock(data: StockAnalysisInput):
     symbol = data.symbol.strip().upper()
@@ -1396,10 +1480,13 @@ async def analyze_stock(data: StockAnalysisInput):
     if rating is not None and rating_label:
         record_stock_rating(symbol, rating, rating_label)
     summary, details = split_stock_analysis_sections(analysis)
+    saved_report = save_stock_analysis_report(
+        symbol, rating, rating_label, summary, details, citations, quote, analysis,
+    )
     return {
         "symbol": symbol, "rating": rating, "rating_label": rating_label,
         "summary": summary, "details": details, "citations": citations,
-        "mode": "openai",
+        "mode": "openai", **saved_report,
     }
 
 
