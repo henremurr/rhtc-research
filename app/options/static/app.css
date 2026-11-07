@@ -1082,7 +1082,7 @@ body.news-mode .workspace-toolbar-heading{gap:8px}
 .stock-report-history-btn:disabled{opacity:.42;cursor:not-allowed}
 :root[data-theme="dark"] .stock-report-history-btn{border-color:#465260;background:#202a35;color:#bbc5d1}
 :root[data-theme="dark"] .stock-report-history-btn:hover:not(:disabled){border-color:#9b8351;color:#f0d78d;background:#252f3b}
-.stock-report-modal{gap:8px}
+.stock-report-modal{display:block;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
 .stock-report-modal>h2{margin-bottom:0}
 .stock-report-quote{margin:0!important;color:#8994a0!important;font:10px/1.5 var(--mono)!important}
 .stock-report-navigation{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid #e8ebee;border-bottom:1px solid #e8ebee}
