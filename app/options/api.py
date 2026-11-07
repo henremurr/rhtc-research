@@ -819,7 +819,7 @@ async def dashboard_logout(request: Request):
 
 
 class WatchlistUpdate(BaseModel):
-    rows: list[dict[str, Any]] = Field(default_factory=list, max_length=200)
+    rows: list[dict[str, Any]] = Field(default_factory=list, max_length=300)
 
 
 @app.get("/api/health")
@@ -1146,7 +1146,7 @@ async def chain(symbol: str):
 
 class SummaryInput(BaseModel):
     source: str = "demo"
-    rows: list[dict[str, Any]] = Field(default_factory=list, max_length=200)
+    rows: list[dict[str, Any]] = Field(default_factory=list, max_length=300)
 
 
 class TickerNewsInput(BaseModel):
