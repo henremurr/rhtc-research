@@ -1050,6 +1050,180 @@ async def update_watchlist(data: WatchlistUpdate):
     return {"rows": saved_rows, "count": len(saved_rows)}
 
 
+_FINNHUB_BUFFETT_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+
+
+def _finnhub_finite_number(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _finnhub_report_facts(record: dict[str, Any]) -> dict[str, Any]:
+    report = record.get("report", {}) if isinstance(record, dict) else {}
+    report = report if isinstance(report, dict) else {}
+    bs = report.get("bs", {}) if isinstance(report.get("bs"), dict) else {}
+    ic = report.get("ic", {}) if isinstance(report.get("ic"), dict) else {}
+    cf = report.get("cf", {}) if isinstance(report.get("cf"), dict) else {}
+
+    def value(section: dict[str, Any], aliases: set[str]) -> float | None:
+        return fundamental_metric(section, aliases)
+
+    cash = value(bs, {
+        "CashCashEquivalentsAndShortTermInvestments", "CashAndCashEquivalentsAtCarryingValue",
+        "CashAndCashEquivalents", "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
+    })
+    short_investments = value(bs, {"ShortTermInvestments", "MarketableSecuritiesCurrent"})
+    if cash is not None and short_investments is not None and "CashCashEquivalentsAndShortTermInvestments" not in bs:
+        cash += short_investments
+    debt = value(bs, {
+        "LongTermDebtAndFinanceLeaseObligations", "LongTermDebt", "LongTermDebtCurrentAndNoncurrent",
+        "ShortTermBorrowingsAndLongTermDebtCurrentAndNoncurrent",
+    })
+    if debt is None:
+        current_debt = value(bs, {"LongTermDebtCurrent", "LongTermDebtAndFinanceLeaseObligationsCurrent", "ShortTermBorrowings"})
+        noncurrent_debt = value(bs, {"LongTermDebtNoncurrent", "LongTermDebtAndFinanceLeaseObligationsNoncurrent"})
+        if current_debt is not None or noncurrent_debt is not None:
+            debt = (current_debt or 0) + (noncurrent_debt or 0)
+    revenue = value(ic, {
+        "RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "SalesRevenueNet",
+        "RevenueFromContractWithCustomerIncludingAssessedTax", "SalesRevenueGoodsNet",
+    })
+    gross_profit = value(ic, {"GrossProfit"})
+    net_income = value(ic, {"NetIncomeLoss", "NetIncomeLossAttributableToParent", "ProfitLoss"})
+    equity = value(bs, {"StockholdersEquity", "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest", "CommonStockholdersEquity"})
+    operating_cash_flow = value(cf, {"NetCashProvidedByUsedInOperatingActivities", "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"})
+    capex = value(cf, {"PaymentsToAcquirePropertyPlantAndEquipment", "PaymentsToAcquireProductiveAssets", "PaymentsForPropertyPlantAndEquipment"})
+    return {
+        "year": record.get("year"),
+        "quarter": record.get("quarter"),
+        "form": record.get("form"),
+        "end_date": record.get("endDate"),
+        "filed_date": record.get("filedDate"),
+        "cash_and_short_term_investments_usd": cash,
+        "interest_bearing_debt_usd": debt,
+        "revenue_usd": revenue,
+        "gross_profit_usd": gross_profit,
+        "net_income_usd": net_income,
+        "shareholders_equity_usd": equity,
+        "operating_cash_flow_usd": operating_cash_flow,
+        "capital_expenditures_usd": abs(capex) if capex is not None else None,
+        "free_cash_flow_usd": operating_cash_flow - abs(capex) if operating_cash_flow is not None and capex is not None else None,
+        "gross_margin_percent": gross_profit / revenue * 100 if gross_profit is not None and revenue else None,
+        "net_profit_margin_percent": net_income / revenue * 100 if net_income is not None and revenue else None,
+    }
+
+
+def _finnhub_compact_report(record: dict[str, Any]) -> dict[str, Any]:
+    facts = _finnhub_report_facts(record)
+    return {key: facts.get(key) for key in (
+        "year", "quarter", "form", "end_date", "filed_date",
+        "cash_and_short_term_investments_usd", "interest_bearing_debt_usd",
+        "revenue_usd", "gross_profit_usd", "net_income_usd", "shareholders_equity_usd",
+        "operating_cash_flow_usd", "capital_expenditures_usd", "free_cash_flow_usd",
+        "gross_margin_percent", "net_profit_margin_percent",
+    )}
+
+
+async def fetch_buffett_finnhub_data(symbol: str) -> dict[str, Any]:
+    api_key = os.getenv("FINNHUB_API_KEY", "").strip()
+    if not api_key:
+        return {"status": "unavailable", "detail": "FINNHUB_API_KEY is not configured.", "metrics": {}, "annual_reports": [], "quarterly_reports": [], "sources": []}
+    cache_key = symbol.upper()
+    cached = _FINNHUB_BUFFETT_CACHE.get(cache_key)
+    if cached and time.monotonic() - cached[0] < _FINNHUB_METRICS_TTL:
+        return cached[1].copy()
+
+    async with httpx.AsyncClient(
+        base_url="https://finnhub.io/api/v1",
+        headers={"X-Finnhub-Token": api_key, "Accept": "application/json"},
+        timeout=httpx.Timeout(12.0, connect=5.0),
+    ) as client:
+        async def request(path: str, params: dict[str, str]) -> dict[str, Any]:
+            response = await client.get(path, params={"symbol": cache_key, **params})
+            response.raise_for_status()
+            payload = response.json()
+            return payload if isinstance(payload, dict) else {}
+
+        responses = await asyncio.gather(
+            request("/stock/metric", {"metric": "all"}),
+            request("/stock/profile2", {}),
+            request("/stock/financials-reported", {"freq": "annual"}),
+            request("/stock/financials-reported", {"freq": "quarterly"}),
+            return_exceptions=True,
+        )
+    metric_payload, profile_payload, annual_payload, quarterly_payload = responses
+    errors = []
+    for label, payload in zip(("basic metrics", "company profile", "annual filings", "quarterly filings"), responses):
+        if isinstance(payload, BaseException):
+            errors.append(f"{label}: {str(payload)[:180]}")
+    metric_payload = metric_payload if isinstance(metric_payload, dict) else {}
+    profile_payload = profile_payload if isinstance(profile_payload, dict) else {}
+    annual_data = annual_payload.get("data", []) if isinstance(annual_payload, dict) else []
+    quarterly_data = quarterly_payload.get("data", []) if isinstance(quarterly_payload, dict) else []
+    annual_records = sorted((item for item in annual_data if isinstance(item, dict)), key=lambda item: str(item.get("endDate") or ""), reverse=True)[:6]
+    quarterly_records = sorted((item for item in quarterly_data if isinstance(item, dict)), key=lambda item: str(item.get("endDate") or ""), reverse=True)[:4]
+
+    raw_metrics = metric_payload.get("metric", {}) if isinstance(metric_payload, dict) else {}
+    raw_metrics = raw_metrics if isinstance(raw_metrics, dict) else {}
+    metric_aliases = {
+        "market_cap_usd": ("marketCapitalization",),
+        "share_price_usd": ("currentPrice",),
+        "shares_outstanding": ("shareOutstanding",),
+        "pe_ttm": ("peTTM", "peBasicExclExtraTTM"),
+        "eps_ttm_usd": ("epsTTM", "epsInclExtraItemsTTM"),
+        "revenue_per_share_ttm_usd": ("revenuePerShareTTM",),
+        "gross_margin_ttm_percent": ("grossMarginTTM", "grossMarginAnnual"),
+        "return_on_equity_percent": ("roeTTM", "roeRfy"),
+        "net_profit_margin_ttm_percent": ("netMarginTTM", "netProfitMarginTTM", "netMarginAnnual"),
+        "annual_dividend_per_share_usd": ("dividendPerShareAnnual", "dividendPerShareTTM"),
+        "dividend_yield_percent": ("dividendYieldIndicatedAnnual", "currentDividendYieldTTM"),
+        "free_cash_flow_per_share_ttm_usd": ("freeCashFlowPerShareTTM",),
+        "cash_per_share_usd": ("cashPerShareAnnual", "cashPerShareTTM"),
+    }
+    metrics: dict[str, Any] = {}
+    for output_name, keys in metric_aliases.items():
+        value = next((_finnhub_finite_number(raw_metrics.get(key)) for key in keys if _finnhub_finite_number(raw_metrics.get(key)) is not None), None)
+        if value is not None:
+            if output_name == "market_cap_usd":
+                value *= 1_000_000
+            elif output_name == "shares_outstanding":
+                value *= 1_000_000
+            elif output_name.endswith("_percent") and abs(value) <= 1:
+                value *= 100
+            metrics[output_name] = value
+    profile_shares = _finnhub_finite_number(profile_payload.get("shareOutstanding"))
+    if "shares_outstanding" not in metrics and profile_shares is not None:
+        metrics["shares_outstanding"] = profile_shares * 1_000_000
+    profile_cap = _finnhub_finite_number(profile_payload.get("marketCapitalization"))
+    if "market_cap_usd" not in metrics and profile_cap is not None:
+        metrics["market_cap_usd"] = profile_cap * 1_000_000
+    metrics["company_name"] = str(profile_payload.get("name") or "").strip() or None
+    metrics["currency"] = str(profile_payload.get("currency") or "").strip() or None
+
+    annual_facts = [_finnhub_compact_report(item) for item in annual_records]
+    quarterly_facts = [_finnhub_compact_report(item) for item in quarterly_records]
+    available_values = list(metrics.values())
+    has_values = any(value is not None and value != "" for value in available_values) or bool(annual_facts or quarterly_facts)
+    status = "partial" if errors and has_values else "unavailable" if errors and not has_values else "available" if has_values else "unavailable"
+    result = {
+        "status": status,
+        "detail": "; ".join(errors)[:700] if errors else ("Finnhub returned no usable data for this symbol." if not has_values else ""),
+        "symbol": cache_key,
+        "metrics": metrics,
+        "annual_reports": annual_facts,
+        "quarterly_reports": quarterly_facts,
+        "sources": [
+            {"title": "Finnhub basic financial metrics API", "url": "https://finnhub.io/docs/api/company-basic-financials"},
+            {"title": "Finnhub financials as reported API", "url": "https://finnhub.io/docs/api/financials-reported"},
+        ],
+    }
+    _FINNHUB_BUFFETT_CACHE[cache_key] = (time.monotonic(), result.copy())
+    return result
+
+
 class _SourceTextParser(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -1261,6 +1435,7 @@ async def buffett_screen(data: BuffettScreenInput):
             "source_links": saved_source_links,
         }
         source_documents, source_review = await fetch_saved_stock_sources(saved_source_links)
+    finnhub_data = await fetch_buffett_finnhub_data(symbol)
     source_text_budget = 30000
     source_documents_for_model = []
     for document in source_documents:
@@ -1272,10 +1447,11 @@ async def buffett_screen(data: BuffettScreenInput):
     source_review_by_url = {item["url"]: item for item in source_review}
     names = {1:"Industry leader",2:"Cash-adjusted P/E at or below 5",3:"Dividend yield at least 6%",4:"Gross margin at least 60%",5:"Return on equity at least 20%",6:"Net profit margin at least 15%",7:"Asset-light; limited ongoing reinvestment required",8:"Durable products and independent pricing power through inflation",9:"Low debt and at least three-year cash survival under a severe revenue-drop scenario",10:"Widely recognized national brand",11:"Trustworthy management without a material record of misleading or exploiting shareholders",12:"Simple, focused core business",13:"Enduring demand with concentrated supply; frequent repeat purchase is favorable"}
     instructions = (
-        "Use the saved stock analysis and source material in the input first, in this exact order: "
-        "(1) review the saved analysis; (2) review every provided saved-source document, which was fetched from that analysis's cited URL; "
-        "(3) only then use web search to fill facts still missing or to resolve conflicts. Do not redo searches for facts already supported. "
-        "If a saved source could not be fetched, use web search to open that exact URL before searching elsewhere. "
+        "Use evidence in this exact order: (1) review the saved stock analysis; (2) review every fetched document from its cited source links; "
+        "(3) use provided Finnhub data to fill financial facts still missing, keeping its reported period and definitions clear; "
+        "(4) only then use web search for remaining gaps or conflicts. Do not search again for facts already supported by earlier evidence. "
+        "If a saved source could not be fetched, try to open that exact URL before searching elsewhere. "
+        "Do not treat Finnhub ratios as a substitute for the requested Buffett calculations when inputs are available; calculate ratios from statements. "
         "Use the latest 10-K for full-year results and the latest 10-Q for updates; compare ratios with prior years and peers. "
         "The saved analysis is context, not authority: prefer the cited primary filing if it conflicts. "
         "Return ONLY valid JSON. Never guess. Unknown or unsupported means fail. "
@@ -1351,7 +1527,8 @@ async def buffett_screen(data: BuffettScreenInput):
                 "saved_stock_analysis": saved_analysis,
                 "saved_source_documents": source_documents_for_model,
                 "saved_source_review": source_review,
-                "instructions": "Use saved analysis and fetched cited sources before supplemental web searches.",
+                "finnhub_fundamentals": finnhub_data,
+                "instructions": "Review saved analysis and its sources first; use Finnhub to fill missing financial data; search only for remaining gaps.",
             }, ensure_ascii=False),
             text={"format": {"type": "json_schema", "name": "buffett_screen", "strict": True, "schema": response_schema}},
             max_output_tokens=4500, max_tool_calls=8, store=False,
@@ -1362,6 +1539,51 @@ async def buffett_screen(data: BuffettScreenInput):
             raise ValueError("Research response did not contain a JSON object.")
         result = json.loads(raw[first_json:last_json + 1])
         metrics = result.get("metrics") if isinstance(result.get("metrics"), dict) else {}
+        finnhub_filled_fields: list[str] = []
+        finnhub_values = finnhub_data.get("metrics", {}) if isinstance(finnhub_data.get("metrics"), dict) else {}
+        annual_facts = finnhub_data.get("annual_reports", []) if isinstance(finnhub_data.get("annual_reports"), list) else []
+        latest_annual = annual_facts[0] if annual_facts and isinstance(annual_facts[0], dict) else {}
+        def fill_missing_metric(name: str, value: Any) -> None:
+            if value is None:
+                return
+            existing = metrics.get(name)
+            if existing is not None and str(existing).strip().lower() not in {"", "unavailable", "unknown", "n/a", "not available", "null"}:
+                return
+            metrics[name] = value
+            finnhub_filled_fields.append(name)
+        api_fallbacks = {
+            "market_cap_usd": finnhub_values.get("market_cap_usd"),
+            "share_price_usd": finnhub_values.get("share_price_usd"),
+            "annual_dividend_per_share_usd": finnhub_values.get("annual_dividend_per_share_usd"),
+            "dividend_yield_percent": finnhub_values.get("dividend_yield_percent"),
+            "gross_margin_percent": finnhub_values.get("gross_margin_ttm_percent"),
+            "return_on_equity_percent": finnhub_values.get("return_on_equity_percent"),
+            "net_profit_margin_percent": finnhub_values.get("net_profit_margin_ttm_percent"),
+            "cash_and_short_term_investments_usd": latest_annual.get("cash_and_short_term_investments_usd"),
+            "total_interest_bearing_debt_usd": latest_annual.get("interest_bearing_debt_usd"),
+            "dividend_coverage_earnings": (
+                latest_annual.get("net_income_usd") / (finnhub_values.get("annual_dividend_per_share_usd") * finnhub_values.get("shares_outstanding"))
+                if latest_annual.get("net_income_usd") is not None and finnhub_values.get("annual_dividend_per_share_usd") and finnhub_values.get("shares_outstanding") else None
+            ),
+            "dividend_coverage_free_cash_flow": (
+                latest_annual.get("free_cash_flow_usd") / (finnhub_values.get("annual_dividend_per_share_usd") * finnhub_values.get("shares_outstanding"))
+                if latest_annual.get("free_cash_flow_usd") is not None and finnhub_values.get("annual_dividend_per_share_usd") and finnhub_values.get("shares_outstanding") else None
+            ),
+        }
+        annual_incomes = sorted(
+            float(item["net_income_usd"]) for item in annual_facts
+            if isinstance(item, dict) and _finnhub_finite_number(item.get("net_income_usd")) is not None
+        )
+        if annual_incomes:
+            middle = len(annual_incomes) // 2
+            normalized_income = annual_incomes[middle] if len(annual_incomes) % 2 else (annual_incomes[middle-1] + annual_incomes[middle]) / 2
+            api_fallbacks["normalized_annual_net_income_usd"] = normalized_income
+        if latest_annual.get("gross_margin_percent") is not None:
+            api_fallbacks["gross_margin_percent"] = latest_annual["gross_margin_percent"]
+        if latest_annual.get("net_profit_margin_percent") is not None:
+            api_fallbacks["net_profit_margin_percent"] = latest_annual["net_profit_margin_percent"]
+        for metric_name, value in api_fallbacks.items():
+            fill_missing_metric(metric_name, value)
         raw_criteria = result.get("criteria") if isinstance(result.get("criteria"), list) else []
         by_id = {}
         for item in raw_criteria:
@@ -1406,6 +1628,10 @@ async def buffett_screen(data: BuffettScreenInput):
                 "review_status": audit.get("status", "not reviewed"),
             })
         citation_urls = {item["url"] for item in citations}
+        for source in finnhub_data.get("sources", []) if isinstance(finnhub_data.get("sources"), list) else []:
+            if isinstance(source, dict) and source.get("url") not in citation_urls:
+                citations.append({"title": str(source.get("title") or source["url"])[:300], "url": source["url"], "origin": "Finnhub API"})
+                citation_urls.add(source["url"])
         for output_item in getattr(response,"output",[]) or []:
             for content_item in getattr(output_item,"content",[]) or []:
                 for annotation in getattr(content_item,"annotations",[]) or []:
@@ -1434,6 +1660,13 @@ async def buffett_screen(data: BuffettScreenInput):
                 "rating_label": saved_analysis.get("rating_label") if saved_analysis else None,
             },
             "source_review": source_review,
+            "finnhub_data_status": {
+                "status": finnhub_data.get("status", "unavailable"),
+                "detail": finnhub_data.get("detail", ""),
+                "annual_periods": len(finnhub_data.get("annual_reports", [])),
+                "quarterly_periods": len(finnhub_data.get("quarterly_reports", [])),
+            },
+            "finnhub_filled_fields": finnhub_filled_fields,
         }
         report_json=json.dumps(stored)
         with closing(connect_watchlist_db()) as connection:
