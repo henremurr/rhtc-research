@@ -1093,3 +1093,12 @@ body.news-mode .workspace-toolbar-heading{gap:8px}
 :root[data-theme="dark"] .stock-report-navigation button{border-color:#465260;background:#202a35;color:#d1dae4}
 :root[data-theme="dark"] .stock-report-section>h3{color:#bdab7a}
 @media(max-width:760px){.stock-report-navigation button{min-height:38px}}
+
+
+/* Clear the Watchlist Manager add row from the leading action. */
+.symbol-add-form{grid-template-columns:44px minmax(0,.72fr) minmax(0,1.08fr) minmax(0,.82fr) minmax(0,.72fr) minmax(0,1.05fr) minmax(0,.78fr) minmax(0,.68fr) minmax(0,.68fr) minmax(0,.95fr) 3.5ch 30px}
+.symbol-add-form>button#clear-symbol-form{grid-column:auto;width:44px;min-width:44px;max-width:44px;height:30px;justify-self:start;padding:0 4px;background:#fff7f7;color:#9a4b4b;border-color:#d9aaaa;font:600 8px var(--sans)}
+.symbol-add-form>button#clear-symbol-form:hover{background:#fbe9e9;color:#783535;border-color:#b96f6f}
+:root[data-theme="dark"] .symbol-add-form>button#clear-symbol-form{background:#302326;color:#f0b4b4;border-color:#70474b}
+:root[data-theme="dark"] .symbol-add-form>button#clear-symbol-form:hover{background:#42292d;color:#ffd0d0;border-color:#a96369}
+@media(max-width:800px){.symbol-add-form{grid-template-columns:36px minmax(0,.72fr) minmax(0,1.08fr) minmax(0,.82fr) minmax(0,.72fr) minmax(0,1.05fr) minmax(0,.78fr) minmax(0,.68fr) minmax(0,.68fr) minmax(0,.95fr) 3.5ch 25px}.symbol-add-form>button#clear-symbol-form{width:36px;min-width:36px;max-width:36px;height:27px;font-size:7px}}
