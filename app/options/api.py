@@ -176,12 +176,14 @@ def connect_watchlist_db() -> sqlite3.Connection:
     connection = sqlite3.connect(watchlist_db_path(), timeout=15)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA journal_mode=WAL")
-    connection.execute("CREATE TABLE IF NOT EXISTS symbols (position INTEGER PRIMARY KEY, symbol TEXT NOT NULL, peak TEXT NOT NULL, share_price REAL, quantity REAL, call_score REAL, analysis_count INTEGER NOT NULL DEFAULT 0, stock_score INTEGER, stock_rating_label TEXT, lt_call TEXT, lt_expy TEXT, lt_qty INTEGER, lt_premium REAL, pg TEXT, buffett_pass INTEGER, buffett_updated_at TEXT, buffett_criteria_json TEXT)")
+    connection.execute("CREATE TABLE IF NOT EXISTS symbols (position INTEGER PRIMARY KEY, symbol TEXT NOT NULL, peak TEXT NOT NULL, share_price REAL, quantity REAL, call_score REAL, analysis_count INTEGER NOT NULL DEFAULT 0, stock_score INTEGER, stock_rating_label TEXT, lt_call TEXT, lt_expy TEXT, lt_qty INTEGER, lt_premium REAL, pg TEXT, buffett_pass INTEGER, buffett_score REAL, buffett_updated_at TEXT, buffett_criteria_json TEXT)")
     columns = {row["name"] for row in connection.execute("PRAGMA table_info(symbols)")}
     if "account" not in columns:
         connection.execute("ALTER TABLE symbols ADD COLUMN account TEXT")
     if "buffett_pass" not in columns:
         connection.execute("ALTER TABLE symbols ADD COLUMN buffett_pass INTEGER")
+    if "buffett_score" not in columns:
+        connection.execute("ALTER TABLE symbols ADD COLUMN buffett_score REAL")
     if "buffett_updated_at" not in columns:
         connection.execute("ALTER TABLE symbols ADD COLUMN buffett_updated_at TEXT")
     if "buffett_criteria_json" not in columns:
@@ -238,11 +240,11 @@ def connect_watchlist_db() -> sqlite3.Connection:
     if ticker_unique:
         connection.execute("ALTER TABLE symbols RENAME TO symbols_old")
         connection.execute(
-            "CREATE TABLE symbols (position INTEGER PRIMARY KEY, symbol TEXT NOT NULL, peak TEXT NOT NULL, share_price REAL, quantity REAL, call_score REAL, analysis_count INTEGER NOT NULL DEFAULT 0, stock_score INTEGER, stock_rating_label TEXT, lt_call TEXT, lt_expy TEXT, lt_qty INTEGER, lt_premium REAL, account TEXT, pg TEXT)"
+            "CREATE TABLE symbols (position INTEGER PRIMARY KEY, symbol TEXT NOT NULL, peak TEXT NOT NULL, share_price REAL, quantity REAL, call_score REAL, analysis_count INTEGER NOT NULL DEFAULT 0, stock_score INTEGER, stock_rating_label TEXT, lt_call TEXT, lt_expy TEXT, lt_qty INTEGER, lt_premium REAL, account TEXT, pg TEXT, buffett_pass INTEGER, buffett_score REAL, buffett_updated_at TEXT, buffett_criteria_json TEXT)"
         )
         connection.execute(
-            "INSERT INTO symbols(position, symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, lt_call, lt_expy, lt_qty, lt_premium, account, pg) "
-            "SELECT position, symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, lt_call, lt_expy, lt_qty, lt_premium, account, pg FROM symbols_old"
+            "INSERT INTO symbols(position, symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, lt_call, lt_expy, lt_qty, lt_premium, account, pg, buffett_pass, buffett_score, buffett_updated_at, buffett_criteria_json) "
+            "SELECT position, symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, lt_call, lt_expy, lt_qty, lt_premium, account, pg, buffett_pass, buffett_score, buffett_updated_at, buffett_criteria_json FROM symbols_old"
         )
         connection.execute("DROP TABLE symbols_old")
     connection.execute(
@@ -267,13 +269,17 @@ def connect_watchlist_db() -> sqlite3.Connection:
         symbol TEXT NOT NULL,
         created_at TEXT NOT NULL,
         buffett_pass INTEGER NOT NULL,
+        buffett_score REAL,
         report_json TEXT NOT NULL,
         UNIQUE(symbol, created_at)
     )""")
+    report_columns = {row["name"] for row in connection.execute("PRAGMA table_info(buffett_screen_reports)")}
+    if "buffett_score" not in report_columns:
+        connection.execute("ALTER TABLE buffett_screen_reports ADD COLUMN buffett_score REAL")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_buffett_reports_symbol_created ON buffett_screen_reports(symbol, created_at DESC, report_id DESC)")
     connection.execute("""
-        INSERT OR IGNORE INTO buffett_screen_reports(symbol, created_at, buffett_pass, report_json)
-        SELECT symbol, buffett_updated_at, buffett_pass, buffett_criteria_json
+        INSERT OR IGNORE INTO buffett_screen_reports(symbol, created_at, buffett_pass, buffett_score, report_json)
+        SELECT symbol, buffett_updated_at, buffett_pass, buffett_score, buffett_criteria_json
         FROM symbols
         WHERE buffett_updated_at IS NOT NULL AND buffett_criteria_json IS NOT NULL
     """)
@@ -290,7 +296,7 @@ def connect_watchlist_db() -> sqlite3.Connection:
 
 def read_watchlist() -> list[dict[str, Any]]:
     with closing(connect_watchlist_db()) as connection:
-        return [dict(row) for row in connection.execute("SELECT symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account, lt_call, lt_expy, lt_qty, lt_premium, pg, buffett_pass, buffett_updated_at, buffett_criteria_json, (SELECT COUNT(*) FROM stock_analysis_reports r WHERE r.symbol = symbols.symbol) AS stock_report_count, (SELECT COUNT(*) FROM buffett_screen_reports b WHERE b.symbol = symbols.symbol) AS buffett_report_count FROM symbols ORDER BY position")]
+        return [dict(row) for row in connection.execute("SELECT symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account, lt_call, lt_expy, lt_qty, lt_premium, pg, buffett_pass, buffett_score, buffett_updated_at, buffett_criteria_json, (SELECT COUNT(*) FROM stock_analysis_reports r WHERE r.symbol = symbols.symbol) AS stock_report_count, (SELECT COUNT(*) FROM buffett_screen_reports b WHERE b.symbol = symbols.symbol) AS buffett_report_count FROM symbols ORDER BY position")]
 
 
 def extract_analysis_total_score(analysis: str) -> int | None:
@@ -451,18 +457,18 @@ def watchlist_storage_ready() -> bool:
 def replace_watchlist(rows: list[dict[str, Any]]) -> None:
     with closing(connect_watchlist_db()) as connection:
         scores = {
-            row["symbol"]: (row["call_score"], row["analysis_count"], row["stock_score"], row["stock_rating_label"], row["buffett_pass"], row["buffett_updated_at"], row["buffett_criteria_json"])
-            for row in connection.execute("SELECT symbol, call_score, analysis_count, stock_score, stock_rating_label, buffett_pass, buffett_updated_at, buffett_criteria_json FROM symbols")
+            row["symbol"]: (row["call_score"], row["analysis_count"], row["stock_score"], row["stock_rating_label"], row["buffett_pass"], row["buffett_score"], row["buffett_updated_at"], row["buffett_criteria_json"])
+            for row in connection.execute("SELECT symbol, call_score, analysis_count, stock_score, stock_rating_label, buffett_pass, buffett_score, buffett_updated_at, buffett_criteria_json FROM symbols")
         }
         connection.execute("DELETE FROM symbols")
         connection.executemany(
-            "INSERT INTO symbols(position, symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account, lt_call, lt_expy, lt_qty, lt_premium, pg, buffett_pass, buffett_updated_at, buffett_criteria_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO symbols(position, symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account, lt_call, lt_expy, lt_qty, lt_premium, pg, buffett_pass, buffett_score, buffett_updated_at, buffett_criteria_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
                     i, row["symbol"], row["peak"], row["share_price"], row["quantity"],
-                    *scores.get(row["symbol"], (None, 0, None, None, None, None, None))[:4],
+                    *scores.get(row["symbol"], (None, 0, None, None, None, None, None, None))[:4],
                     row["account"], row["lt_call"], row["lt_expy"], row["lt_qty"], row["lt_premium"], row["pg"],
-                    *scores.get(row["symbol"], (None, 0, None, None, None, None, None))[4:],
+                    *scores.get(row["symbol"], (None, 0, None, None, None, None, None, None))[4:],
                 )
                 for i, row in enumerate(rows)
             ],
@@ -1655,7 +1661,10 @@ async def buffett_screen(data: BuffettScreenInput):
         }
         for item in criteria:
             if item["id"] in computed: item["pass"], item["evidence"] = computed[item["id"]]
-        passed = int(all(item["pass"] for item in criteria))
+        criteria_passed = sum(1 for item in criteria if item["pass"])
+        criteria_total = len(criteria)
+        score_percent = round((criteria_passed / criteria_total) * 100, 1) if criteria_total else 0.0
+        passed = int(criteria_total > 0 and criteria_passed == criteria_total)
         citations = []
         for link in saved_source_links:
             audit = source_review_by_url.get(link["url"], {})
@@ -1686,6 +1695,9 @@ async def buffett_screen(data: BuffettScreenInput):
         updated_at=datetime.now(timezone.utc).isoformat()
         stored={
             "buffett_pass":passed,
+            "score_percent":score_percent,
+            "criteria_passed":criteria_passed,
+            "criteria_total":criteria_total,
             "buffett_updated_at":updated_at,
             "criteria":criteria,
             "metrics":metrics,
@@ -1708,11 +1720,11 @@ async def buffett_screen(data: BuffettScreenInput):
         }
         report_json=json.dumps(stored)
         with closing(connect_watchlist_db()) as connection:
-            connection.execute("INSERT INTO buffett_screen_reports(symbol, created_at, buffett_pass, report_json) VALUES (?, ?, ?, ?)",(symbol,updated_at,passed,report_json))
-            connection.execute("UPDATE symbols SET buffett_pass=?, buffett_updated_at=?, buffett_criteria_json=? WHERE symbol=?",(passed,updated_at,report_json,symbol))
+            connection.execute("INSERT INTO buffett_screen_reports(symbol, created_at, buffett_pass, buffett_score, report_json) VALUES (?, ?, ?, ?, ?)",(symbol,updated_at,passed,score_percent,report_json))
+            connection.execute("UPDATE symbols SET buffett_pass=?, buffett_score=?, buffett_updated_at=?, buffett_criteria_json=? WHERE symbol=?",(passed,score_percent,updated_at,report_json,symbol))
             report_count=int(connection.execute("SELECT COUNT(*) FROM buffett_screen_reports WHERE symbol=?",(symbol,)).fetchone()[0])
             connection.commit()
-        return {"symbol":symbol,"report_count":report_count,**stored}
+        return {"symbol":symbol,"report_count":report_count,"buffett_score":score_percent,**stored}
     except HTTPException:
         raise
     except Exception as exc:
@@ -1729,7 +1741,7 @@ async def get_buffett_screen_report(symbol: str, offset: int = Query(default=0, 
         if count == 0:
             raise HTTPException(404, f"No saved Buffett screen reports exist for {symbol}.")
         row = connection.execute(
-            "SELECT report_id, created_at, buffett_pass, report_json FROM buffett_screen_reports WHERE symbol = ? "
+            "SELECT report_id, created_at, buffett_pass, buffett_score, report_json FROM buffett_screen_reports WHERE symbol = ? "
             "ORDER BY created_at DESC, report_id DESC LIMIT 1 OFFSET ?", (symbol, offset)
         ).fetchone()
     if not row:
@@ -1737,6 +1749,13 @@ async def get_buffett_screen_report(symbol: str, offset: int = Query(default=0, 
     record = dict(row)
     report = json.loads(record["report_json"])
     report["buffett_pass"] = record["buffett_pass"]
+    if record.get("buffett_score") is not None:
+        report["score_percent"] = record["buffett_score"]
+    if report.get("score_percent") is None:
+        old_criteria = report.get("criteria") if isinstance(report.get("criteria"), list) else []
+        report["criteria_passed"] = sum(1 for item in old_criteria if isinstance(item, dict) and item.get("pass") is True)
+        report["criteria_total"] = len(old_criteria)
+        report["score_percent"] = round(report["criteria_passed"] * 100 / report["criteria_total"], 1) if report["criteria_total"] else 0.0
     report["report_id"] = record["report_id"]
     report["created_at"] = record["created_at"]
     return {"symbol": symbol, "report_count": count, "offset": offset, "report": report}
