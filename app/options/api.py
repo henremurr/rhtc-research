@@ -566,6 +566,36 @@ def fundamental_metric(data: Any, aliases: set[str]) -> float | None:
     return find(data)
 
 
+_FINNHUB_REQUEST_LOCK = asyncio.Lock()
+_FINNHUB_LAST_REQUEST_AT = 0.0
+_FINNHUB_MIN_REQUEST_INTERVAL = 1.05
+
+
+async def _finnhub_api_json(client: httpx.AsyncClient, path: str, params: dict[str, Any]) -> dict[str, Any]:
+    global _FINNHUB_LAST_REQUEST_AT
+    async with _FINNHUB_REQUEST_LOCK:
+        for attempt in range(3):
+            delay = _FINNHUB_MIN_REQUEST_INTERVAL - (time.monotonic() - _FINNHUB_LAST_REQUEST_AT)
+            if delay > 0:
+                await asyncio.sleep(delay)
+            _FINNHUB_LAST_REQUEST_AT = time.monotonic()
+            response = await client.get(path, params=params)
+            if response.status_code == 429:
+                if attempt == 2:
+                    raise RuntimeError("Finnhub rate limit remained active after 3 attempts (HTTP 429).")
+                retry_after = response.headers.get("Retry-After", "")
+                try:
+                    retry_delay = float(retry_after)
+                except (TypeError, ValueError):
+                    retry_delay = 2 ** (attempt + 1)
+                await asyncio.sleep(min(max(retry_delay, 1.0), 30.0))
+                continue
+            response.raise_for_status()
+            payload = response.json()
+            return payload if isinstance(payload, dict) else {}
+    raise RuntimeError("Finnhub request did not return a response.")
+
+
 _FINNHUB_METRICS_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _FINNHUB_METRICS_TTL = 6 * 60 * 60
 
@@ -708,10 +738,7 @@ class Tradier:
             timeout=10,
         ) as client:
             async def request(path: str, extra_params: dict[str, str] | None = None) -> dict[str, Any]:
-                response = await client.get(path, params={"symbol": cache_key, **(extra_params or {})})
-                response.raise_for_status()
-                payload = response.json()
-                return payload if isinstance(payload, dict) else {}
+                return await _finnhub_api_json(client, path, {"symbol": cache_key, **(extra_params or {})})
 
             sentiment_to = date.today()
             sentiment_from = sentiment_to - timedelta(days=365)
@@ -729,7 +756,8 @@ class Tradier:
         result: dict[str, Any] = parse_finnhub_metrics(basic_profile, financials)
         result["insider_sentiment_mspr"], result["insider_sentiment_month"] = parse_finnhub_insider_sentiment(insider_sentiment)
         result["company_profile"] = parse_finnhub_company_overview(basic_profile, full_profile)
-        _FINNHUB_METRICS_CACHE[cache_key] = (time.monotonic(), result.copy())
+        if any(value is not None for key, value in result.items() if key != "company_profile") or (result.get("company_profile") or {}).get("name"):
+            _FINNHUB_METRICS_CACHE[cache_key] = (time.monotonic(), result.copy())
         return result
 
     async def option_sets(self, symbol: str, peak: str, count: int = 4, only_set: int | None = None) -> list[dict[str, Any]]:
@@ -1142,10 +1170,7 @@ async def fetch_buffett_finnhub_data(symbol: str) -> dict[str, Any]:
         timeout=httpx.Timeout(12.0, connect=5.0),
     ) as client:
         async def request(path: str, params: dict[str, str]) -> dict[str, Any]:
-            response = await client.get(path, params={"symbol": cache_key, **params})
-            response.raise_for_status()
-            payload = response.json()
-            return payload if isinstance(payload, dict) else {}
+            return await _finnhub_api_json(client, path, {"symbol": cache_key, **params})
 
         responses = await asyncio.gather(
             request("/stock/metric", {"metric": "all"}),
@@ -1220,7 +1245,8 @@ async def fetch_buffett_finnhub_data(symbol: str) -> dict[str, Any]:
             {"title": "Finnhub financials as reported API", "url": "https://finnhub.io/docs/api/financials-reported"},
         ],
     }
-    _FINNHUB_BUFFETT_CACHE[cache_key] = (time.monotonic(), result.copy())
+    if status == "available":
+        _FINNHUB_BUFFETT_CACHE[cache_key] = (time.monotonic(), result.copy())
     return result
 
 
