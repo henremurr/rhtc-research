@@ -1375,11 +1375,19 @@ async def fetch_saved_stock_sources(source_links: list[dict[str, str]]) -> tuple
                                 raise ValueError("Source type is not readable text: " + (content_type or "unknown"))
                             chunks = []
                             size = 0
+                            truncated = False
                             async for chunk in response.aiter_bytes():
-                                size += len(chunk)
-                                if size > 750_000:
-                                    raise ValueError("Source document exceeds the 750 KB review limit.")
+                                remaining = 750_000 - size
+                                if remaining <= 0:
+                                    truncated = True
+                                    break
+                                if len(chunk) > remaining:
+                                    chunks.append(chunk[:remaining])
+                                    size += remaining
+                                    truncated = True
+                                    break
                                 chunks.append(chunk)
+                                size += len(chunk)
                             raw = b"".join(chunks).decode(response.encoding or "utf-8", errors="replace")
                             title = link.get("title") or current
                             if content_type in {"text/html", "application/xhtml+xml"}:
@@ -1391,7 +1399,11 @@ async def fetch_saved_stock_sources(source_links: list[dict[str, str]]) -> tuple
                                 extracted = raw
                             compact = _compact_source_text(extracted)
                             document = {"title": title[:300], "url": original, "content": compact}
-                            audit = {"title": title[:300], "url": original, "status": "reviewed", "content_type": content_type, "characters": len(compact)}
+                            audit = {
+                                "title": title[:300], "url": original, "status": "reviewed",
+                                "content_type": content_type, "characters": len(compact), "truncated": truncated,
+                                "detail": "Reviewed the first 750 KB; open the link for the complete source." if truncated else "",
+                            }
                             return document, audit
                     raise ValueError("Source could not be followed.")
                 except Exception as exc:
