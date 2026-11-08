@@ -172,10 +172,16 @@ def connect_watchlist_db() -> sqlite3.Connection:
     connection = sqlite3.connect(watchlist_db_path(), timeout=15)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA journal_mode=WAL")
-    connection.execute("CREATE TABLE IF NOT EXISTS symbols (position INTEGER PRIMARY KEY, symbol TEXT NOT NULL, peak TEXT NOT NULL, share_price REAL, quantity REAL, call_score REAL, analysis_count INTEGER NOT NULL DEFAULT 0, stock_score INTEGER, stock_rating_label TEXT, lt_call TEXT, lt_expy TEXT, lt_qty INTEGER, lt_premium REAL, pg TEXT)")
+    connection.execute("CREATE TABLE IF NOT EXISTS symbols (position INTEGER PRIMARY KEY, symbol TEXT NOT NULL, peak TEXT NOT NULL, share_price REAL, quantity REAL, call_score REAL, analysis_count INTEGER NOT NULL DEFAULT 0, stock_score INTEGER, stock_rating_label TEXT, lt_call TEXT, lt_expy TEXT, lt_qty INTEGER, lt_premium REAL, pg TEXT, buffett_pass INTEGER, buffett_updated_at TEXT, buffett_criteria_json TEXT)")
     columns = {row["name"] for row in connection.execute("PRAGMA table_info(symbols)")}
     if "account" not in columns:
         connection.execute("ALTER TABLE symbols ADD COLUMN account TEXT")
+    if "buffett_pass" not in columns:
+        connection.execute("ALTER TABLE symbols ADD COLUMN buffett_pass INTEGER")
+    if "buffett_updated_at" not in columns:
+        connection.execute("ALTER TABLE symbols ADD COLUMN buffett_updated_at TEXT")
+    if "buffett_criteria_json" not in columns:
+        connection.execute("ALTER TABLE symbols ADD COLUMN buffett_criteria_json TEXT")
     if "share_price" not in columns:
         connection.execute("ALTER TABLE symbols ADD COLUMN share_price REAL")
     if "quantity" not in columns:
@@ -265,7 +271,7 @@ def connect_watchlist_db() -> sqlite3.Connection:
 
 def read_watchlist() -> list[dict[str, Any]]:
     with closing(connect_watchlist_db()) as connection:
-        return [dict(row) for row in connection.execute("SELECT symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account, lt_call, lt_expy, lt_qty, lt_premium, pg, (SELECT COUNT(*) FROM stock_analysis_reports r WHERE r.symbol = symbols.symbol) AS stock_report_count FROM symbols ORDER BY position")]
+        return [dict(row) for row in connection.execute("SELECT symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account, lt_call, lt_expy, lt_qty, lt_premium, pg, buffett_pass, buffett_updated_at, buffett_criteria_json, (SELECT COUNT(*) FROM stock_analysis_reports r WHERE r.symbol = symbols.symbol) AS stock_report_count FROM symbols ORDER BY position")]
 
 
 def extract_analysis_total_score(analysis: str) -> int | None:
@@ -426,17 +432,18 @@ def watchlist_storage_ready() -> bool:
 def replace_watchlist(rows: list[dict[str, Any]]) -> None:
     with closing(connect_watchlist_db()) as connection:
         scores = {
-            row["symbol"]: (row["call_score"], row["analysis_count"], row["stock_score"], row["stock_rating_label"])
-            for row in connection.execute("SELECT symbol, call_score, analysis_count, stock_score, stock_rating_label FROM symbols")
+            row["symbol"]: (row["call_score"], row["analysis_count"], row["stock_score"], row["stock_rating_label"], row["buffett_pass"], row["buffett_updated_at"], row["buffett_criteria_json"])
+            for row in connection.execute("SELECT symbol, call_score, analysis_count, stock_score, stock_rating_label, buffett_pass, buffett_updated_at, buffett_criteria_json FROM symbols")
         }
         connection.execute("DELETE FROM symbols")
         connection.executemany(
-            "INSERT INTO symbols(position, symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account, lt_call, lt_expy, lt_qty, lt_premium, pg) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO symbols(position, symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account, lt_call, lt_expy, lt_qty, lt_premium, pg, buffett_pass, buffett_updated_at, buffett_criteria_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
                     i, row["symbol"], row["peak"], row["share_price"], row["quantity"],
-                    *scores.get(row["symbol"], (None, 0, None, None)),
+                    *scores.get(row["symbol"], (None, 0, None, None, None, None, None))[:4],
                     row["account"], row["lt_call"], row["lt_expy"], row["lt_qty"], row["lt_premium"], row["pg"],
+                    *scores.get(row["symbol"], (None, 0, None, None, None, None, None))[4:],
                 )
                 for i, row in enumerate(rows)
             ],
@@ -866,6 +873,10 @@ class WatchlistUpdate(BaseModel):
     rows: list[dict[str, Any]] = Field(default_factory=list, max_length=300)
 
 
+class BuffettScreenInput(BaseModel):
+    symbol: str = Field(min_length=1, max_length=10)
+
+
 @app.get("/api/health")
 async def health():
     return {"ok": True, "provider": data_source(), "watchlist_count": len(read_watchlist())}
@@ -1018,6 +1029,120 @@ async def update_watchlist(data: WatchlistUpdate):
     replace_watchlist(rows)
     saved_rows = read_watchlist()
     return {"rows": saved_rows, "count": len(saved_rows)}
+
+
+@app.post("/api/buffett-screen")
+async def buffett_screen(data: BuffettScreenInput):
+    require_watchlist_storage()
+    symbol = data.symbol.strip().upper()
+    if not SYMBOL_PATTERN.fullmatch(symbol):
+        raise HTTPException(400, "Enter a valid ticker symbol.")
+    with closing(connect_watchlist_db()) as connection:
+        row = connection.execute("SELECT 1 FROM symbols WHERE symbol = ? LIMIT 1", (symbol,)).fetchone()
+    if not row:
+        raise HTTPException(404, "Ticker is not in the watchlist.")
+    key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not key:
+        raise HTTPException(503, "Buffett screen requires OPENAI_API_KEY on the server.")
+    names = {1:"Industry leader",2:"Cash-adjusted P/E at or below 5",3:"Dividend yield at least 6%",4:"Gross margin at least 60%",5:"Return on equity at least 20%",6:"Net profit margin at least 15%",7:"Asset-light; limited ongoing reinvestment required",8:"Durable products and independent pricing power through inflation",9:"Low debt and at least three-year cash survival under a severe revenue-drop scenario",10:"Widely recognized national brand",11:"Trustworthy management without a material record of misleading or exploiting shareholders",12:"Simple, focused core business",13:"Enduring demand with concentrated supply; frequent repeat purchase is favorable"}
+    instructions = (
+        "Use web search to research the company using its latest 10-K, latest 10-Q, and credible industry sources. "
+        "Return ONLY valid JSON. Use the latest 10-K for full-year results and the 10-Q for updates; compare most financial ratios "
+        "with the prior five years and similar companies. Cite sources for every finding; never guess. Unknown or unsupported means fail. "
+        "Return metrics including: market_cap_usd, cash_and_short_term_investments_usd, total_interest_bearing_debt_usd, "
+        "operating_cash_required_usd, normalized_annual_net_income_usd (use multi-year earnings; normalize volatile profits), "
+        "annual_dividend_per_share_usd, share_price_usd, dividend_yield_percent, dividend_coverage_earnings, "
+        "dividend_coverage_free_cash_flow, gross_margin_percent, return_on_equity_percent (use average equity), "
+        "net_profit_margin_percent (GAAP), cash_available_after_essential_expenses_severe_drop_usd, "
+        "annual_cash_needs_severe_drop_usd. Also return relevant five-year history and evidence. "
+        "Apply these 13 criteria: "
+        "1 industry leader: define its actual market and verify market share/rank stable or growing. "
+        "2 cash-adjusted P/E <=5: (market cap - excess cash)/normalized annual net income; excess cash equals cash and short-term investments minus interest-bearing debt minus cash required for operations; use several years if profits swing. "
+        "3 dividend yield >=6%, with earnings/free-cash-flow coverage and durability through downturns. "
+        "4 gross margin >=60%, with five-year trend and peer comparison. "
+        "5 ROE >=20%, using average equity; assess whether debt or buybacks inflate it. "
+        "6 GAAP net profit margin >=15%; identify unusual gains or charges and compare its multi-year trend. "
+        "7 little reinvestment: review at least five years of capital spending, operating cash flow, free cash flow (operating cash flow minus capex), revenue, facilities, equipment, working capital, and software development. "
+        "8 pricing power: assess selling prices, volume, customer retention, management disclosures, and whether price increases damage demand or margins. "
+        "9 low debt and at least three-year survival: review net debt, maturities, interest, leases, commitments; estimate cash after essential costs under a severe revenue-drop scenario, then divide by annual cash needs. "
+        "10 national brand: use market share, retention, repeat purchases, price premium, and credible awareness data. "
+        "11 trustworthy management: review risk factors, footnotes, auditor changes, restatements, legal/regulatory issues, related parties, proxy pay/ownership, and forecast record; do not treat one insider sale alone as proof. "
+        "12 simple focused core business: assess segment revenue/profit, products, customers, and clarity of competitive position. "
+        "13 enduring repeat demand and few competitors: assess purchase frequency, retention, recurring revenue, concentration, market shares, and barriers to entry; account for health, regulatory, and reputation risks. "
+        "Return {ticker,metrics:{...},criteria:[{id:1,pass:true,evidence:'...'},...13],citations:[{title,url}]}. "
+        "For criteria 3, 4, 5, 6, and 9, criterion pass must also reflect the stated quality checks, not merely the numeric threshold. "
+        "The server independently computes criteria 2-6 thresholds and the three-year runway in criterion 9; missing inputs fail."
+    )
+    try:
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=key, timeout=75, max_retries=0)
+        response = await client.responses.create(
+            model=os.getenv("OPENAI_ANALYSIS_MODEL", os.getenv("OPENAI_MODEL", "gpt-5-mini")),
+            tools=[{"type":"web_search"}], reasoning={"effort":"low"}, instructions=instructions,
+            input=f"Ticker: {symbol}. Criteria: {json.dumps(names)}", max_output_tokens=4500, max_tool_calls=4, store=False,
+        )
+        raw = (response.output_text or "").strip()
+        first_json, last_json = raw.find("{"), raw.rfind("}")
+        if first_json < 0 or last_json < first_json:
+            raise ValueError("Research response did not contain a JSON object.")
+        result = json.loads(raw[first_json:last_json + 1])
+        metrics = result.get("metrics") if isinstance(result.get("metrics"), dict) else {}
+        raw_criteria = result.get("criteria") if isinstance(result.get("criteria"), list) else []
+        by_id = {}
+        for item in raw_criteria:
+            if isinstance(item, dict):
+                try: by_id[int(item.get("id"))] = item
+                except (TypeError, ValueError): pass
+        criteria = [{"id":i,"name":name,"pass":by_id.get(i,{}).get("pass") is True,"evidence":str(by_id.get(i,{}).get("evidence") or "No verifiable evidence returned; counted as fail.")[:1200]} for i,name in names.items()]
+        def number(key_name):
+            try:
+                n=float(metrics.get(key_name))
+                return n if math.isfinite(n) else None
+            except (TypeError, ValueError): return None
+        cash, debt = number("cash_and_short_term_investments_usd"), number("total_interest_bearing_debt_usd")
+        operating_cash = number("operating_cash_required_usd")
+        cap, income = number("market_cap_usd"), number("normalized_annual_net_income_usd")
+        dy, gm, roe, nm = number("dividend_yield_percent"), number("gross_margin_percent"), number("return_on_equity_percent"), number("net_profit_margin_percent")
+        dividend_earnings_cover = number("dividend_coverage_earnings")
+        dividend_fcf_cover = number("dividend_coverage_free_cash_flow")
+        cash_runway, annual_needs = number("cash_available_after_essential_expenses_severe_drop_usd"), number("annual_cash_needs_severe_drop_usd")
+        excess_cash = cash - debt - operating_cash if cash is not None and debt is not None and operating_cash is not None else None
+        pe = (cap-excess_cash)/income if cap is not None and excess_cash is not None and income is not None and income>0 else None
+        runway_years = cash_runway/annual_needs if cash_runway is not None and annual_needs is not None and annual_needs>0 else None
+        contextual = {item["id"]:item["pass"] for item in criteria}
+        computed = {
+            2:(pe is not None and pe<=5, f"Cash-adjusted P/E: {pe:.2f}; excess cash {excess_cash:,.0f}." if pe is not None else "Market cap, cash, debt, operating cash reserve, or positive normalized earnings unavailable."),
+            3:(dy is not None and dy>=6 and dividend_earnings_cover is not None and dividend_earnings_cover>=1 and dividend_fcf_cover is not None and dividend_fcf_cover>=1 and contextual.get(3,False), f"Dividend yield {dy:.2f}%; earnings cover {dividend_earnings_cover if dividend_earnings_cover is not None else 'unavailable'}x; free-cash-flow cover {dividend_fcf_cover if dividend_fcf_cover is not None else 'unavailable'}x; downturn history also checked." if dy is not None else "Dividend yield unavailable."),
+            4:(gm is not None and gm>=60 and contextual.get(4,False), f"Gross margin {gm:.2f}%; five-year trend and peer check also required." if gm is not None else "Gross margin unavailable."),
+            5:(roe is not None and roe>=20 and contextual.get(5,False), f"ROE {roe:.2f}%; average equity and leverage/buyback checks also required." if roe is not None else "ROE unavailable."),
+            6:(nm is not None and nm>=15 and contextual.get(6,False), f"GAAP net margin {nm:.2f}%; unusual items and multi-year trend also checked." if nm is not None else "GAAP net margin unavailable."),
+            9:(runway_years is not None and runway_years>=3 and contextual.get(9,False), f"Severe-drop cash runway: {runway_years:.2f} years; debt and obligations reviewed." if runway_years is not None else "Severe-drop cash available or annual cash needs unavailable."),
+        }
+        for item in criteria:
+            if item["id"] in computed: item["pass"], item["evidence"] = computed[item["id"]]
+        passed = int(all(item["pass"] for item in criteria))
+        passed = int(all(item["pass"] for item in criteria))
+        citations = []
+        for output_item in getattr(response,"output",[]) or []:
+            for content_item in getattr(output_item,"content",[]) or []:
+                for annotation in getattr(content_item,"annotations",[]) or []:
+                    citation=getattr(annotation,"url_citation",None)
+                    if citation:
+                        url=getattr(citation,"url","")
+                        if url and not any(c["url"]==url for c in citations): citations.append({"title":getattr(citation,"title","") or url,"url":url})
+        for cite in result.get("citations",[]) if isinstance(result.get("citations"),list) else []:
+            if isinstance(cite,dict) and isinstance(cite.get("url"),str) and cite["url"].startswith("http") and not any(c["url"]==cite["url"] for c in citations):
+                citations.append({"title":str(cite.get("title") or cite["url"])[:300],"url":cite["url"][:1000]})
+        stored={"criteria":criteria,"metrics":metrics,"adjusted_pe":pe,"citations":citations[:30]}
+        updated_at=datetime.now(timezone.utc).isoformat()
+        with closing(connect_watchlist_db()) as connection:
+            connection.execute("UPDATE symbols SET buffett_pass=?, buffett_updated_at=?, buffett_criteria_json=? WHERE symbol=?",(passed,updated_at,json.dumps(stored),symbol))
+            connection.commit()
+        return {"symbol":symbol,"buffett_pass":passed,"buffett_updated_at":updated_at,**stored}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(502,f"Buffett research failed for {symbol}: {str(exc)[:400]}") from exc
 
 
 @app.get("/api/opportunities")
