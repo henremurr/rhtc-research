@@ -258,6 +258,21 @@ def connect_watchlist_db() -> sqlite3.Connection:
         analysis_text TEXT NOT NULL
     )""")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_stock_analysis_reports_symbol_created ON stock_analysis_reports(symbol, created_at DESC, report_id DESC)")
+    connection.execute("""CREATE TABLE IF NOT EXISTS buffett_screen_reports (
+        report_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        symbol TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        buffett_pass INTEGER NOT NULL,
+        report_json TEXT NOT NULL,
+        UNIQUE(symbol, created_at)
+    )""")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_buffett_reports_symbol_created ON buffett_screen_reports(symbol, created_at DESC, report_id DESC)")
+    connection.execute("""
+        INSERT OR IGNORE INTO buffett_screen_reports(symbol, created_at, buffett_pass, report_json)
+        SELECT symbol, buffett_updated_at, buffett_pass, buffett_criteria_json
+        FROM symbols
+        WHERE buffett_updated_at IS NOT NULL AND buffett_criteria_json IS NOT NULL
+    """)
     connection.execute("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
     connection.execute("INSERT OR IGNORE INTO app_state(key, value) VALUES ('watchlist_seeded', '0')")
     seeded = connection.execute("SELECT value FROM app_state WHERE key = 'watchlist_seeded'").fetchone()
@@ -271,7 +286,7 @@ def connect_watchlist_db() -> sqlite3.Connection:
 
 def read_watchlist() -> list[dict[str, Any]]:
     with closing(connect_watchlist_db()) as connection:
-        return [dict(row) for row in connection.execute("SELECT symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account, lt_call, lt_expy, lt_qty, lt_premium, pg, buffett_pass, buffett_updated_at, buffett_criteria_json, (SELECT COUNT(*) FROM stock_analysis_reports r WHERE r.symbol = symbols.symbol) AS stock_report_count FROM symbols ORDER BY position")]
+        return [dict(row) for row in connection.execute("SELECT symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account, lt_call, lt_expy, lt_qty, lt_premium, pg, buffett_pass, buffett_updated_at, buffett_criteria_json, (SELECT COUNT(*) FROM stock_analysis_reports r WHERE r.symbol = symbols.symbol) AS stock_report_count, (SELECT COUNT(*) FROM buffett_screen_reports b WHERE b.symbol = symbols.symbol) AS buffett_report_count FROM symbols ORDER BY position")]
 
 
 def extract_analysis_total_score(analysis: str) -> int | None:
@@ -1170,16 +1185,42 @@ async def buffett_screen(data: BuffettScreenInput):
         for cite in result.get("citations",[]) if isinstance(result.get("citations"),list) else []:
             if isinstance(cite,dict) and isinstance(cite.get("url"),str) and cite["url"].startswith("http") and not any(c["url"]==cite["url"] for c in citations):
                 citations.append({"title":str(cite.get("title") or cite["url"])[:300],"url":cite["url"][:1000]})
-        stored={"criteria":criteria,"metrics":metrics,"adjusted_pe":pe,"citations":citations[:30]}
         updated_at=datetime.now(timezone.utc).isoformat()
+        stored={"buffett_pass":passed,"buffett_updated_at":updated_at,"criteria":criteria,"metrics":metrics,"adjusted_pe":pe,"citations":citations[:30]}
+        report_json=json.dumps(stored)
         with closing(connect_watchlist_db()) as connection:
-            connection.execute("UPDATE symbols SET buffett_pass=?, buffett_updated_at=?, buffett_criteria_json=? WHERE symbol=?",(passed,updated_at,json.dumps(stored),symbol))
+            connection.execute("INSERT INTO buffett_screen_reports(symbol, created_at, buffett_pass, report_json) VALUES (?, ?, ?, ?)",(symbol,updated_at,passed,report_json))
+            connection.execute("UPDATE symbols SET buffett_pass=?, buffett_updated_at=?, buffett_criteria_json=? WHERE symbol=?",(passed,updated_at,report_json,symbol))
+            report_count=int(connection.execute("SELECT COUNT(*) FROM buffett_screen_reports WHERE symbol=?",(symbol,)).fetchone()[0])
             connection.commit()
-        return {"symbol":symbol,"buffett_pass":passed,"buffett_updated_at":updated_at,**stored}
+        return {"symbol":symbol,"report_count":report_count,**stored}
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(502,f"Buffett research failed for {symbol}: {str(exc)[:400]}") from exc
+
+
+@app.get("/api/buffett-screen/reports/{symbol}")
+async def get_buffett_screen_report(symbol: str, offset: int = Query(default=0, ge=0)):
+    symbol = symbol.strip().upper()
+    if not SYMBOL_PATTERN.fullmatch(symbol):
+        raise HTTPException(400, "Enter a valid ticker symbol.")
+    with closing(connect_watchlist_db()) as connection:
+        count = int(connection.execute("SELECT COUNT(*) FROM buffett_screen_reports WHERE symbol = ?", (symbol,)).fetchone()[0])
+        if count == 0:
+            raise HTTPException(404, f"No saved Buffett screen reports exist for {symbol}.")
+        row = connection.execute(
+            "SELECT report_id, created_at, buffett_pass, report_json FROM buffett_screen_reports WHERE symbol = ? "
+            "ORDER BY created_at DESC, report_id DESC LIMIT 1 OFFSET ?", (symbol, offset)
+        ).fetchone()
+    if not row:
+        raise HTTPException(404, "There are no more Buffett reports in that direction.")
+    record = dict(row)
+    report = json.loads(record["report_json"])
+    report["buffett_pass"] = record["buffett_pass"]
+    report["report_id"] = record["report_id"]
+    report["created_at"] = record["created_at"]
+    return {"symbol": symbol, "report_count": count, "offset": offset, "report": report}
 
 
 @app.get("/api/opportunities")
