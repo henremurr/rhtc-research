@@ -6,6 +6,8 @@ import hmac
 import importlib.metadata as package_metadata
 import platform
 import json
+import ipaddress
+import socket
 import os
 import random
 import math
@@ -16,8 +18,10 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
+from html import unescape
+from html.parser import HTMLParser
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urljoin, urlsplit
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -1046,6 +1050,156 @@ async def update_watchlist(data: WatchlistUpdate):
     return {"rows": saved_rows, "count": len(saved_rows)}
 
 
+class _SourceTextParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self.title_parts: list[str] = []
+        self.in_title = False
+        self.skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if self.skip_depth:
+            self.skip_depth += 1
+        elif tag in {"script", "style", "noscript", "svg", "nav", "footer", "header"}:
+            self.skip_depth = 1
+        elif tag == "title":
+            self.in_title = True
+        elif tag in {"p", "div", "br", "li", "tr", "section", "h1", "h2", "h3"}:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if self.skip_depth:
+            self.skip_depth -= 1
+        elif tag == "title":
+            self.in_title = False
+        elif tag in {"p", "div", "br", "li", "tr", "section", "h1", "h2", "h3"}:
+            self.parts.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        if self.skip_depth:
+            return
+        if self.in_title:
+            self.title_parts.append(data)
+        self.parts.append(data)
+
+
+def _validate_public_source_url(url: str) -> tuple[str, str]:
+    parsed = urlsplit(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("Only public HTTP(S) source URLs are allowed.")
+    if parsed.port not in {None, 80, 443}:
+        raise ValueError("Nonstandard source URL port is not allowed.")
+    host = parsed.hostname.rstrip(".").lower()
+    if host in {"localhost"} or host.endswith((".localhost", ".local", ".internal")):
+        raise ValueError("Local and internal source hosts are not allowed.")
+    try:
+        address = ipaddress.ip_address(host)
+        if not address.is_global:
+            raise ValueError("Non-public source IP is not allowed.")
+    except ValueError as exc:
+        if "Non-public source IP" in str(exc):
+            raise
+        try:
+            records = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
+            addresses = {record[4][0] for record in records}
+            if not addresses or any(not ipaddress.ip_address(address).is_global for address in addresses):
+                raise ValueError("Source host did not resolve exclusively to public IP addresses.")
+        except OSError as dns_error:
+            raise ValueError("Source host could not be resolved.") from dns_error
+    return url, host
+
+
+def _compact_source_text(text: str, limit: int = 5200) -> str:
+    normalized = re.sub(r"\s+", " ", unescape(text)).strip()
+    if len(normalized) <= limit:
+        return normalized
+    low = normalized.lower()
+    terms = (
+        "cash and cash equivalents", "marketable debt securities", "net loss", "net income", "total revenue",
+        "revenue", "cost of sales", "operating expenses", "stockholders' equity", "shareholders' equity",
+        "cash used in operating activities", "capital expenditures", "property, plant and equipment",
+        "interest-bearing debt", "lease liabilities", "dividend", "market share", "customer retention",
+        "pricing power", "risk factors",
+    )
+    windows: list[tuple[int, int]] = []
+    for term in terms:
+        pos = low.find(term)
+        if pos >= 0:
+            windows.append((max(0, pos - 260), min(len(normalized), pos + 560)))
+    if not windows:
+        return normalized[:limit]
+    windows.sort()
+    merged: list[list[int]] = []
+    for start, end in windows:
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    excerpts = []
+    total = 0
+    for start, end in merged:
+        excerpt = normalized[start:end]
+        if total + len(excerpt) > limit:
+            excerpt = excerpt[:max(0, limit-total)]
+        if excerpt:
+            excerpts.append(excerpt)
+            total += len(excerpt)
+        if total >= limit:
+            break
+    return "\n…\n".join(excerpts)
+
+
+async def fetch_saved_stock_sources(source_links: list[dict[str, str]]) -> tuple[list[dict[str, str]], list[dict[str, Any]]]:
+    semaphore = asyncio.Semaphore(5)
+    timeout = httpx.Timeout(8.0, connect=4.0)
+    headers = {"User-Agent": "RHTC-Research/1.0", "Accept": "text/html,application/xhtml+xml,text/plain,application/json,application/xml,text/xml,application/pdf;q=0.8"}
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False, trust_env=False, headers=headers) as client:
+        async def fetch_one(link: dict[str, str]) -> tuple[dict[str, str] | None, dict[str, Any]]:
+            original = link["url"]
+            current = original
+            async with semaphore:
+                try:
+                    for redirect_count in range(4):
+                        await asyncio.wait_for(asyncio.to_thread(_validate_public_source_url, current), timeout=4.5)
+                        async with client.stream("GET", current) as response:
+                            if response.status_code in {301, 302, 303, 307, 308}:
+                                location = response.headers.get("location")
+                                if not location or redirect_count == 3:
+                                    raise ValueError("Source redirect could not be followed.")
+                                current = urljoin(current, location)
+                                continue
+                            response.raise_for_status()
+                            content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+                            if content_type not in {"text/html", "application/xhtml+xml", "text/plain", "application/json", "application/xml", "text/xml"}:
+                                raise ValueError("Source type is not readable text: " + (content_type or "unknown"))
+                            chunks = []
+                            size = 0
+                            async for chunk in response.aiter_bytes():
+                                size += len(chunk)
+                                if size > 750_000:
+                                    raise ValueError("Source document exceeds the 750 KB review limit.")
+                                chunks.append(chunk)
+                            raw = b"".join(chunks).decode(response.encoding or "utf-8", errors="replace")
+                            title = link.get("title") or current
+                            if content_type in {"text/html", "application/xhtml+xml"}:
+                                parser = _SourceTextParser()
+                                parser.feed(raw)
+                                title = " ".join(" ".join(parser.title_parts).split()) or title
+                                extracted = "\n".join(parser.parts)
+                            else:
+                                extracted = raw
+                            compact = _compact_source_text(extracted)
+                            document = {"title": title[:300], "url": original, "content": compact}
+                            audit = {"title": title[:300], "url": original, "status": "reviewed", "content_type": content_type, "characters": len(compact)}
+                            return document, audit
+                    raise ValueError("Source could not be followed.")
+                except Exception as exc:
+                    return None, {"title": link.get("title") or original, "url": original, "status": "unavailable", "detail": str(exc)[:240], "characters": 0}
+        results = await asyncio.gather(*(fetch_one(link) for link in source_links))
+    return [document for document, _ in results if document], [audit for _, audit in results]
+
+
 @app.post("/api/buffett-screen")
 async def buffett_screen(data: BuffettScreenInput):
     require_watchlist_storage()
@@ -1054,16 +1208,78 @@ async def buffett_screen(data: BuffettScreenInput):
         raise HTTPException(400, "Enter a valid ticker symbol.")
     with closing(connect_watchlist_db()) as connection:
         row = connection.execute("SELECT 1 FROM symbols WHERE symbol = ? LIMIT 1", (symbol,)).fetchone()
+        saved_row = connection.execute(
+            "SELECT report_id, created_at, rating, rating_label, summary, details, citations_json, quote_json, analysis_text "
+            "FROM stock_analysis_reports WHERE symbol = ? ORDER BY created_at DESC, report_id DESC LIMIT 1",
+            (symbol,),
+        ).fetchone()
     if not row:
         raise HTTPException(404, "Ticker is not in the watchlist.")
     key = os.getenv("OPENAI_API_KEY", "").strip()
     if not key:
         raise HTTPException(503, "Buffett screen requires OPENAI_API_KEY on the server.")
+    saved_analysis = None
+    saved_source_links: list[dict[str, str]] = []
+    source_documents: list[dict[str, str]] = []
+    source_review: list[dict[str, Any]] = []
+    if saved_row:
+        record = dict(saved_row)
+        try:
+            saved_source_links = json.loads(record.get("citations_json") or "[]")
+        except (TypeError, ValueError):
+            saved_source_links = []
+        if not isinstance(saved_source_links, list):
+            saved_source_links = []
+        unique_links: list[dict[str, str]] = []
+        seen_source_urls: set[str] = set()
+        for citation in saved_source_links:
+            if not isinstance(citation, dict):
+                continue
+            url = citation.get("url")
+            if not isinstance(url, str) or not url.startswith(("https://", "http://")) or url in seen_source_urls:
+                continue
+            seen_source_urls.add(url)
+            unique_links.append({"url": url[:1500], "title": str(citation.get("title") or url)[:300]})
+        for raw_url in re.findall(r"https?://[^\s)\]},;]+", str(record.get("analysis_text") or "")):
+            url = raw_url.rstrip(".,;:!?)]}")
+            if url not in seen_source_urls:
+                seen_source_urls.add(url)
+                unique_links.append({"url": url[:1500], "title": url[:300]})
+        saved_source_links = unique_links
+        try:
+            saved_quote = json.loads(record.get("quote_json") or "{}")
+        except (TypeError, ValueError):
+            saved_quote = {}
+        saved_analysis = {
+            "report_id": record.get("report_id"),
+            "created_at": record.get("created_at"),
+            "rating": record.get("rating"),
+            "rating_label": record.get("rating_label"),
+            "summary": str(record.get("summary") or "")[:5000],
+            "details": str(record.get("details") or "")[:12000],
+            "quote": saved_quote if isinstance(saved_quote, dict) else {},
+            "source_links": saved_source_links,
+        }
+        source_documents, source_review = await fetch_saved_stock_sources(saved_source_links)
+    source_text_budget = 30000
+    source_documents_for_model = []
+    for document in source_documents:
+        if source_text_budget <= 0:
+            break
+        excerpt = document.get("content", "")[:source_text_budget]
+        source_text_budget -= len(excerpt)
+        source_documents_for_model.append({**document, "content": excerpt})
+    source_review_by_url = {item["url"]: item for item in source_review}
     names = {1:"Industry leader",2:"Cash-adjusted P/E at or below 5",3:"Dividend yield at least 6%",4:"Gross margin at least 60%",5:"Return on equity at least 20%",6:"Net profit margin at least 15%",7:"Asset-light; limited ongoing reinvestment required",8:"Durable products and independent pricing power through inflation",9:"Low debt and at least three-year cash survival under a severe revenue-drop scenario",10:"Widely recognized national brand",11:"Trustworthy management without a material record of misleading or exploiting shareholders",12:"Simple, focused core business",13:"Enduring demand with concentrated supply; frequent repeat purchase is favorable"}
     instructions = (
-        "Use web search to research the company using its latest 10-K, latest 10-Q, and credible industry sources. "
-        "Return ONLY valid JSON. Use the latest 10-K for full-year results and the 10-Q for updates; compare most financial ratios "
-        "with the prior five years and similar companies. Cite sources for every finding; never guess. Unknown or unsupported means fail. "
+        "Use the saved stock analysis and source material in the input first, in this exact order: "
+        "(1) review the saved analysis; (2) review every provided saved-source document, which was fetched from that analysis's cited URL; "
+        "(3) only then use web search to fill facts still missing or to resolve conflicts. Do not redo searches for facts already supported. "
+        "If a saved source could not be fetched, use web search to open that exact URL before searching elsewhere. "
+        "Use the latest 10-K for full-year results and the latest 10-Q for updates; compare ratios with prior years and peers. "
+        "The saved analysis is context, not authority: prefer the cited primary filing if it conflicts. "
+        "Return ONLY valid JSON. Never guess. Unknown or unsupported means fail. "
+        "Cite sources for every finding. "
         "Return metrics including: market_cap_usd, cash_and_short_term_investments_usd, total_interest_bearing_debt_usd, "
         "operating_cash_required_usd, normalized_annual_net_income_usd (use multi-year earnings; normalize volatile profits), "
         "annual_dividend_per_share_usd, share_price_usd, dividend_yield_percent, dividend_coverage_earnings, "
@@ -1129,9 +1345,16 @@ async def buffett_screen(data: BuffettScreenInput):
         response = await client.responses.create(
             model=os.getenv("OPENAI_ANALYSIS_MODEL", os.getenv("OPENAI_MODEL", "gpt-5-mini")),
             tools=[{"type":"web_search"}], reasoning={"effort":"low"}, instructions=instructions,
-            input=f"Ticker: {symbol}. Criteria: {json.dumps(names)}",
+            input=json.dumps({
+                "ticker": symbol,
+                "criteria": names,
+                "saved_stock_analysis": saved_analysis,
+                "saved_source_documents": source_documents_for_model,
+                "saved_source_review": source_review,
+                "instructions": "Use saved analysis and fetched cited sources before supplemental web searches.",
+            }, ensure_ascii=False),
             text={"format": {"type": "json_schema", "name": "buffett_screen", "strict": True, "schema": response_schema}},
-            max_output_tokens=3500, max_tool_calls=4, store=False,
+            max_output_tokens=4500, max_tool_calls=8, store=False,
         )
         raw = (response.output_text or "").strip()
         first_json, last_json = raw.find("{"), raw.rfind("}")
@@ -1173,20 +1396,45 @@ async def buffett_screen(data: BuffettScreenInput):
         for item in criteria:
             if item["id"] in computed: item["pass"], item["evidence"] = computed[item["id"]]
         passed = int(all(item["pass"] for item in criteria))
-        passed = int(all(item["pass"] for item in criteria))
         citations = []
+        for link in saved_source_links:
+            audit = source_review_by_url.get(link["url"], {})
+            citations.append({
+                "title": link.get("title") or link["url"],
+                "url": link["url"],
+                "origin": "Saved stock analysis source",
+                "review_status": audit.get("status", "not reviewed"),
+            })
+        citation_urls = {item["url"] for item in citations}
         for output_item in getattr(response,"output",[]) or []:
             for content_item in getattr(output_item,"content",[]) or []:
                 for annotation in getattr(content_item,"annotations",[]) or []:
                     citation=getattr(annotation,"url_citation",None)
                     if citation:
                         url=getattr(citation,"url","")
-                        if url and not any(c["url"]==url for c in citations): citations.append({"title":getattr(citation,"title","") or url,"url":url})
+                        if url and url not in citation_urls:
+                            citations.append({"title":getattr(citation,"title","") or url,"url":url,"origin":"Supplemental web search"})
+                            citation_urls.add(url)
         for cite in result.get("citations",[]) if isinstance(result.get("citations"),list) else []:
-            if isinstance(cite,dict) and isinstance(cite.get("url"),str) and cite["url"].startswith("http") and not any(c["url"]==cite["url"] for c in citations):
-                citations.append({"title":str(cite.get("title") or cite["url"])[:300],"url":cite["url"][:1000]})
+            if isinstance(cite,dict) and isinstance(cite.get("url"),str) and cite["url"].startswith("http") and cite["url"] not in citation_urls:
+                citations.append({"title":str(cite.get("title") or cite["url"])[:300],"url":cite["url"][:1000],"origin":"Supplemental web search"})
+                citation_urls.add(cite["url"])
         updated_at=datetime.now(timezone.utc).isoformat()
-        stored={"buffett_pass":passed,"buffett_updated_at":updated_at,"criteria":criteria,"metrics":metrics,"adjusted_pe":pe,"citations":citations[:30]}
+        stored={
+            "buffett_pass":passed,
+            "buffett_updated_at":updated_at,
+            "criteria":criteria,
+            "metrics":metrics,
+            "adjusted_pe":pe,
+            "citations":citations[:50],
+            "saved_stock_analysis": {
+                "found": saved_analysis is not None,
+                "report_id": saved_analysis.get("report_id") if saved_analysis else None,
+                "created_at": saved_analysis.get("created_at") if saved_analysis else None,
+                "rating_label": saved_analysis.get("rating_label") if saved_analysis else None,
+            },
+            "source_review": source_review,
+        }
         report_json=json.dumps(stored)
         with closing(connect_watchlist_db()) as connection:
             connection.execute("INSERT INTO buffett_screen_reports(symbol, created_at, buffett_pass, report_json) VALUES (?, ?, ?, ?)",(symbol,updated_at,passed,report_json))
