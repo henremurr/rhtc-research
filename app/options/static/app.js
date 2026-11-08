@@ -400,8 +400,9 @@ async function viewBuffettReports(symbol,offset=0){
     const data=await response.json();if(!response.ok)throw Error(data.detail||'Saved Buffett report is unavailable.');
     const report=data.report||{};activeBuffettReportOffset=Number(data.offset)||0;activeBuffettReportCount=Number(data.report_count)||0;
     $('#buffett-report-meta').textContent='Report '+(activeBuffettReportOffset+1)+' of '+activeBuffettReportCount+' · '+newsTimestamp(report.created_at);
-    const passed=Number(report.buffett_pass)===1;
-    $('#buffett-report-score').innerHTML='<div class="buffett-overall-score '+(passed?'pass':'fail')+'"><b>'+(passed?'PASS · 1':'FAIL · 0')+'</b><span>'+(report.criteria||[]).filter(item=>item.pass).length+' of 13 criteria passed</span></div>';
+    const reportCriteria=report.criteria||[],criteriaPassed=reportCriteria.filter(item=>item.pass).length,criteriaTotal=Number(report.criteria_total)||reportCriteria.length||13;
+    const scoreValue=Number(report.score_percent),scorePercent=Number.isFinite(scoreValue)?scoreValue:(criteriaPassed/criteriaTotal*100);
+    $('#buffett-report-score').innerHTML='<div class="buffett-overall-score score"><b>SCORE · '+scorePercent.toFixed(1)+'%</b><span>'+criteriaPassed+' of '+criteriaTotal+' criteria passed</span></div>';
     const metrics=report.metrics||{};
     const labels={market_cap_usd:'Market capitalization',cash_and_short_term_investments_usd:'Cash and short-term investments',total_interest_bearing_debt_usd:'Interest-bearing debt',operating_cash_required_usd:'Operating cash reserve',normalized_annual_net_income_usd:'Normalized annual net income',annual_dividend_per_share_usd:'Annual dividend per share',share_price_usd:'Share price',dividend_yield_percent:'Dividend yield',dividend_coverage_earnings:'Dividend coverage · earnings',dividend_coverage_free_cash_flow:'Dividend coverage · free cash flow',gross_margin_percent:'Gross margin',return_on_equity_percent:'Return on equity',net_profit_margin_percent:'Net profit margin',cash_available_after_essential_expenses_severe_drop_usd:'Cash after severe-drop essential expenses',annual_cash_needs_severe_drop_usd:'Annual cash needs · severe-drop case'};
     $('#buffett-report-metrics').innerHTML=Object.entries(labels).map(([key,label])=>{const value=metrics[key];let shown='Unavailable';if(value!==null&&value!==undefined&&Number.isFinite(Number(value))){const n=Number(value);shown=key.endsWith('_usd')?'$'+n.toLocaleString('en-US',{maximumFractionDigits:2}):key.endsWith('_percent')?n.toFixed(2)+'%':n.toLocaleString('en-US',{maximumFractionDigits:3})}return '<div class="buffett-metric"><span>'+safe(label)+'</span><b>'+safe(shown)+'</b></div>'}).join('');
@@ -576,21 +577,22 @@ async function runBuffettScreen(){
   const symbols=[...new Set(getFilteredSymbolRows().map(row=>String(row.symbol||'').trim().toUpperCase()).filter(Boolean))];
   if(!symbols.length){$('#buffett-screen-status').textContent='No tickers match the current watchlist filters.';return}
   if(!state.editingEnabled){$('#buffett-screen-status').textContent='Shared watchlist storage is unavailable; results cannot be saved.';return}
-  if(!window.confirm('Run the Buffett screen for '+symbols.length+' distinct tickers currently shown by the watchlist filters? This makes one OpenAI web research request per ticker and may incur API charges. All 13 must pass; missing evidence counts as fail.'))return;
+  if(!window.confirm('Run the Buffett screen for '+symbols.length+' distinct tickers currently shown by the watchlist filters? This makes one OpenAI web research request per ticker and may incur API charges. Each ticker receives a percentage score based on its 13 criteria; missing evidence scores 0.'))return;
   const button=$('#buffett-screen-btn'),status=$('#buffett-screen-status');button.disabled=true;button.textContent='Screening…';
-  let passed=0,failed=0,errors=[];
+  let scores=[],errors=[];
   try{
     for(let i=0;i<symbols.length;i++){
       const symbol=symbols[i];status.textContent='Buffett screen '+(i+1)+'/'+symbols.length+' · '+symbol;
       try{
         const response=await fetch('/options/api/buffett-screen',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol})});
         const data=await response.json();if(!response.ok)throw new Error(data.detail||('HTTP '+response.status));
-        state.watchlist.forEach(row=>{if(String(row.symbol||'').toUpperCase()===symbol){row.buffett_pass=data.buffett_pass;row.buffett_updated_at=data.buffett_updated_at;row.buffett_criteria_json=JSON.stringify({buffett_pass:data.buffett_pass,buffett_updated_at:data.buffett_updated_at,criteria:data.criteria,metrics:data.metrics,adjusted_pe:data.adjusted_pe,citations:data.citations});row.buffett_report_count=data.report_count}});
-        if(Number(data.buffett_pass)===1)passed++;else failed++;
+        const returnedScore=Number(data.buffett_score??data.score_percent),criteriaTotal=(data.criteria||[]).length||13,criteriaPassed=(data.criteria||[]).filter(item=>item.pass).length,score=Number.isFinite(returnedScore)?returnedScore:criteriaPassed/criteriaTotal*100;
+        state.watchlist.forEach(row=>{if(String(row.symbol||'').toUpperCase()===symbol){row.buffett_pass=data.buffett_pass;row.buffett_score=score;row.buffett_updated_at=data.buffett_updated_at;row.buffett_criteria_json=JSON.stringify({buffett_pass:data.buffett_pass,buffett_score:score,score_percent:score,criteria_passed:criteriaPassed,criteria_total:criteriaTotal,buffett_updated_at:data.buffett_updated_at,criteria:data.criteria,metrics:data.metrics,adjusted_pe:data.adjusted_pe,citations:data.citations});row.buffett_report_count=data.report_count}});
+        if(Number.isFinite(score))scores.push(score);else errors.push(symbol+': screen returned no score');
       }catch(error){errors.push(symbol+': '+String(error.message||error))}
       if((i+1)%5===0||i===symbols.length-1)renderSymbolList();
     }
-    renderSymbolList();status.textContent='Complete: '+passed+' pass · '+failed+' fail · '+errors.length+' research errors.'+(errors.length?' First errors: '+errors.slice(0,3).join(' | '):'');status.title=errors.join('\n');
+    renderSymbolList();const averageScore=scores.length?scores.reduce((sum,value)=>sum+value,0)/scores.length:0;status.textContent='Complete: '+scores.length+' tickers scored · average '+averageScore.toFixed(1)+'% · '+errors.length+' research errors.'+(errors.length?' First errors: '+errors.slice(0,3).join(' | '):'');status.title=errors.join('\n');
   }finally{button.disabled=false;button.textContent='Buffett'}
 }
 function pageChain(delta){const next=state.chainIndex+delta;if(next<0||next>=state.chainRows.length)return;state.chainIndex=next;renderChainPage()}
