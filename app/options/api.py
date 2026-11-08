@@ -1069,17 +1069,54 @@ async def buffett_screen(data: BuffettScreenInput):
         "11 trustworthy management: review risk factors, footnotes, auditor changes, restatements, legal/regulatory issues, related parties, proxy pay/ownership, and forecast record; do not treat one insider sale alone as proof. "
         "12 simple focused core business: assess segment revenue/profit, products, customers, and clarity of competitive position. "
         "13 enduring repeat demand and few competitors: assess purchase frequency, retention, recurring revenue, concentration, market shares, and barriers to entry; account for health, regulatory, and reputation risks. "
-        "Return {ticker,metrics:{...},criteria:[{id:1,pass:true,evidence:'...'},...13],citations:[{title,url}]}. "
+        "Return exactly 13 criterion objects and all requested metric fields. Keep each evidence field to one concise sentence under 160 characters. "
         "For criteria 3, 4, 5, 6, and 9, criterion pass must also reflect the stated quality checks, not merely the numeric threshold. "
         "The server independently computes criteria 2-6 thresholds and the three-year runway in criterion 9; missing inputs fail."
     )
     try:
         from openai import AsyncOpenAI
         client = AsyncOpenAI(api_key=key, timeout=75, max_retries=0)
+        metric_keys = [
+            "market_cap_usd", "cash_and_short_term_investments_usd", "total_interest_bearing_debt_usd",
+            "operating_cash_required_usd", "normalized_annual_net_income_usd", "annual_dividend_per_share_usd",
+            "share_price_usd", "dividend_yield_percent", "dividend_coverage_earnings",
+            "dividend_coverage_free_cash_flow", "gross_margin_percent", "return_on_equity_percent",
+            "net_profit_margin_percent", "cash_available_after_essential_expenses_severe_drop_usd",
+            "annual_cash_needs_severe_drop_usd",
+        ]
+        response_schema = {
+            "type": "object",
+            "properties": {
+                "ticker": {"type": "string"},
+                "metrics": {
+                    "type": "object",
+                    "properties": {key_name: {"type": ["number", "null"]} for key_name in metric_keys},
+                    "required": metric_keys,
+                    "additionalProperties": False,
+                },
+                "criteria": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "integer"},
+                            "pass": {"type": "boolean"},
+                            "evidence": {"type": "string"},
+                        },
+                        "required": ["id", "pass", "evidence"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": ["ticker", "metrics", "criteria"],
+            "additionalProperties": False,
+        }
         response = await client.responses.create(
             model=os.getenv("OPENAI_ANALYSIS_MODEL", os.getenv("OPENAI_MODEL", "gpt-5-mini")),
             tools=[{"type":"web_search"}], reasoning={"effort":"low"}, instructions=instructions,
-            input=f"Ticker: {symbol}. Criteria: {json.dumps(names)}", max_output_tokens=4500, max_tool_calls=4, store=False,
+            input=f"Ticker: {symbol}. Criteria: {json.dumps(names)}",
+            text={"format": {"type": "json_schema", "name": "buffett_screen", "strict": True, "schema": response_schema}},
+            max_output_tokens=3500, max_tool_calls=4, store=False,
         )
         raw = (response.output_text or "").strip()
         first_json, last_json = raw.find("{"), raw.rfind("}")
