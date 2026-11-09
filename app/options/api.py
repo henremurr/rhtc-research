@@ -21,7 +21,7 @@ from pathlib import Path
 from html import unescape
 from html.parser import HTMLParser
 from typing import Any
-from urllib.parse import quote, urljoin, urlsplit
+from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlsplit, urlunsplit
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -1356,6 +1356,15 @@ def _compact_source_text(text: str, limit: int = 5200) -> str:
     return "\n…\n".join(excerpts)
 
 
+def _source_html_fallback_url(url: str) -> str | None:
+    parts = urlsplit(url)
+    query = parse_qsl(parts.query, keep_blank_values=True)
+    if not any(key.lower() == "aspdf" for key, _ in query):
+        return None
+    readable_query = [(key, value) for key, value in query if key.lower() != "aspdf"]
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(readable_query), parts.fragment))
+
+
 async def fetch_saved_stock_sources(source_links: list[dict[str, str]]) -> tuple[list[dict[str, str]], list[dict[str, Any]]]:
     semaphore = asyncio.Semaphore(5)
     timeout = httpx.Timeout(8.0, connect=4.0)
@@ -1366,6 +1375,7 @@ async def fetch_saved_stock_sources(source_links: list[dict[str, str]]) -> tuple
             current = original
             async with semaphore:
                 try:
+                    html_fallback_used = False
                     for redirect_count in range(4):
                         await asyncio.wait_for(asyncio.to_thread(_validate_public_source_url, current), timeout=4.5)
                         async with client.stream("GET", current) as response:
@@ -1377,6 +1387,12 @@ async def fetch_saved_stock_sources(source_links: list[dict[str, str]]) -> tuple
                                 continue
                             response.raise_for_status()
                             content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+                            if content_type == "application/pdf":
+                                fallback_url = _source_html_fallback_url(current)
+                                if fallback_url and fallback_url != current and not html_fallback_used:
+                                    current = fallback_url
+                                    html_fallback_used = True
+                                    continue
                             if content_type not in {"text/html", "application/xhtml+xml", "text/plain", "application/json", "application/xml", "text/xml"}:
                                 raise ValueError("Source type is not readable text: " + (content_type or "unknown"))
                             chunks = []
@@ -1408,7 +1424,7 @@ async def fetch_saved_stock_sources(source_links: list[dict[str, str]]) -> tuple
                             audit = {
                                 "title": title[:300], "url": original, "status": "reviewed",
                                 "content_type": content_type, "characters": len(compact), "truncated": truncated,
-                                "detail": "Reviewed the first 750 KB; open the link for the complete source." if truncated else "",
+                                "detail": ("Readable HTML was fetched after removing the PDF-view parameter. " if html_fallback_used else "") + ("Reviewed the first 750 KB; open the link for the complete source." if truncated else ""),
                             }
                             return document, audit
                     raise ValueError("Source could not be followed.")
