@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import closing
 import hmac
+from io import BytesIO
 import importlib.metadata as package_metadata
 import platform
 import json
@@ -25,6 +26,7 @@ from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlsplit, urlunsp
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
+from pypdf import PdfReader
 from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -1540,10 +1542,29 @@ def _compact_source_text(text: str, limit: int = 5200) -> str:
 def _source_html_fallback_url(url: str) -> str | None:
     parts = urlsplit(url)
     query = parse_qsl(parts.query, keep_blank_values=True)
-    if not any(key.lower() == "aspdf" for key, _ in query):
-        return None
     readable_query = [(key, value) for key, value in query if key.lower() != "aspdf"]
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(readable_query), parts.fragment))
+    path = parts.path
+    changed = len(readable_query) != len(query)
+    if path.rstrip("/").lower().endswith("/pdf"):
+        path = path.rstrip("/")[:-4] or "/"
+        changed = True
+    if not changed:
+        return None
+    return urlunsplit((parts.scheme, parts.netloc, path, urlencode(readable_query), parts.fragment))
+
+
+def _extract_pdf_source_text(data: bytes) -> str:
+    reader = PdfReader(BytesIO(data))
+    pages: list[str] = []
+    characters = 0
+    for page in reader.pages[:80]:
+        page_text = page.extract_text() or ""
+        if page_text:
+            pages.append(page_text)
+            characters += len(page_text)
+        if characters >= 60_000:
+            break
+    return "\n".join(pages)
 
 
 async def fetch_saved_stock_sources(source_links: list[dict[str, str]]) -> tuple[list[dict[str, str]], list[dict[str, Any]]]:
@@ -1574,6 +1595,35 @@ async def fetch_saved_stock_sources(source_links: list[dict[str, str]]) -> tuple
                                     current = fallback_url
                                     html_fallback_used = True
                                     continue
+                            if content_type == "application/pdf":
+                                pdf_chunks = []
+                                pdf_size = 0
+                                pdf_truncated = False
+                                async for chunk in response.aiter_bytes():
+                                    remaining = 8_000_000 - pdf_size
+                                    if remaining <= 0:
+                                        pdf_truncated = True
+                                        break
+                                    if len(chunk) > remaining:
+                                        pdf_chunks.append(chunk[:remaining])
+                                        pdf_size += remaining
+                                        pdf_truncated = True
+                                        break
+                                    pdf_chunks.append(chunk)
+                                    pdf_size += len(chunk)
+                                pdf_text = await asyncio.to_thread(_extract_pdf_source_text, b"".join(pdf_chunks))
+                                compact = _compact_source_text(pdf_text)
+                                if not compact:
+                                    raise ValueError("PDF contains no extractable text.")
+                                title = str(link.get("title") or current)[:300]
+                                document = {"title": title, "url": original, "content": compact}
+                                audit = {
+                                    "title": title, "url": original, "status": "reviewed",
+                                    "content_type": content_type, "characters": len(compact), "truncated": pdf_truncated,
+                                    "detail": ("Extracted readable text from the PDF. " +
+                                               ("Reviewed the first 8 MB; open the link for the complete source." if pdf_truncated else ""))
+                                }
+                                return document, audit
                             if content_type not in {"text/html", "application/xhtml+xml", "text/plain", "application/json", "application/xml", "text/xml"}:
                                 raise ValueError("Source type is not readable text: " + (content_type or "unknown"))
                             chunks = []
