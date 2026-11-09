@@ -27,6 +27,7 @@ from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlsplit, urlunsp
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
 from pypdf import PdfReader
+from json_repair import repair_json
 from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -1829,13 +1830,22 @@ async def buffett_screen(data: BuffettScreenInput):
                 "instructions": "Review saved analysis and its sources first; use SEC Company Facts XBRL for filed cash facts, then Finnhub for remaining financial gaps; search only for remaining gaps.",
             }, ensure_ascii=False),
             text={"format": {"type": "json_schema", "name": "buffett_screen", "strict": True, "schema": response_schema}},
-            max_output_tokens=4500, max_tool_calls=8, store=False,
+            max_output_tokens=6500, max_tool_calls=8, store=False,
         )
         raw = (response.output_text or "").strip()
         first_json, last_json = raw.find("{"), raw.rfind("}")
         if first_json < 0 or last_json < first_json:
             raise ValueError("Research response did not contain a JSON object.")
-        result = json.loads(raw[first_json:last_json + 1])
+        json_payload = raw[first_json:last_json + 1]
+        try:
+            result = json.loads(json_payload)
+        except json.JSONDecodeError:
+            result = repair_json(json_payload, return_objects=True)
+        if not isinstance(result, dict):
+            raise ValueError("Research response could not be converted into a JSON object.")
+        returned_criteria = result.get("criteria")
+        if not isinstance(returned_criteria, list) or len(returned_criteria) != 13:
+            raise ValueError(f"Research response returned {len(returned_criteria) if isinstance(returned_criteria, list) else 0} of 13 criteria.")
         metrics = result.get("metrics") if isinstance(result.get("metrics"), dict) else {}
         finnhub_filled_fields: list[str] = []
         sec_filled_fields: list[str] = []
