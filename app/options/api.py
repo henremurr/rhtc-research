@@ -1854,6 +1854,43 @@ async def buffett_screen(data: BuffettScreenInput):
             api_fallbacks["net_profit_margin_percent"] = latest_annual["net_profit_margin_percent"]
         for metric_name, value in api_fallbacks.items():
             fill_missing_metric(metric_name, value)
+
+        # Convert filed statement data into the screen's derived liquidity fields.
+        # These are estimates, so retain the filed inputs and make the formula explicit
+        # in the criterion evidence rather than presenting them as reported facts.
+        sec_cash = _finnhub_finite_number(sec_values.get("cash_and_short_term_investments_usd"))
+        sec_capex = _finnhub_finite_number(sec_values.get("capital_expenditures_usd"))
+        sec_free_cash_flow = _finnhub_finite_number(sec_values.get("free_cash_flow_usd"))
+        derived_cash_need_candidates = [
+            value for value in (
+                abs(sec_free_cash_flow) if sec_free_cash_flow is not None and sec_free_cash_flow < 0 else None,
+                sec_capex if sec_capex is not None and sec_capex > 0 else None,
+            ) if value is not None
+        ]
+        if derived_cash_need_candidates:
+            annual_cash_need = max(derived_cash_need_candidates)
+            fill_missing_metric("annual_cash_needs_severe_drop_usd", annual_cash_need, sec_filled_fields)
+            fill_missing_metric("operating_cash_required_usd", annual_cash_need, sec_filled_fields)
+            if sec_cash is not None:
+                fill_missing_metric(
+                    "cash_available_after_essential_expenses_severe_drop_usd",
+                    max(sec_cash - annual_cash_need, 0.0),
+                    sec_filled_fields,
+                )
+
+        # A zero cash dividend is a valid result, not missing data. When both the SEC
+        # facts and Finnhub show no dividend, record the zero explicitly.
+        no_sec_cash_dividend = sec_data.get("status") == "available" and sec_dividends_paid is None
+        no_finnhub_dividend = (
+            _finnhub_finite_number(finnhub_values.get("annual_dividend_per_share_usd")) is None
+            and _finnhub_finite_number(finnhub_values.get("dividend_yield_percent")) is None
+        )
+        if no_sec_cash_dividend and no_finnhub_dividend:
+            fill_missing_metric("annual_dividend_per_share_usd", 0.0, sec_filled_fields)
+            fill_missing_metric("dividend_yield_percent", 0.0, sec_filled_fields)
+            fill_missing_metric("dividend_coverage_earnings", 0.0, sec_filled_fields)
+            fill_missing_metric("dividend_coverage_free_cash_flow", 0.0, sec_filled_fields)
+
         raw_criteria = result.get("criteria") if isinstance(result.get("criteria"), list) else []
         by_id = {}
         for item in raw_criteria:
@@ -1877,13 +1914,41 @@ async def buffett_screen(data: BuffettScreenInput):
         pe = (cap-excess_cash)/income if cap is not None and excess_cash is not None and income is not None and income>0 else None
         runway_years = cash_runway/annual_needs if cash_runway is not None and annual_needs is not None and annual_needs>0 else None
         contextual = {item["id"]:item["pass"] for item in criteria}
+        if income is not None and income <= 0:
+            pe_evidence = f"Normalized annual net income is negative ({income:,.0f}); cash-adjusted P/E is not meaningful."
+        else:
+            missing_pe_inputs = [
+                label for label, value in (
+                    ("market capitalization", cap),
+                    ("cash", cash),
+                    ("debt", debt),
+                    ("operating cash reserve estimate", operating_cash),
+                    ("positive normalized earnings", income),
+                ) if value is None
+            ]
+            pe_evidence = (
+                f"Cash-adjusted P/E: {pe:.2f}; excess cash {excess_cash:,.0f}."
+                if pe is not None
+                else f"Cannot calculate cash-adjusted P/E; missing {', '.join(missing_pe_inputs)}."
+            )
+        if dy == 0:
+            dividend_evidence = "No cash dividend reported in SEC facts or Finnhub; annual dividend $0.00 and yield 0.00%."
+        elif dy is not None:
+            dividend_evidence = f"Dividend yield {dy:.2f}%; earnings cover {dividend_earnings_cover if dividend_earnings_cover is not None else 'unavailable'}x; free-cash-flow cover {dividend_fcf_cover if dividend_fcf_cover is not None else 'unavailable'}x; downturn history also checked."
+        else:
+            dividend_evidence = "Dividend yield unavailable."
+        runway_evidence = (
+            f"Severe-drop cash runway: {runway_years:.2f} years; annual cash need estimated as the greater of negative free cash flow and capital expenditures; debt and obligations reviewed."
+            if runway_years is not None
+            else "Severe-drop cash runway could not be calculated from filed cash flow and cash balances."
+        )
         computed = {
-            2:(pe is not None and pe<=5, f"Cash-adjusted P/E: {pe:.2f}; excess cash {excess_cash:,.0f}." if pe is not None else "Market cap, cash, debt, operating cash reserve, or positive normalized earnings unavailable."),
-            3:(dy is not None and dy>=6 and dividend_earnings_cover is not None and dividend_earnings_cover>=1 and dividend_fcf_cover is not None and dividend_fcf_cover>=1 and contextual.get(3,False), f"Dividend yield {dy:.2f}%; earnings cover {dividend_earnings_cover if dividend_earnings_cover is not None else 'unavailable'}x; free-cash-flow cover {dividend_fcf_cover if dividend_fcf_cover is not None else 'unavailable'}x; downturn history also checked." if dy is not None else "Dividend yield unavailable."),
+            2:(pe is not None and pe<=5, pe_evidence),
+            3:(dy is not None and dy>=6 and dividend_earnings_cover is not None and dividend_earnings_cover>=1 and dividend_fcf_cover is not None and dividend_fcf_cover>=1 and contextual.get(3,False), dividend_evidence),
             4:(gm is not None and gm>=60 and contextual.get(4,False), f"Gross margin {gm:.2f}%; five-year trend and peer check also required." if gm is not None else "Gross margin unavailable."),
             5:(roe is not None and roe>=20 and contextual.get(5,False), f"ROE {roe:.2f}%; average equity and leverage/buyback checks also required." if roe is not None else "ROE unavailable."),
             6:(nm is not None and nm>=15 and contextual.get(6,False), f"GAAP net margin {nm:.2f}%; unusual items and multi-year trend also checked." if nm is not None else "GAAP net margin unavailable."),
-            9:(runway_years is not None and runway_years>=3 and contextual.get(9,False), f"Severe-drop cash runway: {runway_years:.2f} years; debt and obligations reviewed." if runway_years is not None else "Severe-drop cash available or annual cash needs unavailable."),
+            9:(runway_years is not None and runway_years>=3 and contextual.get(9,False), runway_evidence),
         }
         for item in criteria:
             if item["id"] in computed: item["pass"], item["evidence"] = computed[item["id"]]
