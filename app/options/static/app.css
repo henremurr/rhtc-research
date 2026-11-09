@@ -1115,3 +1115,9 @@ body.news-mode .workspace-toolbar-heading{gap:8px}
 
 :root[data-theme="dark"] .buffett-screen-controls{background:#202b36;border-color:#394654;color:#c4ced8}
 :root[data-theme="dark"] .buffett-screen-controls .buffett-status{color:#d1dae4}
+
+/* Match saved Buffett ticker links to dashboard stock quote tickers. */
+.buffett-report-ticker{color:#283548;font:700 11px var(--mono);text-decoration:none;text-decoration-color:initial;text-underline-offset:initial}
+.buffett-report-ticker:hover{color:#80652e;text-decoration:underline}
+:root[data-theme="dark"] .buffett-report-ticker{color:#d1dae4}
+:root[data-theme="dark"] .buffett-report-ticker:hover{color:#f0d78d}
