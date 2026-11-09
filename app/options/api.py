@@ -572,6 +572,109 @@ def fundamental_metric(data: Any, aliases: set[str]) -> float | None:
     return find(data)
 
 
+_SEC_CIK_MAP_CACHE: tuple[float, dict[str, int]] | None = None
+_SEC_FACT_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_SEC_CIK_MAP_LOCK = asyncio.Lock()
+
+
+async def fetch_sec_company_facts(symbol: str) -> dict[str, Any]:
+    """Fetch recent cash and short-term-investment facts from the SEC's official XBRL API."""
+    global _SEC_CIK_MAP_CACHE
+    symbol = symbol.strip().upper()
+    now = time.monotonic()
+    try:
+        headers = {
+            "User-Agent": "RHTC Research Dashboard admin@rhtc2025.com",
+            "Accept": "application/json",
+            "Accept-Encoding": "gzip, deflate",
+        }
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0), trust_env=False, headers=headers) as client:
+            async with _SEC_CIK_MAP_LOCK:
+                cached_map = _SEC_CIK_MAP_CACHE
+                if cached_map and now - cached_map[0] < 24 * 60 * 60:
+                    ticker_map = cached_map[1]
+                else:
+                    response = await client.get("https://www.sec.gov/files/company_tickers.json")
+                    response.raise_for_status()
+                    payload = response.json()
+                    ticker_map = {
+                        str(item.get("ticker") or "").strip().upper(): int(item["cik_str"])
+                        for item in payload.values()
+                        if isinstance(item, dict) and item.get("ticker") and item.get("cik_str") is not None
+                    }
+                    _SEC_CIK_MAP_CACHE = (now, ticker_map)
+            cik = ticker_map.get(symbol) or ticker_map.get(symbol.replace(".", "-"))
+            if not cik:
+                return {"status": "unavailable", "detail": "Ticker was not found in the SEC company ticker index.", "metrics": {}, "source_url": None}
+            cache_key = str(cik).zfill(10)
+            cached_facts = _SEC_FACT_CACHE.get(cache_key)
+            if cached_facts and now - cached_facts[0] < 6 * 60 * 60:
+                return cached_facts[1].copy()
+            source_url = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cache_key}.json"
+            response = await client.get(source_url)
+            response.raise_for_status()
+            company = response.json()
+        us_gaap = company.get("facts", {}).get("us-gaap", {})
+        allowed_forms = {"10-K", "10-Q", "20-F", "40-F"}
+        def latest_instant(tag: str) -> dict[str, Any] | None:
+            unit_data = us_gaap.get(tag, {}).get("units", {})
+            observations = unit_data.get("USD", []) if isinstance(unit_data, dict) else []
+            valid = [
+                item for item in observations
+                if isinstance(item, dict) and item.get("form") in allowed_forms and item.get("end") and "start" not in item
+                and _finnhub_finite_number(item.get("val")) is not None
+            ]
+            return max(valid, key=lambda item: (str(item.get("end") or ""), str(item.get("filed") or "")), default=None)
+        cash_fact = latest_instant("CashAndCashEquivalentsAtCarryingValue")
+        combined_fact = latest_instant("CashCashEquivalentsAndShortTermInvestments")
+        if not cash_fact and combined_fact:
+            selected = combined_fact
+            cash_value = _finnhub_finite_number(selected.get("val"))
+            short_value = None
+            total_cash = cash_value
+            cash_basis = "cash, cash equivalents, and short-term investments (reported combined)"
+        elif cash_fact:
+            selected = cash_fact
+            cash_value = _finnhub_finite_number(cash_fact.get("val"))
+            investment_fact = None
+            for tag in ("ShortTermInvestments", "AvailableForSaleSecuritiesCurrent", "MarketableSecuritiesCurrent"):
+                candidate = latest_instant(tag)
+                if candidate and candidate.get("end") == cash_fact.get("end"):
+                    investment_fact = candidate
+                    break
+            short_value = _finnhub_finite_number(investment_fact.get("val")) if investment_fact else None
+            total_cash = (cash_value or 0) + (short_value or 0)
+            cash_basis = "cash and cash equivalents" + (" plus short-term investments" if short_value is not None else "; no same-period short-term-investment fact reported")
+        else:
+            selected = None
+            cash_value = short_value = total_cash = None
+            cash_basis = ""
+        if selected is None or total_cash is None:
+            result = {"status": "unavailable", "detail": "No current SEC XBRL cash fact was found.", "metrics": {}, "source_url": source_url}
+        else:
+            metrics = {
+                "cash_and_short_term_investments_usd": total_cash,
+                "cash_and_cash_equivalents_usd": cash_value,
+                "short_term_investments_usd": short_value,
+            }
+            result = {
+                "status": "available",
+                "detail": f"{cash_basis}; period ended {selected.get('end')}, filed {selected.get('filed')}, form {selected.get('form')}.",
+                "form": selected.get("form"),
+                "period_end": selected.get("end"),
+                "filed_date": selected.get("filed"),
+                "metrics": metrics,
+                "source_url": source_url,
+                "source_title": f"SEC Company Facts XBRL · {selected.get('form')} filed {selected.get('filed')}",
+                "cash_fact_tag": "CashCashEquivalentsAndShortTermInvestments" if cash_fact is None else "CashAndCashEquivalentsAtCarryingValue",
+                "investment_fact_tag": next((tag for tag in ("ShortTermInvestments", "AvailableForSaleSecuritiesCurrent", "MarketableSecuritiesCurrent") if latest_instant(tag) and latest_instant(tag).get("end") == selected.get("end")), None) if cash_fact else None,
+            }
+        _SEC_FACT_CACHE[cache_key] = (now, result)
+        return result.copy()
+    except Exception as exc:
+        return {"status": "unavailable", "detail": f"SEC Company Facts lookup failed: {str(exc)[:200]}", "metrics": {}, "source_url": None}
+
+
 _FINNHUB_REQUEST_LOCK = asyncio.Lock()
 _FINNHUB_LAST_REQUEST_AT = 0.0
 _FINNHUB_MIN_REQUEST_INTERVAL = 1.05
@@ -1495,6 +1598,9 @@ async def buffett_screen(data: BuffettScreenInput):
             "source_links": saved_source_links,
         }
         source_documents, source_review = await fetch_saved_stock_sources(saved_source_links)
+    sec_data = await fetch_sec_company_facts(symbol)
+    if sec_data.get('status') == 'available' and sec_data.get('source_url'):
+        source_review.append({"title": sec_data.get('source_title') or "SEC Company Facts XBRL", "url": sec_data['source_url'], "status": "reviewed", "content_type": "application/json", "characters": len(json.dumps(sec_data.get('metrics', {}))), "truncated": False, "detail": sec_data.get('detail', '')})
     finnhub_data = await fetch_buffett_finnhub_data(symbol)
     source_text_budget = 30000
     source_documents_for_model = []
@@ -1508,8 +1614,9 @@ async def buffett_screen(data: BuffettScreenInput):
     names = {1:"Industry leader",2:"Cash-adjusted P/E at or below 5",3:"Dividend yield at least 6%",4:"Gross margin at least 60%",5:"Return on equity at least 20%",6:"Net profit margin at least 15%",7:"Asset-light; limited ongoing reinvestment required",8:"Durable products and independent pricing power through inflation",9:"Low debt and at least three-year cash survival under a severe revenue-drop scenario",10:"Widely recognized national brand",11:"Trustworthy management without a material record of misleading or exploiting shareholders",12:"Simple, focused core business",13:"Enduring demand with concentrated supply; frequent repeat purchase is favorable"}
     instructions = (
         "Use evidence in this exact order: (1) review the saved stock analysis; (2) review every fetched document from its cited source links; "
-        "(3) use provided Finnhub data to fill financial facts still missing, keeping its reported period and definitions clear; "
-        "(4) only then use web search for remaining gaps or conflicts. Do not search again for facts already supported by earlier evidence. "
+        "(3) use provided SEC Company Facts XBRL data for filed cash and short-term-investment facts; "
+        "(4) use provided Finnhub data to fill financial facts still missing, keeping its reported period and definitions clear; "
+        "(5) only then use web search for remaining gaps or conflicts. Do not search again for facts already supported by earlier evidence. "
         "If a saved source could not be fetched, try to open that exact URL before searching elsewhere. "
         "Do not treat Finnhub ratios as a substitute for the requested Buffett calculations when inputs are available; calculate ratios from statements. "
         "Use the latest 10-K for full-year results and the latest 10-Q for updates; compare ratios with prior years and peers. "
@@ -1587,8 +1694,9 @@ async def buffett_screen(data: BuffettScreenInput):
                 "saved_stock_analysis": saved_analysis,
                 "saved_source_documents": source_documents_for_model,
                 "saved_source_review": source_review,
+                "sec_company_facts": sec_data,
                 "finnhub_fundamentals": finnhub_data,
-                "instructions": "Review saved analysis and its sources first; use Finnhub to fill missing financial data; search only for remaining gaps.",
+                "instructions": "Review saved analysis and its sources first; use SEC Company Facts XBRL for filed cash facts, then Finnhub for remaining financial gaps; search only for remaining gaps.",
             }, ensure_ascii=False),
             text={"format": {"type": "json_schema", "name": "buffett_screen", "strict": True, "schema": response_schema}},
             max_output_tokens=4500, max_tool_calls=8, store=False,
@@ -1600,17 +1708,20 @@ async def buffett_screen(data: BuffettScreenInput):
         result = json.loads(raw[first_json:last_json + 1])
         metrics = result.get("metrics") if isinstance(result.get("metrics"), dict) else {}
         finnhub_filled_fields: list[str] = []
+        sec_filled_fields: list[str] = []
+        sec_values = sec_data.get("metrics", {}) if isinstance(sec_data.get("metrics"), dict) else {}
         finnhub_values = finnhub_data.get("metrics", {}) if isinstance(finnhub_data.get("metrics"), dict) else {}
         annual_facts = finnhub_data.get("annual_reports", []) if isinstance(finnhub_data.get("annual_reports"), list) else []
         latest_annual = annual_facts[0] if annual_facts and isinstance(annual_facts[0], dict) else {}
-        def fill_missing_metric(name: str, value: Any) -> None:
+        def fill_missing_metric(name: str, value: Any, filled_fields: list[str] | None = None) -> None:
             if value is None:
                 return
             existing = metrics.get(name)
             if existing is not None and str(existing).strip().lower() not in {"", "unavailable", "unknown", "n/a", "not available", "null"}:
                 return
             metrics[name] = value
-            finnhub_filled_fields.append(name)
+            (filled_fields if filled_fields is not None else finnhub_filled_fields).append(name)
+        fill_missing_metric("cash_and_short_term_investments_usd", sec_values.get("cash_and_short_term_investments_usd"), sec_filled_fields)
         api_fallbacks = {
             "market_cap_usd": finnhub_values.get("market_cap_usd"),
             "share_price_usd": finnhub_values.get("share_price_usd"),
@@ -1691,6 +1802,10 @@ async def buffett_screen(data: BuffettScreenInput):
                 "review_status": audit.get("status", "not reviewed"),
             })
         citation_urls = {item["url"] for item in citations}
+        sec_source_url = sec_data.get("source_url")
+        if sec_data.get("status") == "available" and isinstance(sec_source_url, str) and sec_source_url not in citation_urls:
+            citations.append({"title": str(sec_data.get("source_title") or "SEC Company Facts XBRL")[:300], "url": sec_source_url, "origin": "SEC Company Facts XBRL"})
+            citation_urls.add(sec_source_url)
         for source in finnhub_data.get("sources", []) if isinstance(finnhub_data.get("sources"), list) else []:
             if isinstance(source, dict) and source.get("url") not in citation_urls:
                 citations.append({"title": str(source.get("title") or source["url"])[:300], "url": source["url"], "origin": "Finnhub API"})
@@ -1726,6 +1841,14 @@ async def buffett_screen(data: BuffettScreenInput):
                 "rating_label": saved_analysis.get("rating_label") if saved_analysis else None,
             },
             "source_review": source_review,
+            "sec_data_status": {
+                "status": sec_data.get("status", "unavailable"),
+                "detail": sec_data.get("detail", ""),
+                "form": sec_data.get("form"),
+                "period_end": sec_data.get("period_end"),
+                "filed_date": sec_data.get("filed_date"),
+                "filled_fields": sec_filled_fields,
+            },
             "finnhub_data_status": {
                 "status": finnhub_data.get("status", "unavailable"),
                 "detail": finnhub_data.get("detail", ""),
