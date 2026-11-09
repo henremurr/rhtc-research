@@ -1121,3 +1121,10 @@ body.news-mode .workspace-toolbar-heading{gap:8px}
 .buffett-report-ticker:hover{color:#80652e;text-decoration:underline}
 :root[data-theme="dark"] .buffett-report-ticker{color:#d1dae4}
 :root[data-theme="dark"] .buffett-report-ticker:hover{color:#f0d78d}
+
+.buffett-report-nav-group{display:flex;align-items:center;gap:8px}
+.buffett-report-navigation button.buffett-delete-button,:root[data-theme="dark"] .buffett-report-navigation button.buffett-delete-button{border-color:#a94b4b;background:#fff7f6;color:#a33f3b}
+.buffett-report-navigation button.buffett-delete-all-button,:root[data-theme="dark"] .buffett-report-navigation button.buffett-delete-all-button{border-color:#8e3535;background:#a94442;color:#fff}
+.buffett-report-navigation button.buffett-delete-button:hover{background:#fae9e7}
+.buffett-report-navigation button.buffett-delete-all-button:hover{background:#8e3535}
+@media(max-width:520px){.buffett-report-navigation{flex-wrap:wrap}.buffett-report-nav-group{gap:5px}.buffett-report-navigation button{padding:6px 8px}}
