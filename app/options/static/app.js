@@ -389,16 +389,18 @@ async function analyzeSymbol(symbol){activeNewsStory=null;activeAnalysisCitation
     $('#analysis-mp3-btn').disabled=false;
   }catch(error){body.textContent=error.message.includes('OPENAI_API_KEY')?'ChatGPT analysis is not enabled on the server yet. Add OPENAI_API_KEY to Railway Variables, then redeploy.':error.message;status.textContent='Analysis unavailable';}
 }
-let activeBuffettReportSymbol='',activeBuffettReportOffset=0,activeBuffettReportCount=0;
+let activeBuffettReportSymbol='',activeBuffettReportOffset=0,activeBuffettReportCount=0,activeBuffettReportId=null;
 async function viewBuffettReports(symbol,offset=0){
   const modal=$('#buffett-report-modal'),status=$('#buffett-report-status');
-  activeBuffettReportSymbol=symbol;modal.classList.add('open');status.textContent='Loading saved Buffett report…';
+  activeBuffettReportSymbol=symbol;activeBuffettReportId=null;modal.classList.add('open');status.textContent='Loading saved Buffett report…';
+  $('#buffett-report-delete').disabled=true;$('#buffett-report-delete-all').disabled=true;
   $('#buffett-report-title').textContent=symbol+' · Buffett screen';
   $('#buffett-report-score').innerHTML='';$('#buffett-report-metrics').innerHTML='';$('#buffett-report-source-review').innerHTML='';$('#buffett-report-criteria').innerHTML='';$('#buffett-report-citations').innerHTML='';
   try{
     const response=await fetch('/options/api/buffett-screen/reports/'+encodeURIComponent(symbol)+'?offset='+encodeURIComponent(offset));
     const data=await response.json();if(!response.ok)throw Error(data.detail||'Saved Buffett report is unavailable.');
-    const report=data.report||{};activeBuffettReportOffset=Number(data.offset)||0;activeBuffettReportCount=Number(data.report_count)||0;
+    const report=data.report||{};activeBuffettReportOffset=Number(data.offset)||0;activeBuffettReportCount=Number(data.report_count)||0;activeBuffettReportId=Number(report.report_id)||null;
+    $('#buffett-report-delete').disabled=!activeBuffettReportId;$('#buffett-report-delete-all').disabled=activeBuffettReportCount<1;
     $('#buffett-report-meta').textContent='Report '+(activeBuffettReportOffset+1)+' of '+activeBuffettReportCount+' · '+newsTimestamp(report.created_at);
     const reportCriteria=report.criteria||[],criteriaPassed=reportCriteria.filter(item=>item.pass).length,criteriaTotal=Number(report.criteria_total)||reportCriteria.length||13;
     const scoreValue=Number(report.score_percent),scorePercent=Number.isFinite(scoreValue)?scoreValue:(criteriaPassed/criteriaTotal*100);
@@ -418,9 +420,36 @@ async function viewBuffettReports(symbol,offset=0){
     $('#buffett-report-citations').innerHTML=(report.citations||[]).map(cite=>'<li><a href="'+safe(cite.url)+'" target="_blank" rel="noopener noreferrer">'+safe(cite.title||cite.url)+'</a><small> · '+safe(cite.origin||'Source')+(cite.review_status?' · '+safe(cite.review_status):'')+'</small></li>').join('');
     $('#buffett-report-previous').disabled=activeBuffettReportOffset>=activeBuffettReportCount-1;
     $('#buffett-report-next').disabled=activeBuffettReportOffset<=0;status.textContent='';
-  }catch(error){status.textContent=error.message;$('#buffett-report-previous').disabled=true;$('#buffett-report-next').disabled=true}
+  }catch(error){status.textContent=error.message;$('#buffett-report-previous').disabled=true;$('#buffett-report-next').disabled=true;$('#buffett-report-delete').disabled=true;$('#buffett-report-delete-all').disabled=true}
 }
 function navigateBuffettReport(direction){if(!activeBuffettReportSymbol)return;const offset=activeBuffettReportOffset+direction;if(offset<0||offset>=activeBuffettReportCount)return;viewBuffettReports(activeBuffettReportSymbol,offset)}
+async function deleteBuffettReport(){
+  if(!activeBuffettReportSymbol||!activeBuffettReportId)return;
+  const symbol=activeBuffettReportSymbol,reportId=activeBuffettReportId;
+  if(!confirm('Delete this Buffett report for '+symbol+'? This cannot be undone.'))return;
+  const status=$('#buffett-report-status'),button=$('#buffett-report-delete');
+  button.disabled=true;status.textContent='Deleting Buffett report…';
+  try{
+    const response=await fetch('/options/api/buffett-screen/reports/'+encodeURIComponent(symbol)+'/'+encodeURIComponent(reportId),{method:'DELETE',credentials:'same-origin'});
+    const data=await response.json();if(!response.ok)throw Error(data.detail||'Could not delete the Buffett report.');
+    for(const row of state.watchlist||[])if(row.symbol===symbol)row.buffett_report_count=Number(data.report_count)||0;
+    if(Number(data.report_count)>0)await viewBuffettReports(symbol,Math.min(activeBuffettReportOffset,Number(data.report_count)-1));
+    else{closeBuffettReportViewer();toast('Deleted the Buffett report. No saved reports remain for '+symbol+'.');}
+  }catch(error){status.textContent=error.message;button.disabled=false}
+}
+async function deleteAllBuffettReports(){
+  if(!activeBuffettReportSymbol||activeBuffettReportCount<1)return;
+  const symbol=activeBuffettReportSymbol;
+  if(!confirm('Delete all '+activeBuffettReportCount+' Buffett reports for '+symbol+'? This cannot be undone.'))return;
+  const status=$('#buffett-report-status'),button=$('#buffett-report-delete-all');
+  button.disabled=true;status.textContent='Deleting all Buffett reports…';
+  try{
+    const response=await fetch('/options/api/buffett-screen/reports/'+encodeURIComponent(symbol),{method:'DELETE',credentials:'same-origin'});
+    const data=await response.json();if(!response.ok)throw Error(data.detail||'Could not delete Buffett reports.');
+    for(const row of state.watchlist||[])if(row.symbol===symbol)row.buffett_report_count=0;
+    closeBuffettReportViewer();toast('Deleted '+(Number(data.deleted_count)||0)+' Buffett reports for '+symbol+'.');
+  }catch(error){status.textContent=error.message;button.disabled=false}
+}
 function closeBuffettReportViewer(){$('#buffett-report-modal').classList.remove('open')}
 
 let activeStockReportSymbol='',activeStockReportOffset=0,activeStockReportCount=0;
