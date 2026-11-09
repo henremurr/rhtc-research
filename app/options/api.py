@@ -1721,7 +1721,12 @@ async def buffett_screen(data: BuffettScreenInput):
                 return
             metrics[name] = value
             (filled_fields if filled_fields is not None else finnhub_filled_fields).append(name)
-        fill_missing_metric("cash_and_short_term_investments_usd", sec_values.get("cash_and_short_term_investments_usd"), sec_filled_fields)
+        sec_cash_value = _finnhub_finite_number(sec_values.get("cash_and_short_term_investments_usd"))
+        if sec_cash_value is not None:
+            existing_cash_value = _finnhub_finite_number(metrics.get("cash_and_short_term_investments_usd"))
+            if existing_cash_value is None or not math.isclose(existing_cash_value, sec_cash_value, rel_tol=0.000001, abs_tol=0.5):
+                sec_filled_fields.append("cash_and_short_term_investments_usd")
+            metrics["cash_and_short_term_investments_usd"] = sec_cash_value
         api_fallbacks = {
             "market_cap_usd": finnhub_values.get("market_cap_usd"),
             "share_price_usd": finnhub_values.get("share_price_usd"),
