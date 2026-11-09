@@ -578,7 +578,7 @@ _SEC_CIK_MAP_LOCK = asyncio.Lock()
 
 
 async def fetch_sec_company_facts(symbol: str) -> dict[str, Any]:
-    """Fetch recent cash and short-term-investment facts from the SEC's official XBRL API."""
+    """Fetch filed balance-sheet, income-statement, and cash-flow facts from SEC XBRL."""
     global _SEC_CIK_MAP_CACHE
     symbol = symbol.strip().upper()
     now = time.monotonic()
@@ -614,61 +614,139 @@ async def fetch_sec_company_facts(symbol: str) -> dict[str, Any]:
             response = await client.get(source_url)
             response.raise_for_status()
             company = response.json()
+
         us_gaap = company.get("facts", {}).get("us-gaap", {})
-        allowed_forms = {"10-K", "10-Q", "20-F", "40-F"}
-        def latest_instant(tag: str) -> dict[str, Any] | None:
-            unit_data = us_gaap.get(tag, {}).get("units", {})
-            observations = unit_data.get("USD", []) if isinstance(unit_data, dict) else []
-            valid = [
-                item for item in observations
-                if isinstance(item, dict) and item.get("form") in allowed_forms and item.get("end") and "start" not in item
-                and _finnhub_finite_number(item.get("val")) is not None
-            ]
-            return max(valid, key=lambda item: (str(item.get("end") or ""), str(item.get("filed") or "")), default=None)
-        cash_fact = latest_instant("CashAndCashEquivalentsAtCarryingValue")
-        combined_fact = latest_instant("CashCashEquivalentsAndShortTermInvestments")
-        if not cash_fact and combined_fact:
-            selected = combined_fact
-            cash_value = _finnhub_finite_number(selected.get("val"))
-            short_value = None
-            total_cash = cash_value
-            cash_basis = "cash, cash equivalents, and short-term investments (reported combined)"
-        elif cash_fact:
-            selected = cash_fact
-            cash_value = _finnhub_finite_number(cash_fact.get("val"))
-            investment_fact = None
-            for tag in ("ShortTermInvestments", "AvailableForSaleSecuritiesCurrent", "MarketableSecuritiesCurrent"):
-                candidate = latest_instant(tag)
-                if candidate and candidate.get("end") == cash_fact.get("end"):
-                    investment_fact = candidate
-                    break
-            short_value = _finnhub_finite_number(investment_fact.get("val")) if investment_fact else None
-            total_cash = (cash_value or 0) + (short_value or 0)
-            cash_basis = "cash and cash equivalents" + (" plus short-term investments" if short_value is not None else "; no same-period short-term-investment fact reported")
-        else:
-            selected = None
-            cash_value = short_value = total_cash = None
-            cash_basis = ""
-        if selected is None or total_cash is None:
+        annual_forms = {"10-K", "20-F", "40-F"}
+        filed_forms = annual_forms | {"10-Q"}
+
+        def usd_facts(tag: str) -> list[dict[str, Any]]:
+            units = us_gaap.get(tag, {}).get("units", {})
+            rows = units.get("USD", []) if isinstance(units, dict) else []
+            return [item for item in rows if isinstance(item, dict) and _finnhub_finite_number(item.get("val")) is not None]
+
+        def latest_instant(*tags: str, end_date: str | None = None) -> tuple[str | None, dict[str, Any] | None]:
+            choices: list[tuple[str, dict[str, Any]]] = []
+            for tag in tags:
+                for item in usd_facts(tag):
+                    if item.get("form") not in filed_forms or not item.get("end") or item.get("start"):
+                        continue
+                    if end_date and item.get("end") != end_date:
+                        continue
+                    choices.append((tag, item))
+            if not choices:
+                return None, None
+            return max(choices, key=lambda pair: (str(pair[1].get("end") or ""), str(pair[1].get("filed") or ""), str(pair[1].get("accn") or "")))
+
+        def annual_facts(*tags: str) -> list[tuple[str, dict[str, Any]]]:
+            by_period: dict[str, tuple[str, dict[str, Any]]] = {}
+            for tag in tags:
+                for item in usd_facts(tag):
+                    if item.get("form") not in annual_forms or not item.get("start") or not item.get("end"):
+                        continue
+                    try:
+                        duration = (date.fromisoformat(item["end"]) - date.fromisoformat(item["start"])).days
+                    except (TypeError, ValueError):
+                        continue
+                    if not 300 <= duration <= 430:
+                        continue
+                    period = str(item["end"])
+                    candidate = (tag, item)
+                    prior = by_period.get(period)
+                    if prior is None or (str(item.get("filed") or ""), str(item.get("accn") or "")) > (str(prior[1].get("filed") or ""), str(prior[1].get("accn") or "")):
+                        by_period[period] = candidate
+            return sorted(by_period.values(), key=lambda pair: (str(pair[1].get("end") or ""), str(pair[1].get("filed") or "")), reverse=True)
+
+        def annual_value(*tags: str) -> tuple[float | None, dict[str, Any] | None]:
+            rows = annual_facts(*tags)
+            return (_finnhub_finite_number(rows[0][1].get("val")), rows[0][1]) if rows else (None, None)
+
+        cash_tag, cash_fact = latest_instant("CashAndCashEquivalentsAtCarryingValue", "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents")
+        combined_tag, combined_fact = latest_instant("CashCashEquivalentsAndShortTermInvestments")
+        selected = combined_fact if combined_fact and (not cash_fact or combined_fact.get("end") >= cash_fact.get("end")) else cash_fact
+        selected_tag = combined_tag if selected is combined_fact else cash_tag
+        if not selected:
             result = {"status": "unavailable", "detail": "No current SEC XBRL cash fact was found.", "metrics": {}, "source_url": source_url}
-        else:
-            metrics = {
-                "cash_and_short_term_investments_usd": total_cash,
-                "cash_and_cash_equivalents_usd": cash_value,
-                "short_term_investments_usd": short_value,
-            }
-            result = {
-                "status": "available",
-                "detail": f"{cash_basis}; period ended {selected.get('end')}, filed {selected.get('filed')}, form {selected.get('form')}.",
-                "form": selected.get("form"),
-                "period_end": selected.get("end"),
-                "filed_date": selected.get("filed"),
-                "metrics": metrics,
-                "source_url": source_url,
-                "source_title": f"SEC Company Facts XBRL · {selected.get('form')} filed {selected.get('filed')}",
-                "cash_fact_tag": "CashCashEquivalentsAndShortTermInvestments" if cash_fact is None else "CashAndCashEquivalentsAtCarryingValue",
-                "investment_fact_tag": next((tag for tag in ("ShortTermInvestments", "AvailableForSaleSecuritiesCurrent", "MarketableSecuritiesCurrent") if latest_instant(tag) and latest_instant(tag).get("end") == selected.get("end")), None) if cash_fact else None,
-            }
+            _SEC_FACT_CACHE[cache_key] = (now, result)
+            return result.copy()
+
+        period_end = str(selected.get("end"))
+        cash_value = _finnhub_finite_number(selected.get("val"))
+        short_value = None
+        if selected_tag != "CashCashEquivalentsAndShortTermInvestments":
+            _, investment_fact = latest_instant("ShortTermInvestments", "AvailableForSaleSecuritiesCurrent", "MarketableSecuritiesCurrent", end_date=period_end)
+            short_value = _finnhub_finite_number(investment_fact.get("val")) if investment_fact else None
+        total_cash = (cash_value or 0) + (short_value or 0)
+
+        def same_period_value(*tags: str) -> float | None:
+            _, fact = latest_instant(*tags, end_date=period_end)
+            return _finnhub_finite_number(fact.get("val")) if fact else None
+
+        current_debt = same_period_value("LongTermDebtCurrent", "ShortTermBorrowings", "ShortTermDebtCurrent")
+        noncurrent_debt = same_period_value("LongTermDebtNoncurrent", "LongTermDebtAndFinanceLeaseObligationsNoncurrent")
+        debt = sum(value for value in (current_debt, noncurrent_debt) if value is not None) if current_debt is not None or noncurrent_debt is not None else None
+        equity = same_period_value("StockholdersEquity", "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest")
+
+        revenue, revenue_fact = annual_value("RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "SalesRevenueNet")
+        gross_profit, _ = annual_value("GrossProfit")
+        net_income, net_income_fact = annual_value("NetIncomeLoss", "ProfitLoss")
+        operating_cash_flow, _ = annual_value("NetCashProvidedByUsedInOperatingActivities", "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations")
+        capex, _ = annual_value("PaymentsToAcquirePropertyPlantAndEquipment", "PaymentsForPropertyPlantAndEquipment", "PaymentsToAcquireProductiveAssets")
+        capex = abs(capex) if capex is not None else None
+        free_cash_flow = operating_cash_flow - capex if operating_cash_flow is not None and capex is not None else None
+
+        income_history = [
+            _finnhub_finite_number(item.get("val"))
+            for _, item in annual_facts("NetIncomeLoss", "ProfitLoss")[:5]
+        ]
+        income_history = [value for value in income_history if value is not None]
+        normalized_income = None
+        if income_history:
+            ordered_income = sorted(income_history)
+            middle = len(ordered_income) // 2
+            normalized_income = ordered_income[middle] if len(ordered_income) % 2 else (ordered_income[middle - 1] + ordered_income[middle]) / 2
+
+        equity_history = annual_facts("StockholdersEquity", "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest")
+        equity_values = [_finnhub_finite_number(item.get("val")) for _, item in equity_history[:2]]
+        equity_values = [value for value in equity_values if value is not None]
+        average_equity = sum(equity_values) / len(equity_values) if equity_values else equity
+        annual_dividends, _ = annual_value("PaymentsOfDividendsCommonStock", "PaymentsOfDividends")
+        shares_tag, shares_fact = latest_instant("CommonStocksIncludingAdditionalPaidInCapitalMember", end_date=period_end)
+        del shares_tag, shares_fact
+
+        metrics = {
+            "cash_and_short_term_investments_usd": total_cash,
+            "cash_and_cash_equivalents_usd": cash_value,
+            "short_term_investments_usd": short_value,
+            "total_interest_bearing_debt_usd": debt,
+            "normalized_annual_net_income_usd": normalized_income,
+            "gross_margin_percent": gross_profit / revenue * 100 if gross_profit is not None and revenue else None,
+            "return_on_equity_percent": net_income / average_equity * 100 if net_income is not None and average_equity else None,
+            "net_profit_margin_percent": net_income / revenue * 100 if net_income is not None and revenue else None,
+            "revenue_usd": revenue,
+            "gross_profit_usd": gross_profit,
+            "net_income_usd": net_income,
+            "shareholders_equity_usd": equity,
+            "operating_cash_flow_usd": operating_cash_flow,
+            "capital_expenditures_usd": capex,
+            "free_cash_flow_usd": free_cash_flow,
+            "annual_dividends_paid_usd": abs(annual_dividends) if annual_dividends is not None else None,
+        }
+        available_fields = [name for name, value in metrics.items() if value is not None]
+        latest_annual_fact = revenue_fact or net_income_fact
+        cash_basis = "cash and cash equivalents" + (" plus short-term investments" if short_value is not None else "; no same-period short-term-investment fact reported")
+        result = {
+            "status": "available",
+            "detail": f"{cash_basis}; extracted {len(available_fields)} filed fields; balance-sheet period {period_end}, filed {selected.get('filed')}, form {selected.get('form')}.",
+            "form": selected.get("form"),
+            "period_end": period_end,
+            "filed_date": selected.get("filed"),
+            "annual_period_end": latest_annual_fact.get("end") if latest_annual_fact else None,
+            "metrics": metrics,
+            "available_fields": available_fields,
+            "source_url": source_url,
+            "source_title": f"SEC Company Facts XBRL · {selected.get('form')} filed {selected.get('filed')}",
+            "cash_fact_tag": selected_tag,
+        }
         _SEC_FACT_CACHE[cache_key] = (now, result)
         return result.copy()
     except Exception as exc:
@@ -1721,12 +1799,28 @@ async def buffett_screen(data: BuffettScreenInput):
                 return
             metrics[name] = value
             (filled_fields if filled_fields is not None else finnhub_filled_fields).append(name)
-        sec_cash_value = _finnhub_finite_number(sec_values.get("cash_and_short_term_investments_usd"))
-        if sec_cash_value is not None:
-            existing_cash_value = _finnhub_finite_number(metrics.get("cash_and_short_term_investments_usd"))
-            if existing_cash_value is None or not math.isclose(existing_cash_value, sec_cash_value, rel_tol=0.000001, abs_tol=0.5):
-                sec_filled_fields.append("cash_and_short_term_investments_usd")
-            metrics["cash_and_short_term_investments_usd"] = sec_cash_value
+        sec_priority_fields = (
+            "cash_and_short_term_investments_usd",
+            "total_interest_bearing_debt_usd",
+            "normalized_annual_net_income_usd",
+            "gross_margin_percent",
+            "return_on_equity_percent",
+            "net_profit_margin_percent",
+        )
+        for metric_name in sec_priority_fields:
+            sec_value = _finnhub_finite_number(sec_values.get(metric_name))
+            if sec_value is None:
+                continue
+            existing_value = _finnhub_finite_number(metrics.get(metric_name))
+            if existing_value is None or not math.isclose(existing_value, sec_value, rel_tol=0.000001, abs_tol=0.5):
+                sec_filled_fields.append(metric_name)
+            metrics[metric_name] = sec_value
+        sec_dividends_paid = _finnhub_finite_number(sec_values.get("annual_dividends_paid_usd"))
+        if sec_dividends_paid and sec_dividends_paid > 0:
+            sec_net_income = _finnhub_finite_number(sec_values.get("net_income_usd"))
+            sec_free_cash_flow = _finnhub_finite_number(sec_values.get("free_cash_flow_usd"))
+            fill_missing_metric("dividend_coverage_earnings", sec_net_income / sec_dividends_paid if sec_net_income is not None else None, sec_filled_fields)
+            fill_missing_metric("dividend_coverage_free_cash_flow", sec_free_cash_flow / sec_dividends_paid if sec_free_cash_flow is not None else None, sec_filled_fields)
         api_fallbacks = {
             "market_cap_usd": finnhub_values.get("market_cap_usd"),
             "share_price_usd": finnhub_values.get("share_price_usd"),
@@ -1852,6 +1946,8 @@ async def buffett_screen(data: BuffettScreenInput):
                 "form": sec_data.get("form"),
                 "period_end": sec_data.get("period_end"),
                 "filed_date": sec_data.get("filed_date"),
+                "annual_period_end": sec_data.get("annual_period_end"),
+                "available_fields": sec_data.get("available_fields", []),
                 "filled_fields": sec_filled_fields,
             },
             "finnhub_data_status": {
