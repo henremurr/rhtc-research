@@ -1772,8 +1772,9 @@ async def buffett_screen(data: BuffettScreenInput):
         "12 simple focused core business: assess segment revenue/profit, products, customers, and clarity of competitive position. "
         "13 enduring repeat demand and few competitors: assess purchase frequency, retention, recurring revenue, concentration, market shares, and barriers to entry; account for health, regulatory, and reputation risks. "
         "Return exactly 13 criterion objects and all requested metric fields. Keep each evidence field to one concise sentence under 160 characters. "
-        "For criteria 3, 4, 5, 6, and 9, criterion pass must also reflect the stated quality checks, not merely the numeric threshold. "
-        "The server independently computes criteria 2-6 thresholds and the three-year runway in criterion 9; missing inputs fail."
+        "Grade every criterion from 0 to 4: 0 absent or seriously deficient, 1 weak, 2 mixed/adequate, 3 strong, 4 fully meets Buffett's demanding standard. "
+        "Set pass true only for a score of 4. For criteria 3, 4, 5, 6, and 9, the score must reflect the stated quality checks, not merely the numeric threshold. "
+        "The server independently grades criteria 2-6 thresholds and the three-year runway in criterion 9."
     )
     try:
         from openai import AsyncOpenAI
@@ -1803,9 +1804,10 @@ async def buffett_screen(data: BuffettScreenInput):
                         "properties": {
                             "id": {"type": "integer"},
                             "pass": {"type": "boolean"},
+                            "score": {"type": "integer", "minimum": 0, "maximum": 4},
                             "evidence": {"type": "string"},
                         },
-                        "required": ["id", "pass", "evidence"],
+                        "required": ["id", "pass", "score", "evidence"],
                         "additionalProperties": False,
                     },
                 },
@@ -1947,7 +1949,20 @@ async def buffett_screen(data: BuffettScreenInput):
             if isinstance(item, dict):
                 try: by_id[int(item.get("id"))] = item
                 except (TypeError, ValueError): pass
-        criteria = [{"id":i,"name":name,"pass":by_id.get(i,{}).get("pass") is True,"evidence":str(by_id.get(i,{}).get("evidence") or "No verifiable evidence returned; counted as fail.")[:1200]} for i,name in names.items()]
+        criteria = []
+        for i, name in names.items():
+            source_item = by_id.get(i, {})
+            try:
+                criterion_score = max(0, min(4, int(source_item.get("score", 4 if source_item.get("pass") is True else 0))))
+            except (TypeError, ValueError):
+                criterion_score = 0
+            criteria.append({
+                "id": i,
+                "name": name,
+                "score": criterion_score,
+                "pass": criterion_score == 4,
+                "evidence": str(source_item.get("evidence") or "No verifiable evidence returned; scored 0.")[:1200],
+            })
         def number(key_name):
             try:
                 n=float(metrics.get(key_name))
@@ -1963,7 +1978,7 @@ async def buffett_screen(data: BuffettScreenInput):
         excess_cash = cash - debt - operating_cash if cash is not None and debt is not None and operating_cash is not None else None
         pe = (cap-excess_cash)/income if cap is not None and excess_cash is not None and income is not None and income>0 else None
         runway_years = cash_runway/annual_needs if cash_runway is not None and annual_needs is not None and annual_needs>0 else None
-        contextual = {item["id"]:item["pass"] for item in criteria}
+        contextual = {item["id"]: item["pass"] for item in criteria}
         if income is not None and income <= 0:
             pe_evidence = f"Normalized annual net income is negative ({income:,.0f}); cash-adjusted P/E is not meaningful."
         else:
@@ -1992,20 +2007,42 @@ async def buffett_screen(data: BuffettScreenInput):
             if runway_years is not None
             else "Severe-drop cash runway could not be calculated from filed cash flow and cash balances."
         )
+        pe_score = 4 if pe is not None and pe <= 5 else 3 if pe is not None and pe <= 10 else 2 if pe is not None and pe <= 20 else 1 if pe is not None and pe <= 30 else 0
+        dividend_score = 4 if dy is not None and dy >= 6 and dividend_earnings_cover is not None and dividend_earnings_cover >= 1 and dividend_fcf_cover is not None and dividend_fcf_cover >= 1 and contextual.get(3, False) else 3 if dy is not None and dy >= 4 else 2 if dy is not None and dy >= 2 else 1 if dy is not None and dy > 0 else 0
+        gross_margin_score = 4 if gm is not None and gm >= 60 and contextual.get(4, False) else 3 if gm is not None and gm >= 50 else 2 if gm is not None and gm >= 35 else 1 if gm is not None and gm >= 20 else 0
+        roe_score = 4 if roe is not None and roe >= 20 and contextual.get(5, False) else 3 if roe is not None and roe >= 15 else 2 if roe is not None and roe >= 10 else 1 if roe is not None and roe > 0 else 0
+        margin_score = 4 if nm is not None and nm >= 15 and contextual.get(6, False) else 3 if nm is not None and nm >= 10 else 2 if nm is not None and nm >= 5 else 1 if nm is not None and nm > 0 else 0
+        runway_score = 4 if runway_years is not None and runway_years >= 3 and contextual.get(9, False) else 3 if runway_years is not None and runway_years >= 2 else 2 if runway_years is not None and runway_years >= 1 else 1 if runway_years is not None and runway_years > 0 else 0
         computed = {
-            2:(pe is not None and pe<=5, pe_evidence),
-            3:(dy is not None and dy>=6 and dividend_earnings_cover is not None and dividend_earnings_cover>=1 and dividend_fcf_cover is not None and dividend_fcf_cover>=1 and contextual.get(3,False), dividend_evidence),
-            4:(gm is not None and gm>=60 and contextual.get(4,False), f"Gross margin {gm:.2f}%; five-year trend and peer check also required." if gm is not None else "Gross margin unavailable."),
-            5:(roe is not None and roe>=20 and contextual.get(5,False), f"ROE {roe:.2f}%; average equity and leverage/buyback checks also required." if roe is not None else "ROE unavailable."),
-            6:(nm is not None and nm>=15 and contextual.get(6,False), f"GAAP net margin {nm:.2f}%; unusual items and multi-year trend also checked." if nm is not None else "GAAP net margin unavailable."),
-            9:(runway_years is not None and runway_years>=3 and contextual.get(9,False), runway_evidence),
+            2: (pe_score, pe_evidence),
+            3: (dividend_score, dividend_evidence),
+            4: (gross_margin_score, f"Gross margin {gm:.2f}%; five-year trend and peer check also required." if gm is not None else "Gross margin unavailable."),
+            5: (roe_score, f"ROE {roe:.2f}%; average equity and leverage/buyback checks also required." if roe is not None else "ROE unavailable."),
+            6: (margin_score, f"GAAP net margin {nm:.2f}%; unusual items and multi-year trend also checked." if nm is not None else "GAAP net margin unavailable."),
+            9: (runway_score, runway_evidence),
         }
         for item in criteria:
-            if item["id"] in computed: item["pass"], item["evidence"] = computed[item["id"]]
-        criteria_passed = sum(1 for item in criteria if item["pass"])
+            if item["id"] in computed:
+                item["score"], item["evidence"] = computed[item["id"]]
+            item["pass"] = item["score"] == 4
+
+        criterion_weights = {1:8, 2:12, 3:6, 4:8, 5:8, 6:8, 7:10, 8:8, 9:10, 10:5, 11:7, 12:5, 13:5}
+        weighted_points = sum((item["score"] / 4) * criterion_weights[item["id"]] for item in criteria)
+        score_percent = round(weighted_points, 1)
+        criteria_passed = sum(1 for item in criteria if item["score"] == 4)
         criteria_total = len(criteria)
-        score_percent = round((criteria_passed / criteria_total) * 100, 1) if criteria_total else 0.0
-        passed = int(criteria_total > 0 and criteria_passed == criteria_total)
+        if score_percent < 25:
+            rating_label = "Avoid"
+        elif score_percent < 45:
+            rating_label = "Sell"
+        elif score_percent < 65:
+            rating_label = "Watch"
+        elif score_percent < 80:
+            rating_label = "Buy"
+        else:
+            rating_label = "Bargain" if pe_score >= 3 else "Buy"
+        passed = int(rating_label in {"Buy", "Bargain"})
+
         citations = []
         for link in saved_source_links:
             audit = source_review_by_url.get(link["url"], {})
@@ -2041,6 +2078,9 @@ async def buffett_screen(data: BuffettScreenInput):
         stored={
             "buffett_pass":passed,
             "score_percent":score_percent,
+            "rating_label":rating_label,
+            "scoring_scale":"0-4 per criterion; weighted total out of 100",
+            "criterion_weights":criterion_weights,
             "criteria_passed":criteria_passed,
             "criteria_total":criteria_total,
             "buffett_updated_at":updated_at,
