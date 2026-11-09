@@ -1761,6 +1761,63 @@ async def get_buffett_screen_report(symbol: str, offset: int = Query(default=0, 
     return {"symbol": symbol, "report_count": count, "offset": offset, "report": report}
 
 
+
+@app.delete("/api/buffett-screen/reports/{symbol}/{report_id}")
+async def delete_buffett_screen_report(symbol: str, report_id: int):
+    symbol = symbol.strip().upper()
+    if not SYMBOL_PATTERN.fullmatch(symbol):
+        raise HTTPException(400, "Enter a valid ticker symbol.")
+    with closing(connect_watchlist_db()) as connection:
+        existing = connection.execute(
+            "SELECT report_id FROM buffett_screen_reports WHERE symbol = ? AND report_id = ?",
+            (symbol, report_id),
+        ).fetchone()
+        if not existing:
+            raise HTTPException(404, f"Buffett report {report_id} does not exist for {symbol}.")
+        connection.execute(
+            "DELETE FROM buffett_screen_reports WHERE symbol = ? AND report_id = ?",
+            (symbol, report_id),
+        )
+        latest = connection.execute(
+            "SELECT created_at, buffett_pass, buffett_score, report_json FROM buffett_screen_reports "
+            "WHERE symbol = ? ORDER BY created_at DESC, report_id DESC LIMIT 1",
+            (symbol,),
+        ).fetchone()
+        if latest:
+            connection.execute(
+                "UPDATE symbols SET buffett_pass = ?, buffett_score = ?, buffett_updated_at = ?, buffett_criteria_json = ? WHERE symbol = ?",
+                (latest["buffett_pass"], latest["buffett_score"], latest["created_at"], latest["report_json"], symbol),
+            )
+        else:
+            connection.execute(
+                "UPDATE symbols SET buffett_pass = NULL, buffett_score = NULL, buffett_updated_at = NULL, buffett_criteria_json = NULL WHERE symbol = ?",
+                (symbol,),
+            )
+        count = int(connection.execute(
+            "SELECT COUNT(*) FROM buffett_screen_reports WHERE symbol = ?",
+            (symbol,),
+        ).fetchone()[0])
+        connection.commit()
+    return {"symbol": symbol, "deleted_count": 1, "report_count": count}
+
+
+@app.delete("/api/buffett-screen/reports/{symbol}")
+async def delete_all_buffett_screen_reports(symbol: str):
+    symbol = symbol.strip().upper()
+    if not SYMBOL_PATTERN.fullmatch(symbol):
+        raise HTTPException(400, "Enter a valid ticker symbol.")
+    with closing(connect_watchlist_db()) as connection:
+        deleted = connection.execute(
+            "DELETE FROM buffett_screen_reports WHERE symbol = ?",
+            (symbol,),
+        ).rowcount
+        connection.execute(
+            "UPDATE symbols SET buffett_pass = NULL, buffett_score = NULL, buffett_updated_at = NULL, buffett_criteria_json = NULL WHERE symbol = ?",
+            (symbol,),
+        )
+        connection.commit()
+    return {"symbol": symbol, "deleted_count": int(deleted or 0), "report_count": 0}
+
 @app.get("/api/opportunities")
 async def opportunities(
     peak: str = "All Peaks", q: str = "", sort: str = "income", account: str | None = None,
