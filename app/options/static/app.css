@@ -1112,3 +1112,6 @@ body.news-mode .workspace-toolbar-heading{gap:8px}
 .buffett-source-review-item{color:inherit;text-decoration:none;cursor:pointer;transition:border-color .15s ease,background .15s ease}.buffett-source-review-item:hover{border-color:#c7a75e;background:#fbfaf7}.buffett-source-link-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#536b8b;text-decoration:underline}:root[data-theme="dark"] .buffett-source-review-item:hover{background:#273444}.buffett-source-review-item .buffett-source-link-title{color:#536b8b}:root[data-theme="dark"] .buffett-source-review-item .buffett-source-link-title{color:#c7d6eb}
 
 .buffett-overall-score.score{background:#f7f0df;color:#8a651d}:root[data-theme="dark"] .buffett-overall-score.score{background:#3b3323;color:#f2d28a}
+
+:root[data-theme="dark"] .buffett-screen-controls{background:#202b36;border-color:#394654;color:#c4ced8}
+:root[data-theme="dark"] .buffett-screen-controls .buffett-status{color:#d1dae4}
