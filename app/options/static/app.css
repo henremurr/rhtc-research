@@ -732,7 +732,7 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 .symbol-add-form label:last-of-type input {width:3.5ch;max-width:3.5ch}
 .symbol-add-form label {letter-spacing:0}
 .symbol-add-form input,.symbol-add-form select {padding:0 3px}
-.symbol-entry:not(.editing) {grid-template-columns:30px 3.5ch minmax(0,1fr) 30px!important}
+.symbol-entry:not(.editing) {grid-template-columns:30px 3.5ch 5ch minmax(0,1fr) 30px!important}
 .symbol-entry:not(.editing) .symbol-description {
   grid-template-columns:minmax(0,.42fr) minmax(0,.92fr) minmax(0,.88fr) minmax(0,1.02fr) minmax(0,.92fr) minmax(0,.68fr) minmax(0,.82fr);
   gap:clamp(2px,.35vw,5px);
@@ -746,6 +746,18 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
   text-overflow:ellipsis;
 }
 .symbol-entry:not(.editing)>.symbol-pg-details {width:3.5ch}
+.symbol-buffett-score {
+  display:block;
+  width:5ch;
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:#8a6b19;
+  font:700 12px var(--mono);
+  text-align:right;
+}
+:root[data-theme="dark"] .symbol-buffett-score {color:#e6c85f}
 .symbol-entry.editing {
   grid-template-columns:minmax(0,.62fr) minmax(0,1.04fr) minmax(0,.76fr) minmax(0,.7fr) minmax(0,1.02fr) minmax(0,.72fr) minmax(0,.62fr) minmax(0,.64fr) minmax(0,.9fr) 3.5ch 38px 42px;
   gap:clamp(2px,.3vw,4px);
