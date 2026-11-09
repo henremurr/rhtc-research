@@ -2136,6 +2136,17 @@ async def buffett_screen(data: BuffettScreenInput):
         raise HTTPException(502,f"Buffett research failed for {symbol}: {str(exc)[:400]}") from exc
 
 
+@app.delete("/api/buffett-screen/reports")
+async def purge_all_buffett_screen_reports():
+    with closing(connect_watchlist_db()) as connection:
+        deleted = connection.execute("DELETE FROM buffett_screen_reports").rowcount
+        connection.execute(
+            "UPDATE symbols SET buffett_pass = NULL, buffett_score = NULL, buffett_updated_at = NULL, buffett_criteria_json = NULL"
+        )
+        connection.commit()
+    return {"deleted_count": int(deleted or 0), "report_count": 0}
+
+
 @app.get("/api/buffett-screen/reports/{symbol}")
 async def get_buffett_screen_report(symbol: str, offset: int = Query(default=0, ge=0)):
     symbol = symbol.strip().upper()
