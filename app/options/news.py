@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import hashlib
 import re
 import unicodedata
 import logging
@@ -58,6 +59,14 @@ class NewsDeleteInput(BaseModel):
 
 class NewsUrlInput(BaseModel):
     url: str = Field(min_length=8, max_length=2000)
+
+
+class NewsContentInput(BaseModel):
+    content: str = Field(min_length=20, max_length=50000)
+    title: str = Field(default="", max_length=500)
+    source: str = Field(default="", max_length=200)
+    published_at: str = Field(default="", max_length=80)
+    url: str = Field(default="", max_length=2000)
 
 
 NEWS_PEAKS = {"AI/I", "EFM/I", "DS/I", "Cross-Peak", "Other"}
@@ -168,6 +177,7 @@ def connect_db() -> sqlite3.Connection:
         ("x_post_id", "TEXT NOT NULL DEFAULT ''"),
         ("x_post_url", "TEXT NOT NULL DEFAULT ''"),
         ("x_published_at", "TEXT NOT NULL DEFAULT ''"),
+        ("story_content", "TEXT NOT NULL DEFAULT ''"),
     ):
         if column not in existing_columns:
             connection.execute(f"ALTER TABLE news_items ADD COLUMN {column} {declaration}")
@@ -287,6 +297,72 @@ def _normalized_published_at(value: str) -> str:
     except ValueError:
         match = re.search(r"\d{4}-\d{2}-\d{2}", candidate)
         return match.group(0) if match else ""
+
+
+
+def _infer_story_source(content: str) -> str:
+    sample = content[:1200]
+    providers = (
+        ("Reuters", r"\bReuters\b"),
+        ("Associated Press", r"\bAssociated Press\b|\bAP News\b"),
+        ("Bloomberg", r"\bBloomberg\b"),
+        ("CNBC", r"\bCNBC\b"),
+        ("The Wall Street Journal", r"\bWall Street Journal\b"),
+        ("Financial Times", r"\bFinancial Times\b"),
+        ("The New York Times", r"\bNew York Times\b"),
+        ("BBC", r"\bBBC\b"),
+    )
+    for label, pattern in providers:
+        if re.search(pattern, sample, re.IGNORECASE):
+            return label
+    return "Pasted story"
+
+
+def _infer_story_date(content: str) -> str:
+    sample = content[:1600]
+    iso_match = re.search(r"\b(20\d{2}-\d{2}-\d{2})\b", sample)
+    if iso_match:
+        return iso_match.group(1)
+    month_match = re.search(
+        r"\b(January|February|March|April|May|June|July|August|September|October|November|December)"
+        r"\s+(\d{1,2}),?\s+(20\d{2})\b",
+        sample,
+        re.IGNORECASE,
+    )
+    if month_match:
+        try:
+            return datetime.strptime(" ".join(month_match.groups()), "%B %d %Y").date().isoformat()
+        except ValueError:
+            pass
+    return ""
+
+
+def pasted_story_record(data: NewsContentInput, seen_at: str) -> dict[str, str]:
+    content = data.content.strip()
+    lines = [line.strip() for line in content.splitlines() if line.strip()]
+    supplied_url = canonical_news_url(data.url) if data.url.strip() else ""
+    digest = hashlib.sha256(re.sub(r"\s+", " ", content).encode("utf-8")).hexdigest()
+    internal_url = f"https://manual.rhtc.invalid/story/{digest[:32]}"
+    title = data.title.strip() or (lines[0] if lines else "Pasted news story")
+    title = re.sub(r"^(?:headline|title)\s*:\s*", "", title, flags=re.IGNORECASE).strip()[:500]
+    if not title:
+        title = "Pasted news story"
+    source = data.source.strip()[:200]
+    if not source and supplied_url:
+        source = (urlparse(supplied_url).hostname or "").removeprefix("www.")[:200]
+    if not source:
+        source = _infer_story_source(content)
+    published_at = _normalized_published_at(data.published_at) or _infer_story_date(content)
+    return {
+        "url": (supplied_url or internal_url)[:2000],
+        "title": title,
+        "source": source,
+        "published_at": published_at,
+        "snippet": content[:3000],
+        "story_content": content,
+        "peak": classify_peak(title, content),
+        "seen_at": seen_at,
+    }
 
 
 async def fetch_news_url_metadata(value: str) -> dict[str, str]:
@@ -504,6 +580,51 @@ async def update_news_peak(data: NewsPeakInput) -> dict[str, Any]:
             raise HTTPException(404, "The story is no longer in the stored news feed.")
         connection.commit()
     return {"status": "updated", "url": url, "peak": data.peak}
+
+
+@router.post("/add-content")
+async def add_news_content(data: NewsContentInput) -> dict[str, Any]:
+    """Add a pasted news story to the feed while retaining the complete supplied text."""
+    seen_at = now_pacific().isoformat()
+    item = pasted_story_record(data, seen_at)
+    with closing(connect_db()) as connection:
+        existing = connection.execute(
+            "SELECT url FROM news_items WHERE url=?",
+            (item["url"],),
+        ).fetchone()
+        connection.execute(
+            """INSERT INTO news_items(
+                   url,title,source,published_at,snippet,peak,first_seen_at,last_seen_at,story_content
+               ) VALUES(
+                   :url,:title,:source,:published_at,:snippet,:peak,:seen_at,:seen_at,:story_content
+               )
+               ON CONFLICT(url) DO UPDATE SET
+                 title=excluded.title,
+                 source=excluded.source,
+                 published_at=CASE WHEN excluded.published_at!='' THEN excluded.published_at ELSE news_items.published_at END,
+                 snippet=excluded.snippet,
+                 story_content=excluded.story_content,
+                 peak=excluded.peak,
+                 last_seen_at=excluded.last_seen_at""",
+            item,
+        )
+        connection.commit()
+        total = connection.execute("SELECT COUNT(*) AS n FROM news_items").fetchone()["n"]
+    return {
+        "status": "added" if existing is None else "updated",
+        "added": existing is None,
+        "total": total,
+        "item": {
+            "url": item["url"],
+            "title": item["title"],
+            "source": item["source"],
+            "published_at": item["published_at"],
+            "snippet": item["snippet"],
+            "peak": item["peak"],
+            "first_seen_at": seen_at,
+            "last_seen_at": seen_at,
+        },
+    }
 
 
 @router.post("/add-url")
@@ -753,12 +874,22 @@ async def analyze_news_story(data: NewsAnalysisInput) -> dict[str, Any]:
     from app.options.api import openai_error_message, read_watchlist
 
     watchlist = [{"symbol": item["symbol"], "peak": item["peak"]} for item in read_watchlist()]
+    canonical_url = canonical_news_url(data.url)
+    stored_content = ""
+    if canonical_url:
+        with closing(connect_db()) as connection:
+            stored = connection.execute(
+                "SELECT story_content FROM news_items WHERE url=?",
+                (canonical_url,),
+            ).fetchone()
+            if stored:
+                stored_content = str(stored["story_content"] or "").strip()
     article = {
         "title": data.title.strip(),
         "url": data.url.strip(),
         "source": parsed.hostname.removeprefix("www."),
         "published_at": data.published_at.strip(),
-        "excerpt": data.snippet.strip(),
+        "excerpt": stored_content or data.snippet.strip(),
     }
     instructions = (
         "You are an RHTC Three Peaks research analyst. Analyze the supplied news story for its implications "
