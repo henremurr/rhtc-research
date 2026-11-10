@@ -912,6 +912,32 @@ async function translateNewsStory(card,button){
 }
 async function loadNews({quiet=false}={}){try{const params=new URLSearchParams({peak:$('#news-peak').value,publication:$('#news-publication').value,q:$('#news-search').value.trim()});const response=await fetch(`/options/api/news?${params}`);if(!response.ok)throw Error('News feed is unavailable.');const data=await response.json();renderNews(data.items||[]);const stamp=data.last_scan_at?new Intl.DateTimeFormat('en-US',{timeZone:'America/Los_Angeles',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}).format(new Date(data.last_scan_at))+' PT':'Not scanned yet';$('#news-last-scanned').textContent=data.configured?`LAST SCAN · ${stamp}`:'PERPLEXITY KEY NOT CONFIGURED';if(!data.configured)$('#news-count').textContent='Add PERPLEXITY_API_KEY in Railway Variables to enable scanning.'}catch(error){if(!quiet){$('#news-items').innerHTML=`<p class="news-empty">${safe(error.message)}</p>`;toast('Could not load the RHTC news feed.')}}}
 async function scanNews(query=''){const button=$('#scan-news'),submit=$('#news-search-submit');button.disabled=true;if(submit)submit.disabled=true;button.querySelector('.refresh-icon').classList.add('spin');try{const params=new URLSearchParams();if(query)params.set('q',query);const response=await fetch(`/options/api/news/scan${params.size?'?'+params.toString():''}`,{method:'POST'});const data=await response.json();if(!response.ok)throw Error(data.detail||'News scan failed.');await loadNews({quiet:true});toast(`${data.added||0} new · ${data.retrieved||0} retrieved · ${data.total||0} stories stored.`)}catch(error){toast(error.message)}finally{button.disabled=false;if(submit)submit.disabled=false;button.querySelector('.refresh-icon').classList.remove('spin')}}
+async function addNewsUrl(){
+  const value=window.prompt('Paste the full news story URL:','');
+  if(value===null)return;
+  const url=value.trim();
+  if(!/^https?:\/\//i.test(url)){toast('Paste a complete http:// or https:// news URL.');return}
+  const button=$('#add-news-url');
+  const label=button.textContent;
+  button.disabled=true;
+  button.textContent='Adding…';
+  try{
+    const response=await fetch('/options/api/news/add-url',{
+      method:'POST',
+      credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({url})
+    });
+    const data=await response.json();
+    if(!response.ok)throw Error(data.detail||'Could not add the news story.');
+    $('#news-peak').value='All';
+    $('#news-publication').value='All';
+    $('#news-search').value='';
+    await loadNews({quiet:true});
+    toast(data.added?'News story added to the feed.':'Story already existed and was refreshed.');
+  }catch(error){toast(error.message||'Could not add the news story.')}
+  finally{button.disabled=false;button.textContent=label}
+}
 async function deduplicateNews(){
   const button=$('#dedupe-news');
   if(!window.confirm('Remove duplicate stories from all saved news? Stories are duplicates only when their normalized headlines and publication dates match. The copy with the most complete excerpt will be kept.'))return;
@@ -1082,7 +1108,7 @@ $('#peak-filter').addEventListener('change',e=>{const selection=e.target.value,a
 function updateScoreMissingFilters(){state.stockScoreFilter=$('#stock-score-filter').value;state.callScoreFilter=$('#call-score-filter').value;state.mode='overview';state.selectedOnly=false;setMode('overview');loadRows({ai:false,snapshot:false})}
 $('#stock-score-filter').addEventListener('change',updateScoreMissingFilters);$('#call-score-filter').addEventListener('change',updateScoreMissingFilters);
 document.querySelectorAll('.nav-item').forEach(el=>el.addEventListener('click',()=>{const wasCostOnly=state.costOnly;state.costOnly=false;setMode(el.dataset.filter||'overview');if(wasCostOnly)loadRows({ai:false,snapshot:false})}));
-$('#scan-news').addEventListener('click',()=>scanNews());$('#dedupe-news').addEventListener('click',deduplicateNews);$('#news-search-form').addEventListener('submit',event=>{event.preventDefault();scanNews($('#news-search').value.trim())});$('#news-peak').addEventListener('change',()=>loadNews());$('#news-publication').addEventListener('change',()=>loadNews());let newsSearchTimer;$('#news-search').addEventListener('input',()=>{clearTimeout(newsSearchTimer);newsSearchTimer=setTimeout(()=>loadNews({quiet:true}),220)});
+$('#scan-news').addEventListener('click',()=>scanNews());$('#add-news-url').addEventListener('click',addNewsUrl);$('#dedupe-news').addEventListener('click',deduplicateNews);$('#news-search-form').addEventListener('submit',event=>{event.preventDefault();scanNews($('#news-search').value.trim())});$('#news-peak').addEventListener('change',()=>loadNews());$('#news-publication').addEventListener('change',()=>loadNews());let newsSearchTimer;$('#news-search').addEventListener('input',()=>{clearTimeout(newsSearchTimer);newsSearchTimer=setTimeout(()=>loadNews({quiet:true}),220)});
 $('#analysis-read-btn').addEventListener('click',toggleAnalysisSpeech);$('#analysis-stop-btn').addEventListener('click',()=>stopAnalysisSpeech());
 $('#analysis-mp3-btn').addEventListener('click',createAnalysisPodcast);$('#analysis-copy-transcript').addEventListener('click',copyAnalysisPodcastTranscript);$('#youtube-publish-btn').addEventListener('click',publishAnalysisToYouTube);$('#youtube-review-confirm').addEventListener('change',updateYouTubePublishButton);
 $('#news-items').addEventListener('click',event=>{const button=event.target.closest('[data-news-action]');if(!button)return;const card=button.closest('.news-item');if(!card)return;if(button.dataset.newsAction==='read')toggleNewsSpeech(card);else if(button.dataset.newsAction==='stop')stopNewsSpeech();else if(button.dataset.newsAction==='analyze')analyzeNewsStory(card,button);else if(button.dataset.newsAction==='publish')publishNewsStory(card,button);else if(button.dataset.newsAction==='retry-x')unlockXRetry(card);else if(button.dataset.newsAction==='translate')translateNewsStory(card,button);else if(button.dataset.newsAction==='change-peak'){const select=card.querySelector('.news-peak-select');select.hidden=!select.hidden;if(!select.hidden)select.focus()}else if(button.dataset.newsAction==='delete-story')deleteNewsStory(card,button)});
