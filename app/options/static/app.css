@@ -1093,6 +1093,9 @@ body.news-mode .workspace-toolbar-heading{gap:8px}
 .stock-score-report-link:hover{filter:brightness(1.08)}
 .stock-score-report-link:focus-visible{outline:2px solid #d7b979;outline-offset:2px}
 .stock-report-modal{display:block;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+.stock-report-modal>.modal-close,.buffett-report-modal>.modal-close{position:sticky;top:0;z-index:20;display:grid;place-items:center;width:44px;height:44px;margin:0 0 8px auto;padding:0;border:1px solid #e2e6ea;border-radius:50%;background:#fff;color:#596575;font-size:24px;line-height:1;touch-action:manipulation;box-shadow:0 1px 5px #1823331a}
+.stock-report-modal>.modal-close:focus-visible,.buffett-report-modal>.modal-close:focus-visible{outline:2px solid #9f844c;outline-offset:2px}
+:root[data-theme="dark"] .stock-report-modal>.modal-close,:root[data-theme="dark"] .buffett-report-modal>.modal-close{border-color:#465260;background:#202a35;color:#e0e6ed}
 .stock-report-modal>h2{margin-bottom:0}
 .stock-report-quote{margin:0!important;color:#8994a0!important;font:10px/1.5 var(--mono)!important}
 .stock-report-navigation{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid #e8ebee;border-bottom:1px solid #e8ebee}
