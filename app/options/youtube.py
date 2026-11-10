@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 
 from app.options.news import NewsPublishedInput, mark_news_published
 
@@ -48,20 +48,60 @@ def artwork_for_series(series: str) -> Path:
     return path
 
 
+def google_error_message(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    error = payload.get("error")
+    if isinstance(error, dict):
+        return str(error.get("message") or error.get("status") or "")
+    description = payload.get("error_description")
+    return str(description or error or "")
+
+
 @router.get("/status")
-async def youtube_status() -> dict[str, Any]:
+async def youtube_status(verify: bool = Query(False)) -> dict[str, Any]:
     missing = missing_youtube_settings()
     try:
         import imageio_ffmpeg  # noqa: F401
         ffmpeg_ready = True
     except Exception:
         ffmpeg_ready = False
-    return {
+    result: dict[str, Any] = {
         "configured": not missing and ffmpeg_ready,
         "missing": missing,
         "ffmpeg_ready": ffmpeg_ready,
         "privacy_note": "Unverified YouTube API projects may restrict uploads to private viewing.",
     }
+    if verify and not missing:
+        timeout = httpx.Timeout(connect=20.0, read=30.0, write=30.0, pool=20.0)
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                token = await refresh_access_token(client)
+                channel = await client.get(
+                    "https://www.googleapis.com/youtube/v3/channels",
+                    params={"part": "id,snippet", "mine": "true"},
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                if channel.status_code == 200:
+                    items = channel.json().get("items") or []
+                    result["authorization"] = "valid"
+                    result["channel_title"] = (
+                        str(items[0].get("snippet", {}).get("title") or "") if items else ""
+                    )
+                else:
+                    result["authorization"] = "invalid"
+                    result["authorization_error"] = google_error_message(channel) or "YouTube rejected the channel authorization."
+        except HTTPException as exc:
+            result["authorization"] = "invalid"
+            result["authorization_error"] = str(exc.detail)
+        except httpx.HTTPError:
+            result["authorization"] = "unreachable"
+            result["authorization_error"] = "Google authorization could not be reached."
+    return result
 
 
 async def refresh_access_token(client: httpx.AsyncClient) -> str:
@@ -78,7 +118,12 @@ async def refresh_access_token(client: httpx.AsyncClient) -> str:
         },
     )
     if response.status_code != 200:
-        raise HTTPException(502, "Google could not refresh the YouTube authorization. Reconnect the channel and update its refresh token.")
+        reason = google_error_message(response)
+        detail = "Google could not refresh the YouTube authorization."
+        if reason:
+            detail += f" Google reported: {reason}"
+        detail += " Reconnect the channel and update its refresh token."
+        raise HTTPException(502, detail)
     token = response.json().get("access_token")
     if not token:
         raise HTTPException(502, "Google returned no YouTube access token.")
