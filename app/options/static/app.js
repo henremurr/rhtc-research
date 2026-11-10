@@ -215,6 +215,7 @@ async function analyzeStockQuote(){
       stock_report_count:Number(data.report_count)||1,
     }:item);
     state.watchlist=state.watchlist.map(item=>item.symbol===symbol?{...item,stock_report_count:Number(data.report_count)||1}:item);
+    updateStockReportsButton(symbol,Number(data.report_count)||1);
     renderRows();
     const summary=$('#stock-analysis-summary');
     summary.innerHTML='<div class="stock-rating stock-rating-'+(Number.isFinite(rating)?rating:0)+'"><span>RHTC rating</span><b>'+(Number.isFinite(rating)?rating+' · ':'')+safe(label)+'</b></div><div class="stock-ranking-scale" aria-label="Rating scale">1 Avoid · 2 Sell · 3 Watch · 4 Grow · 5 Bargain</div><div class="stock-summary-copy">'+renderAnalysis(data.summary||'Summary was not returned.')+'</div>';
@@ -229,6 +230,17 @@ async function analyzeStockQuote(){
   }finally{
     button.disabled=false;button.textContent='✦ Analyze stock';
   }
+}
+function updateStockReportsButton(symbol,count){
+  if(window.stockQuoteContext?.symbol!==symbol)return;
+  const button=$('#stock-reports-btn');
+  if(!button)return;
+  button.disabled=Number(count)<1;
+  button.textContent=Number(count)>0?'View reports ('+Number(count)+')':'View reports';
+}
+function viewCurrentStockReports(){
+  const symbol=window.stockQuoteContext?.symbol;
+  if(symbol)viewStockReports(symbol);
 }
 async function searchTickerNews(){
   const symbol=window.stockQuoteContext?.symbol;
@@ -282,6 +294,7 @@ async function viewChain(symbol){
   $('#detail-company-overview').innerHTML='<div class="loading">Loading company overview…</div>';
   $('#detail-option-source').innerHTML='';
   window.stockQuoteContext=null;
+  $('#stock-reports-btn').disabled=true;$('#stock-reports-btn').textContent='View reports';
   $('#stock-analyze-btn').disabled=true;$('#stock-analysis-status').textContent='Uses current-source research and OpenAI API credits.';
   $('#stock-analysis-results').hidden=true;$('#stock-analysis-summary').innerHTML='';$('#stock-analysis-details').innerHTML='';$('#stock-analysis-sources').innerHTML='';
   $('#ticker-news-btn').disabled=true;$('#ticker-news-btn').textContent='⌕ Search ticker news';$('#ticker-news-results').hidden=true;$('#ticker-news-content').innerHTML='';$('#ticker-news-sources').innerHTML='';
@@ -297,6 +310,8 @@ async function viewChain(symbol){
     const quote=await responses[0].json(),chainData=await responses[1].json();
     if(!responses[0].ok)throw Error(quote.detail||'Stock quote unavailable.');
     window.stockQuoteContext={symbol,quote};
+    const stockReportCount=Number(((state.rows||[]).find(row=>row.symbol===symbol)||(state.watchlist||[]).find(row=>row.symbol===symbol))?.stock_report_count)||0;
+    updateStockReportsButton(symbol,stockReportCount);
     $('#stock-analyze-btn').disabled=false;
     $('#ticker-news-btn').disabled=false;
     const sourceLabel=quote.source==='demo'?'Illustrative demo values · Not live market data':quote.source==='tradier_sandbox'?'Tradier sandbox quote · May be delayed':'Tradier stock quote';
@@ -425,7 +440,8 @@ async function viewBuffettReports(symbol,offset=0){
     const labels={market_cap_usd:'Market capitalization',cash_and_short_term_investments_usd:'Cash and short-term investments',total_interest_bearing_debt_usd:'Interest-bearing debt',operating_cash_required_usd:'Operating cash reserve',normalized_annual_net_income_usd:'Normalized annual net income',annual_dividend_per_share_usd:'Annual dividend per share',share_price_usd:'Share price',dividend_yield_percent:'Dividend yield',dividend_coverage_earnings:'Dividend coverage · earnings',dividend_coverage_free_cash_flow:'Dividend coverage · free cash flow',gross_margin_percent:'Gross margin',return_on_equity_percent:'Return on equity',net_profit_margin_percent:'Net profit margin',cash_available_after_essential_expenses_severe_drop_usd:'Cash after severe-drop essential expenses',annual_cash_needs_severe_drop_usd:'Annual cash needs · severe-drop case'};
     $('#buffett-report-metrics').innerHTML=Object.entries(labels).map(([key,label])=>{const value=metrics[key];let shown='Unavailable';if(value!==null&&value!==undefined&&Number.isFinite(Number(value))){const n=Number(value);shown=key.endsWith('_usd')?'$'+n.toLocaleString('en-US',{maximumFractionDigits:2}):key.endsWith('_percent')?n.toFixed(2)+'%':n.toLocaleString('en-US',{maximumFractionDigits:3})}return '<div class="buffett-metric"><span>'+safe(label)+'</span><b>'+safe(shown)+'</b></div>'}).join('');
     const savedAnalysis=report.saved_stock_analysis||{},sourceReview=report.source_review||[],finnhubStatus=report.finnhub_data_status||{},finnhubFields=report.finnhub_filled_fields||[],secStatus=report.sec_data_status||{};
-    let reviewHtml=savedAnalysis.found?'<p class="buffett-source-summary">Used saved stock analysis report '+safe(String(savedAnalysis.report_id||''))+' · '+safe(newsTimestamp(savedAnalysis.created_at))+' · '+safe(savedAnalysis.rating_label||'Unrated')+'</p>':'<p class="buffett-source-summary">No saved stock analysis was available for this ticker.</p>';
+    const savedReports=Array.isArray(savedAnalysis.reports)?savedAnalysis.reports:(savedAnalysis.found?[savedAnalysis]:[]);
+    let reviewHtml=savedAnalysis.found?'<p class="buffett-source-summary">Reviewed '+safe(String(savedAnalysis.report_count||savedReports.length||1))+' saved stock analysis report'+((Number(savedAnalysis.report_count||savedReports.length||1)===1)?'':'s')+' from newest to oldest:</p><ol class="buffett-stock-report-history">'+savedReports.map(item=>'<li>Report '+safe(String(item.report_id||''))+' · '+safe(newsTimestamp(item.created_at))+' · '+safe(item.rating_label||'Unrated')+'</li>').join('')+'</ol>':'<p class="buffett-source-summary">No saved stock analysis was available for this ticker.</p>';
     const secAvailable=Array.isArray(secStatus.available_fields)?secStatus.available_fields:[],secFilled=Array.isArray(secStatus.filled_fields)?secStatus.filled_fields:[];
     const fieldLabel=value=>String(value).replace(/_usd$/,'').replace(/_percent$/,'%').replaceAll('_',' ');
     const secLine='SEC Company Facts: '+safe(secStatus.status||'unavailable')+(secStatus.form?' · '+safe(secStatus.form)+' period ended '+safe(secStatus.period_end||'')+' (filed '+safe(secStatus.filed_date||'')+')':'')+(secStatus.annual_period_end?' · annual statements through '+safe(secStatus.annual_period_end):'')+(secAvailable.length?' · extracted '+safe(String(secAvailable.length))+' fields':'')+(secFilled.length?' · applied: '+safe(secFilled.map(fieldLabel).join(', ')):'')+(secStatus.detail?' · '+safe(secStatus.detail):'');
@@ -473,13 +489,14 @@ async function deleteAllBuffettReports(){
 }
 function closeBuffettReportViewer(){$('#buffett-report-modal').classList.remove('open')}
 
-let activeStockReportSymbol='',activeStockReportOffset=0,activeStockReportCount=0;
+let activeStockReportSymbol='',activeStockReportOffset=0,activeStockReportCount=0,activeStockReportId=null;
 
 async function viewStockReports(symbol,offset=0){
   const modal=$('#stock-report-modal'),status=$('#stock-report-status');
   activeStockReportSymbol=symbol;
   modal.classList.add('open');
   status.textContent='Loading saved stock analysis…';
+  $('#stock-report-delete').disabled=true;$('#stock-report-delete-all').disabled=true;
   $('#stock-report-title').textContent=symbol+' · Stock analysis';
   $('#stock-report-summary').innerHTML='';
   $('#stock-report-details').innerHTML='';
@@ -492,6 +509,7 @@ async function viewStockReports(symbol,offset=0){
     const report=data.report||{};
     activeStockReportOffset=Number(data.offset)||0;
     activeStockReportCount=Number(data.report_count)||0;
+    activeStockReportId=Number(report.report_id)||null;
     const rating=Number(report.rating),label=report.rating_label||'Unrated';
     $('#stock-report-rating').innerHTML='<div class="stock-rating stock-rating-'+(Number.isInteger(rating)?rating:0)+'"><span>RHTC rating</span><b>'+(Number.isInteger(rating)?rating+' · ':'')+safe(label)+'</b></div>';
     $('#stock-report-meta').textContent='Report '+(activeStockReportOffset+1)+' of '+activeStockReportCount+' · '+newsTimestamp(report.created_at);
@@ -503,11 +521,15 @@ async function viewStockReports(symbol,offset=0){
     $('#stock-report-quote').textContent='Quote snapshot: '+(quote.price!==null&&quote.price!==undefined&&Number.isFinite(price)?'$'+price.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'price unavailable')+' · '+(quote.quote_time||'timestamp unavailable')+' · '+(quote.source||'source unavailable');
     $('#stock-report-previous').disabled=activeStockReportOffset>=activeStockReportCount-1;
     $('#stock-report-next').disabled=activeStockReportOffset<=0;
+    $('#stock-report-delete').disabled=!activeStockReportId;
+    $('#stock-report-delete-all').disabled=activeStockReportCount<1;
     status.textContent='';
   }catch(error){
     status.textContent=error.message;
     $('#stock-report-previous').disabled=true;
     $('#stock-report-next').disabled=true;
+    $('#stock-report-delete').disabled=true;
+    $('#stock-report-delete-all').disabled=true;
   }
 }
 function navigateStockReport(direction){
@@ -515,6 +537,36 @@ function navigateStockReport(direction){
   const nextOffset=activeStockReportOffset+direction;
   if(nextOffset<0||nextOffset>=activeStockReportCount)return;
   viewStockReports(activeStockReportSymbol,nextOffset);
+}
+async function deleteStockReport(){
+  if(!activeStockReportSymbol||!activeStockReportId)return;
+  const symbol=activeStockReportSymbol,reportId=activeStockReportId;
+  if(!confirm('Delete this stock analysis report for '+symbol+'? This cannot be undone.'))return;
+  const status=$('#stock-report-status'),button=$('#stock-report-delete');button.disabled=true;status.textContent='Deleting stock analysis report…';
+  try{
+    const response=await fetch('/options/api/stock-analysis/reports/'+encodeURIComponent(symbol)+'/'+encodeURIComponent(reportId),{method:'DELETE',credentials:'same-origin'});
+    const data=await response.json();if(!response.ok)throw Error(data.detail||'Could not delete the stock analysis report.');
+    for(const row of state.rows||[])if(row.symbol===symbol){row.stock_report_count=Number(data.report_count)||0;row.stock_score=data.rating??null;row.stock_rating_label=data.rating_label??null}
+    for(const row of state.watchlist||[])if(row.symbol===symbol){row.stock_report_count=Number(data.report_count)||0;row.stock_score=data.rating??null;row.stock_rating_label=data.rating_label??null}
+    updateStockReportsButton(symbol,Number(data.report_count)||0);
+    renderRows();renderSymbolList();
+    if(Number(data.report_count)>0)await viewStockReports(symbol,Math.min(activeStockReportOffset,Number(data.report_count)-1));
+    else{closeStockReportViewer();toast('Deleted the stock analysis report. No saved reports remain for '+symbol+'.')}
+  }catch(error){status.textContent=error.message;button.disabled=false}
+}
+async function deleteAllStockReports(){
+  if(!activeStockReportSymbol||activeStockReportCount<1)return;
+  const symbol=activeStockReportSymbol;
+  if(!confirm('PURGE all '+activeStockReportCount+' stock analysis reports for '+symbol+'? This cannot be undone.'))return;
+  const status=$('#stock-report-status'),button=$('#stock-report-delete-all');button.disabled=true;status.textContent='Purging stock analysis reports…';
+  try{
+    const response=await fetch('/options/api/stock-analysis/reports/'+encodeURIComponent(symbol),{method:'DELETE',credentials:'same-origin'});
+    const data=await response.json();if(!response.ok)throw Error(data.detail||'Could not delete stock analysis reports.');
+    for(const row of state.rows||[])if(row.symbol===symbol){row.stock_report_count=0;row.stock_score=null;row.stock_rating_label=null}
+    for(const row of state.watchlist||[])if(row.symbol===symbol){row.stock_report_count=0;row.stock_score=null;row.stock_rating_label=null}
+    updateStockReportsButton(symbol,0);
+    renderRows();renderSymbolList();closeStockReportViewer();toast('Purged '+(Number(data.deleted_count)||0)+' stock analysis reports for '+symbol+'.');
+  }catch(error){status.textContent=error.message;button.disabled=false}
 }
 function closeStockReportViewer(){
   $('#stock-report-modal').classList.remove('open');

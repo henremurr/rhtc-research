@@ -1674,31 +1674,31 @@ async def buffett_screen(data: BuffettScreenInput):
         raise HTTPException(400, "Enter a valid ticker symbol.")
     with closing(connect_watchlist_db()) as connection:
         row = connection.execute("SELECT 1 FROM symbols WHERE symbol = ? LIMIT 1", (symbol,)).fetchone()
-        saved_row = connection.execute(
+        saved_rows = connection.execute(
             "SELECT report_id, created_at, rating, rating_label, summary, details, citations_json, quote_json, analysis_text "
-            "FROM stock_analysis_reports WHERE symbol = ? ORDER BY created_at DESC, report_id DESC LIMIT 1",
+            "FROM stock_analysis_reports WHERE symbol = ? ORDER BY created_at DESC, report_id DESC",
             (symbol,),
-        ).fetchone()
+        ).fetchall()
     if not row:
         raise HTTPException(404, "Ticker is not in the watchlist.")
     key = os.getenv("OPENAI_API_KEY", "").strip()
     if not key:
         raise HTTPException(503, "Buffett screen requires OPENAI_API_KEY on the server.")
-    saved_analysis = None
+    saved_analyses: list[dict[str, Any]] = []
     saved_source_links: list[dict[str, str]] = []
     source_documents: list[dict[str, str]] = []
     source_review: list[dict[str, Any]] = []
-    if saved_row:
+    seen_source_urls: set[str] = set()
+    for saved_row in saved_rows:
         record = dict(saved_row)
         try:
-            saved_source_links = json.loads(record.get("citations_json") or "[]")
+            report_links = json.loads(record.get("citations_json") or "[]")
         except (TypeError, ValueError):
-            saved_source_links = []
-        if not isinstance(saved_source_links, list):
-            saved_source_links = []
+            report_links = []
+        if not isinstance(report_links, list):
+            report_links = []
         unique_links: list[dict[str, str]] = []
-        seen_source_urls: set[str] = set()
-        for citation in saved_source_links:
+        for citation in report_links:
             if not isinstance(citation, dict):
                 continue
             url = citation.get("url")
@@ -1708,15 +1708,14 @@ async def buffett_screen(data: BuffettScreenInput):
             unique_links.append({"url": url[:1500], "title": str(citation.get("title") or url)[:300]})
         for raw_url in re.findall(r"https?://[^\s)\]},;]+", str(record.get("analysis_text") or "")):
             url = raw_url.rstrip(".,;:!?)]}")
-            if url not in seen_source_urls:
+            if url.startswith(("https://", "http://")) and url not in seen_source_urls:
                 seen_source_urls.add(url)
                 unique_links.append({"url": url[:1500], "title": url[:300]})
-        saved_source_links = unique_links
         try:
             saved_quote = json.loads(record.get("quote_json") or "{}")
         except (TypeError, ValueError):
             saved_quote = {}
-        saved_analysis = {
+        saved_analyses.append({
             "report_id": record.get("report_id"),
             "created_at": record.get("created_at"),
             "rating": record.get("rating"),
@@ -1724,8 +1723,10 @@ async def buffett_screen(data: BuffettScreenInput):
             "summary": str(record.get("summary") or "")[:5000],
             "details": str(record.get("details") or "")[:12000],
             "quote": saved_quote if isinstance(saved_quote, dict) else {},
-            "source_links": saved_source_links,
-        }
+            "source_links": unique_links,
+        })
+        saved_source_links.extend(unique_links)
+    if saved_analyses:
         source_documents, source_review = await fetch_saved_stock_sources(saved_source_links)
     sec_data = await fetch_sec_company_facts(symbol)
     if sec_data.get('status') == 'available' and sec_data.get('source_url'):
@@ -1742,14 +1743,14 @@ async def buffett_screen(data: BuffettScreenInput):
     source_review_by_url = {item["url"]: item for item in source_review}
     names = {1:"Industry leader",2:"Cash-adjusted P/E at or below 5",3:"Dividend yield at least 6%",4:"Gross margin at least 60%",5:"Return on equity at least 20%",6:"Net profit margin at least 15%",7:"Asset-light; limited ongoing reinvestment required",8:"Durable products and independent pricing power through inflation",9:"Low debt and at least three-year cash survival under a severe revenue-drop scenario",10:"Widely recognized national brand",11:"Trustworthy management without a material record of misleading or exploiting shareholders",12:"Simple, focused core business",13:"Enduring demand with concentrated supply; frequent repeat purchase is favorable"}
     instructions = (
-        "Use evidence in this exact order: (1) review the saved stock analysis; (2) review every fetched document from its cited source links; "
+        "Use evidence in this exact order: (1) review every saved stock analysis in newest-to-oldest order and compare how its thesis and rating changed; (2) review every fetched document from their cited source links; "
         "(3) use provided SEC Company Facts XBRL data for filed cash and short-term-investment facts; "
         "(4) use provided Finnhub data to fill financial facts still missing, keeping its reported period and definitions clear; "
         "(5) only then use web search for remaining gaps or conflicts. Do not search again for facts already supported by earlier evidence. "
         "If a saved source could not be fetched, try to open that exact URL before searching elsewhere. "
         "Do not treat Finnhub ratios as a substitute for the requested Buffett calculations when inputs are available; calculate ratios from statements. "
         "Use the latest 10-K for full-year results and the latest 10-Q for updates; compare ratios with prior years and peers. "
-        "The saved analysis is context, not authority: prefer the cited primary filing if it conflicts. "
+        "Saved analyses are context, not authority: use their entire report history, note changes over time, and prefer cited primary filings if they conflict. "
         "Return ONLY valid JSON. Never guess. Unknown or unsupported means fail. "
         "Cite sources for every finding. "
         "Return metrics including: market_cap_usd, cash_and_short_term_investments_usd, total_interest_bearing_debt_usd, "
@@ -1822,12 +1823,13 @@ async def buffett_screen(data: BuffettScreenInput):
             input=json.dumps({
                 "ticker": symbol,
                 "criteria": names,
-                "saved_stock_analysis": saved_analysis,
+                "saved_stock_analyses": saved_analyses,
+                "saved_stock_analysis_count": len(saved_analyses),
                 "saved_source_documents": source_documents_for_model,
                 "saved_source_review": source_review,
                 "sec_company_facts": sec_data,
                 "finnhub_fundamentals": finnhub_data,
-                "instructions": "Review saved analysis and its sources first; use SEC Company Facts XBRL for filed cash facts, then Finnhub for remaining financial gaps; search only for remaining gaps.",
+                "instructions": "Review all saved stock analysis reports from newest to oldest and their sources first. Compare rating, quote and thesis changes across reports. Use SEC Company Facts XBRL for filed cash facts, then Finnhub for remaining financial gaps; search only for remaining gaps.",
             }, ensure_ascii=False),
             text={"format": {"type": "json_schema", "name": "buffett_screen", "strict": True, "schema": response_schema}},
             max_output_tokens=6500, max_tool_calls=8, store=False,
@@ -2099,10 +2101,9 @@ async def buffett_screen(data: BuffettScreenInput):
             "adjusted_pe":pe,
             "citations":citations[:50],
             "saved_stock_analysis": {
-                "found": saved_analysis is not None,
-                "report_id": saved_analysis.get("report_id") if saved_analysis else None,
-                "created_at": saved_analysis.get("created_at") if saved_analysis else None,
-                "rating_label": saved_analysis.get("rating_label") if saved_analysis else None,
+                "found": bool(saved_analyses),
+                "report_count": len(saved_analyses),
+                "reports": [{"report_id": item["report_id"], "created_at": item["created_at"], "rating_label": item["rating_label"]} for item in saved_analyses],
             },
             "source_review": source_review,
             "sec_data_status": {
@@ -2605,6 +2606,45 @@ async def get_stock_analysis_report(symbol: str, offset: int = Query(default=0, 
             "analysis": record["analysis_text"],
         },
     }
+
+
+@app.delete("/api/stock-analysis/reports/{symbol}/{report_id}")
+async def delete_stock_analysis_report(symbol: str, report_id: int):
+    symbol = symbol.strip().upper()
+    if not SYMBOL_PATTERN.fullmatch(symbol):
+        raise HTTPException(400, "Enter a valid ticker symbol.")
+    with closing(connect_watchlist_db()) as connection:
+        existing = connection.execute(
+            "SELECT report_id FROM stock_analysis_reports WHERE symbol = ? AND report_id = ?",
+            (symbol, report_id),
+        ).fetchone()
+        if not existing:
+            raise HTTPException(404, f"Stock analysis report {report_id} does not exist for {symbol}.")
+        connection.execute("DELETE FROM stock_analysis_reports WHERE symbol = ? AND report_id = ?", (symbol, report_id))
+        latest = connection.execute(
+            "SELECT rating, rating_label FROM stock_analysis_reports WHERE symbol = ? "
+            "AND rating IS NOT NULL ORDER BY created_at DESC, report_id DESC LIMIT 1",
+            (symbol,),
+        ).fetchone()
+        if latest:
+            connection.execute("UPDATE symbols SET stock_score = ?, stock_rating_label = ? WHERE symbol = ?", (latest["rating"], latest["rating_label"], symbol))
+        else:
+            connection.execute("UPDATE symbols SET stock_score = NULL, stock_rating_label = NULL WHERE symbol = ?", (symbol,))
+        count = int(connection.execute("SELECT COUNT(*) FROM stock_analysis_reports WHERE symbol = ?", (symbol,)).fetchone()[0])
+        connection.commit()
+    return {"symbol": symbol, "deleted_count": 1, "report_count": count, "rating": latest["rating"] if latest else None, "rating_label": latest["rating_label"] if latest else None}
+
+
+@app.delete("/api/stock-analysis/reports/{symbol}")
+async def delete_all_stock_analysis_reports(symbol: str):
+    symbol = symbol.strip().upper()
+    if not SYMBOL_PATTERN.fullmatch(symbol):
+        raise HTTPException(400, "Enter a valid ticker symbol.")
+    with closing(connect_watchlist_db()) as connection:
+        deleted = connection.execute("DELETE FROM stock_analysis_reports WHERE symbol = ?", (symbol,)).rowcount
+        connection.execute("UPDATE symbols SET stock_score = NULL, stock_rating_label = NULL WHERE symbol = ?", (symbol,))
+        connection.commit()
+    return {"symbol": symbol, "deleted_count": int(deleted or 0), "report_count": 0}
 
 
 @app.post("/api/stock-analysis")
