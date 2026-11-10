@@ -11,7 +11,7 @@ from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -53,6 +53,10 @@ class NewsPeakInput(BaseModel):
 
 
 class NewsDeleteInput(BaseModel):
+    url: str = Field(min_length=8, max_length=2000)
+
+
+class NewsUrlInput(BaseModel):
     url: str = Field(min_length=8, max_length=2000)
 
 
@@ -251,6 +255,114 @@ def clean_result(item: dict[str, Any], seen_at: str) -> dict[str, str] | None:
     }
 
 
+
+def _page_meta_content(page: str, keys: tuple[str, ...]) -> str:
+    for key in keys:
+        escaped = re.escape(key)
+        patterns = (
+            rf'<meta[^>]+(?:property|name)=["\']{escaped}["\'][^>]+content=["\']([^"\']+)["\']',
+            rf'<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\']{escaped}["\']',
+        )
+        for pattern in patterns:
+            match = re.search(pattern, page, re.IGNORECASE)
+            if match:
+                return html.unescape(match.group(1)).strip()
+    return ""
+
+
+def _page_title(page: str) -> str:
+    title = _page_meta_content(page, ("og:title", "twitter:title"))
+    if title:
+        return title
+    match = re.search(r"<title[^>]*>(.*?)</title>", page, re.IGNORECASE | re.DOTALL)
+    return html.unescape(re.sub(r"\s+", " ", match.group(1))).strip() if match else ""
+
+
+def _normalized_published_at(value: str) -> str:
+    candidate = value.strip()[:80]
+    if not candidate:
+        return ""
+    try:
+        return datetime.fromisoformat(candidate.replace("Z", "+00:00")).isoformat()
+    except ValueError:
+        match = re.search(r"\d{4}-\d{2}-\d{2}", candidate)
+        return match.group(0) if match else ""
+
+
+async def fetch_news_url_metadata(value: str) -> dict[str, str]:
+    from app.options.api import _validate_public_source_url
+
+    current = value.strip()
+    timeout = httpx.Timeout(15.0, connect=5.0)
+    headers = {
+        "User-Agent": "RHTC-Research/1.0",
+        "Accept": "text/html,application/xhtml+xml;q=0.9,text/plain;q=0.7",
+    }
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False, trust_env=False, headers=headers) as client:
+        for redirect_count in range(5):
+            try:
+                await asyncio.wait_for(
+                    asyncio.to_thread(_validate_public_source_url, current),
+                    timeout=5.0,
+                )
+            except (ValueError, asyncio.TimeoutError) as exc:
+                raise HTTPException(400, str(exc) or "The story URL could not be validated.") from exc
+            try:
+                async with client.stream("GET", current) as response:
+                    if response.status_code in {301, 302, 303, 307, 308}:
+                        location = response.headers.get("location")
+                        if not location or redirect_count == 4:
+                            raise HTTPException(400, "The story URL redirected too many times.")
+                        current = urljoin(current, location)
+                        continue
+                    response.raise_for_status()
+                    content_type = response.headers.get("content-type", "").split(";", 1)[0].lower()
+                    if content_type not in {"text/html", "application/xhtml+xml", "text/plain", ""}:
+                        raise HTTPException(400, "The pasted URL does not point to a readable news page.")
+                    chunks: list[bytes] = []
+                    size = 0
+                    async for chunk in response.aiter_bytes():
+                        size += len(chunk)
+                        if size > 1_500_000:
+                            break
+                        chunks.append(chunk)
+                    page = b"".join(chunks).decode(response.encoding or "utf-8", errors="replace")
+            except HTTPException:
+                raise
+            except httpx.HTTPStatusError as exc:
+                raise HTTPException(502, f"The news page returned HTTP {exc.response.status_code}.") from exc
+            except httpx.TimeoutException as exc:
+                raise HTTPException(502, "The news page timed out.") from exc
+            except httpx.HTTPError as exc:
+                raise HTTPException(502, "The news page could not be fetched.") from exc
+            break
+        else:
+            raise HTTPException(400, "The story URL redirected too many times.")
+
+    canonical_url = canonical_news_url(current)
+    parsed = urlparse(canonical_url)
+    title = _page_title(page)[:500]
+    if not title:
+        raise HTTPException(422, "The page did not provide a readable story title.")
+    snippet = _page_meta_content(
+        page,
+        ("og:description", "twitter:description", "description"),
+    )[:3000]
+    published_at = _normalized_published_at(
+        _page_meta_content(
+            page,
+            ("article:published_time", "datePublished", "date", "pubdate"),
+        )
+    )
+    return {
+        "url": canonical_url[:2000],
+        "title": title,
+        "source": (parsed.hostname or "").removeprefix("www.")[:200],
+        "published_at": published_at,
+        "snippet": snippet,
+    }
+
+
 def latest_scan_at(connection: sqlite3.Connection) -> str | None:
     row = connection.execute("SELECT value FROM news_meta WHERE key='last_scan_at'").fetchone()
     return row["value"] if row else None
@@ -392,6 +504,48 @@ async def update_news_peak(data: NewsPeakInput) -> dict[str, Any]:
             raise HTTPException(404, "The story is no longer in the stored news feed.")
         connection.commit()
     return {"status": "updated", "url": url, "peak": data.peak}
+
+
+@router.post("/add-url")
+async def add_news_url(data: NewsUrlInput) -> dict[str, Any]:
+    """Fetch one public news URL and add it to the stored feed."""
+    metadata = await fetch_news_url_metadata(data.url)
+    seen_at = now_pacific().isoformat()
+    peak = classify_peak(metadata["title"], metadata["snippet"])
+    with closing(connect_db()) as connection:
+        existing = connection.execute(
+            "SELECT url FROM news_items WHERE url=?",
+            (metadata["url"],),
+        ).fetchone()
+        connection.execute(
+            """INSERT INTO news_items(url,title,source,published_at,snippet,peak,first_seen_at,last_seen_at)
+               VALUES(?,?,?,?,?,?,?,?)
+               ON CONFLICT(url) DO UPDATE SET
+                 title=excluded.title,
+                 source=excluded.source,
+                 published_at=CASE WHEN excluded.published_at!='' THEN excluded.published_at ELSE news_items.published_at END,
+                 snippet=CASE WHEN excluded.snippet!='' THEN excluded.snippet ELSE news_items.snippet END,
+                 peak=excluded.peak,
+                 last_seen_at=excluded.last_seen_at""",
+            (
+                metadata["url"],
+                metadata["title"],
+                metadata["source"],
+                metadata["published_at"],
+                metadata["snippet"],
+                peak,
+                seen_at,
+                seen_at,
+            ),
+        )
+        connection.commit()
+        total = connection.execute("SELECT COUNT(*) AS n FROM news_items").fetchone()["n"]
+    return {
+        "status": "added" if existing is None else "updated",
+        "added": existing is None,
+        "total": total,
+        "item": {**metadata, "peak": peak, "first_seen_at": seen_at, "last_seen_at": seen_at},
+    }
 
 
 @router.post("/delete")
