@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 
 from app.models import BatchRequest
 from app.options.api import app as options_app
+from app.legal import router as legal_router
 from app.options.news import start_daily_news_scheduler
 from app.perplexity_client import analyze_one
 from app.reporting import create_pdf
@@ -29,6 +30,7 @@ app = FastAPI(
     description="Three Peaks batch research, classification, and PDF reporting.",
 )
 app.mount("/options", options_app)
+app.include_router(legal_router)
 
 
 @app.on_event("startup")
