@@ -13,7 +13,7 @@ from urllib.parse import urlencode, urlsplit
 
 import httpx
 from cryptography.fernet import Fernet, InvalidToken
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.options.news import db_path
@@ -77,7 +77,11 @@ def page(request, message=""):
         connected = bool(db.execute("SELECT 1 FROM youtube_connection WHERE id=1").fetchone())
     prefix = html.escape(base(request), quote=True)
     status = "YouTube connected through this dashboard." if connected else "Connect the YouTube channel used for RHTC publishing."
-    return HTMLResponse(f'''<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect YouTube · RHTC</title><body style="font:18px system-ui;max-width:760px;margin:50px auto;padding:24px"><h1>Connect YouTube</h1><p role="status">{html.escape(message or status)}</p><p>This connection allows RHTC to upload videos to the channel you authorize. Publishing still requires your confirmation in the dashboard.</p><form method="post" action="{prefix}/api/youtube/connect"><button {'disabled' if not configured else ''} style="padding:14px;font:inherit">{'Reconnect' if connected else 'Connect'} YouTube</button></form><details {'open' if not configured else ''}><summary>Connection setup</summary><p>In Google Cloud, open the web application's OAuth client and add this Authorized redirect URI. Set Railway's YOUTUBE_REDIRECT_URI to the same value:</p><code style="overflow-wrap:anywhere">{html.escape(callback)}</code><p>YOUTUBE_CLIENT_ID and YOUTUBE_CLIENT_SECRET must belong to that client. RHTC_DATA_DIR must use persistent storage. The refresh token is saved automatically; no manual token copying is needed.</p></details><p><a href="{prefix}/">Return to dashboard</a></p></body></html>''', headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+    csrf = secrets.token_urlsafe(32)
+    response = HTMLResponse(f'''<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect YouTube · RHTC</title><body style="font:18px system-ui;max-width:760px;margin:50px auto;padding:24px"><h1>Connect YouTube</h1><p role="status">{html.escape(message or status)}</p><p>This connection allows RHTC to upload videos to the channel you authorize. Publishing still requires your confirmation in the dashboard.</p><form method="post" action="{prefix}/api/youtube/connect"><input type="hidden" name="csrf" value="{csrf}"><button {'disabled' if not configured else ''} style="padding:14px;font:inherit">{'Reconnect' if connected else 'Connect'} YouTube</button></form><details {'open' if not configured else ''}><summary>Connection setup</summary><p>In Google Cloud, open the web application's OAuth client and add this Authorized redirect URI. Set Railway's YOUTUBE_REDIRECT_URI to the same value:</p><code style="overflow-wrap:anywhere">{html.escape(callback)}</code><p>YOUTUBE_CLIENT_ID and YOUTUBE_CLIENT_SECRET must belong to that client. RHTC_DATA_DIR must use persistent storage. The refresh token is saved automatically; no manual token copying is needed.</p></details><p><a href="{prefix}/">Return to dashboard</a></p></body></html>''', headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+
+    response.set_cookie("rhtc_youtube_form", csrf, max_age=600, httponly=True, secure=True, samesite="strict", path=base(request) + "/api/youtube")
+    return response
 
 
 @router.get("/connect")
@@ -86,14 +90,16 @@ def youtube_connection_page(request: Request):
 
 
 @router.post("/connect")
-def youtube_connect(request: Request):
+def youtube_connect(request: Request, csrf: str = Form("")):
     try:
         uri = redirect_uri()
     except HTTPException:
         return page(request, "The callback setting is missing or invalid. Use the HTTPS URL below in Google Cloud and Railway, then try again.")
     # A top-level form POST must originate from this dashboard.
     expected = urlsplit(uri)
-    if request.headers.get("origin") != f"{expected.scheme}://{expected.netloc}":
+    origin = request.headers.get("origin")
+    form_cookie = request.cookies.get("rhtc_youtube_form", "")
+    if not csrf or not form_cookie or not secrets.compare_digest(csrf, form_cookie) or (origin not in (None, "null", f"{expected.scheme}://{expected.netloc}")):
         raise HTTPException(403, "Start the connection from the dashboard.")
     if not os.getenv("YOUTUBE_CLIENT_ID") or not os.getenv("YOUTUBE_CLIENT_SECRET"):
         raise HTTPException(503, "Configure the YouTube OAuth client first.")
