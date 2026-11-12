@@ -1201,3 +1201,13 @@ body.news-mode .workspace-toolbar-heading{gap:8px}
 /* CEO Risk reports contain long evidence sections; make the report itself scrollable. */
 .ceo-risk-report-modal{display:block;overflow-x:hidden;overflow-y:auto;overscroll-behavior-y:contain;-webkit-overflow-scrolling:touch;touch-action:pan-y}
 .ceo-risk-report-modal .buffett-criterion p,.ceo-risk-report-modal .ceo-risk-scenario p{overflow-wrap:anywhere}
+
+/* Color the screen controls to match their corresponding score columns. */
+.buffett-screen-controls #buffett-screen-btn{border-color:#8a6b19;background:#f7f0df;color:#8a6b19}
+.buffett-screen-controls #buffett-screen-btn:hover{background:#efe4c5}
+.buffett-screen-controls #ceo-risk-screen-btn{border-color:#b34a40;background:#fbefee;color:#b34a40}
+.buffett-screen-controls #ceo-risk-screen-btn:hover{background:#f5dfdc}
+:root[data-theme="dark"] .buffett-screen-controls #buffett-screen-btn{border-color:#806c43;background:#3b3323;color:#e6c85f}
+:root[data-theme="dark"] .buffett-screen-controls #buffett-screen-btn:hover{background:#4a3f29}
+:root[data-theme="dark"] .buffett-screen-controls #ceo-risk-screen-btn{border-color:#805052;background:#3c2728;color:#f09b91}
+:root[data-theme="dark"] .buffett-screen-controls #ceo-risk-screen-btn:hover{background:#4b2f31}
