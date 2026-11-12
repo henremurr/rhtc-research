@@ -939,8 +939,11 @@ async function republishNewsStory(card,button){
     card.dataset.newsYoutubeUrl='';
     card.dataset.newsYoutubePrivacy='';
     card.dataset.newsXPublished='false';
+    clearPendingXPost(card.dataset.newsUrl);
     const republish=card.querySelector('[data-news-action="republish"]');
     if(republish)republish.hidden=true;
+    const deleteButton=card.querySelector('.news-delete-btn');
+    if(deleteButton){deleteButton.disabled=false;deleteButton.title='Delete this unpublished story'}
     updateNewsPublishControl(card);
     const publishButton=card.querySelector('[data-news-action="publish"]');
     await publishNewsStory(card,publishButton);
