@@ -58,6 +58,10 @@ class NewsArtworkInput(BaseModel):
     artwork_theme: str = Field(min_length=1, max_length=50)
 
 
+class NewsRepublishResetInput(BaseModel):
+    url: str = Field(min_length=8, max_length=2000)
+
+
 class NewsDeleteInput(BaseModel):
     url: str = Field(min_length=8, max_length=2000)
 
@@ -720,6 +724,33 @@ async def delete_news_story(data: NewsDeleteInput) -> dict[str, Any]:
             raise HTTPException(409, "Published stories cannot be deleted.")
         connection.commit()
     return {"status": "deleted", "url": url}
+
+
+@router.post("/republish-reset")
+async def reset_news_publication(data: NewsRepublishResetInput) -> dict[str, Any]:
+    """Clear stored publication IDs so a manually deleted episode and X post can be republished."""
+    url = canonical_news_url(data.url)
+    if not url:
+        raise HTTPException(400, "A valid story URL is required.")
+    with closing(connect_db()) as connection:
+        result = connection.execute(
+            """UPDATE news_items
+               SET youtube_published=0, youtube_video_id='', youtube_url='',
+                   youtube_published_at='', youtube_privacy_status='',
+                   x_published=0, x_post_id='', x_post_url='', x_published_at=''
+               WHERE url=? AND youtube_published=1 AND x_published=1""",
+            (url,),
+        )
+        if result.rowcount == 0:
+            story = connection.execute(
+                "SELECT youtube_published, x_published FROM news_items WHERE url=?",
+                (url,),
+            ).fetchone()
+            if story is None:
+                raise HTTPException(404, "The story is no longer in the stored news feed.")
+            raise HTTPException(409, "Republish is available only for stories marked published to both YouTube and X.")
+        connection.commit()
+    return {"status": "reset", "url": url}
 
 
 @router.post("/published")
