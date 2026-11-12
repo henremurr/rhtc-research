@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, RedirectResponse
 
 from app.models import BatchRequest
 from app.options.api import app as options_app
@@ -48,7 +48,9 @@ def load_holdings() -> dict[str, list[str]]:
 
 
 @app.get("/")
-async def root() -> dict[str, str]:
+async def root(request: Request):
+    if "text/html" in request.headers.get("accept", ""):
+        return RedirectResponse("/options/", status_code=303)
     return {"status": "running", "service": "RHTC Research API", "version": "1.0.0"}
 
 
