@@ -286,6 +286,15 @@ def connect_watchlist_db() -> sqlite3.Connection:
     if "buffett_score" not in report_columns:
         connection.execute("ALTER TABLE buffett_screen_reports ADD COLUMN buffett_score REAL")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_buffett_reports_symbol_created ON buffett_screen_reports(symbol, created_at DESC, report_id DESC)")
+    connection.execute("""CREATE TABLE IF NOT EXISTS ceo_risk_reports (
+        report_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        symbol TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        risk_score REAL NOT NULL,
+        risk_rating TEXT NOT NULL,
+        report_json TEXT NOT NULL
+    )""")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_ceo_risk_reports_symbol_created ON ceo_risk_reports(symbol, created_at DESC, report_id DESC)")
     connection.execute("""
         INSERT OR IGNORE INTO buffett_screen_reports(symbol, created_at, buffett_pass, buffett_score, report_json)
         SELECT symbol, buffett_updated_at, buffett_pass, buffett_score, buffett_criteria_json
@@ -305,7 +314,7 @@ def connect_watchlist_db() -> sqlite3.Connection:
 
 def read_watchlist() -> list[dict[str, Any]]:
     with closing(connect_watchlist_db()) as connection:
-        return [dict(row) for row in connection.execute("SELECT symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account, lt_call, lt_expy, lt_qty, lt_premium, pg, buffett_pass, buffett_score, buffett_updated_at, buffett_criteria_json, (SELECT COUNT(*) FROM stock_analysis_reports r WHERE r.symbol = symbols.symbol) AS stock_report_count, (SELECT COUNT(*) FROM buffett_screen_reports b WHERE b.symbol = symbols.symbol) AS buffett_report_count FROM symbols ORDER BY position")]
+        return [dict(row) for row in connection.execute("SELECT symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account, lt_call, lt_expy, lt_qty, lt_premium, pg, buffett_pass, buffett_score, buffett_updated_at, buffett_criteria_json, (SELECT COUNT(*) FROM stock_analysis_reports r WHERE r.symbol = symbols.symbol) AS stock_report_count, (SELECT COUNT(*) FROM buffett_screen_reports b WHERE b.symbol = symbols.symbol) AS buffett_report_count, (SELECT risk_score FROM ceo_risk_reports c WHERE c.symbol = symbols.symbol ORDER BY created_at DESC, report_id DESC LIMIT 1) AS ceo_risk_score, (SELECT risk_rating FROM ceo_risk_reports c WHERE c.symbol = symbols.symbol ORDER BY created_at DESC, report_id DESC LIMIT 1) AS ceo_risk_rating, (SELECT created_at FROM ceo_risk_reports c WHERE c.symbol = symbols.symbol ORDER BY created_at DESC, report_id DESC LIMIT 1) AS ceo_risk_updated_at, (SELECT COUNT(*) FROM ceo_risk_reports c WHERE c.symbol = symbols.symbol) AS ceo_risk_report_count FROM symbols ORDER BY position")]
 
 
 def extract_analysis_total_score(analysis: str) -> int | None:
@@ -2240,6 +2249,158 @@ async def delete_all_buffett_screen_reports(symbol: str):
         )
         connection.commit()
     return {"symbol": symbol, "deleted_count": int(deleted or 0), "report_count": 0}
+
+
+@app.post("/api/ceo-risk")
+async def assess_ceo_risk(data: BuffettScreenInput):
+    """Research CEO dependency, succession, governance, and disruption exposure."""
+    require_watchlist_storage()
+    symbol = data.symbol.strip().upper()
+    if not SYMBOL_PATTERN.fullmatch(symbol):
+        raise HTTPException(400, "Enter a valid ticker symbol.")
+    with closing(connect_watchlist_db()) as connection:
+        row = connection.execute("SELECT peak FROM symbols WHERE symbol = ? LIMIT 1", (symbol,)).fetchone()
+        saved = connection.execute(
+            "SELECT report_id, created_at, rating_label, summary, details, citations_json "
+            "FROM stock_analysis_reports WHERE symbol = ? ORDER BY created_at DESC, report_id DESC LIMIT 3",
+            (symbol,),
+        ).fetchall()
+    if not row:
+        raise HTTPException(404, "Ticker is not in the watchlist.")
+    key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not key:
+        raise HTTPException(503, "CEO Risk research requires OPENAI_API_KEY on the server.")
+    dimensions = [
+        "CEO control over strategy, product, capital allocation, and key decisions",
+        "succession readiness and strength of the executive bench",
+        "board independence, oversight, and constraints on CEO power",
+        "operational depth and ability to execute without the CEO",
+        "customer, investor, regulator, partner, and talent relationships tied personally to the CEO",
+        "resilience to sudden absence, misconduct, health event, or loss of credibility",
+    ]
+    try:
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=key, timeout=90, max_retries=0)
+        factor_schema = {
+            "type": "array", "minItems": 6, "maxItems": 6,
+            "items": {"type": "object", "properties": {
+                "id": {"type": "integer", "minimum": 1, "maximum": 6},
+                "name": {"type": "string"},
+                "risk_score": {"type": "integer", "minimum": 0, "maximum": 4},
+                "evidence": {"type": "string"},
+            }, "required": ["id", "name", "risk_score", "evidence"], "additionalProperties": False},
+        }
+        schema = {"type": "object", "properties": {
+            "company_name": {"type": "string"}, "ceo_name": {"type": "string"},
+            "as_of": {"type": "string"}, "confidence": {"type": "integer", "minimum": 0, "maximum": 100},
+            "summary": {"type": "string"}, "factors": factor_schema,
+            "scenarios": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "object", "properties": {
+                "event": {"type": "string"}, "likely_effect": {"type": "string"}, "recovery_path": {"type": "string"},
+            }, "required": ["event", "likely_effect", "recovery_path"], "additionalProperties": False}},
+            "monitor_signals": {"type": "array", "items": {"type": "string"}},
+        }, "required": ["company_name", "ceo_name", "as_of", "confidence", "summary", "factors", "scenarios", "monitor_signals"], "additionalProperties": False}
+        instructions = (
+            "Assess public-company key-person and CEO concentration risk using current web research. Identify the current CEO and cite primary sources where available: proxy statements, filings, company announcements, board disclosures, and credible reporting. "
+            "Risk dimensions in order: " + "; ".join(dimensions) + ". Rate each 0=low, 1=limited, 2=moderate, 3=high, 4=severe risk. "
+            "Score observed dependency and resilience, not CEO quality or popularity. A visionary founder can create both strategic advantage and key-person exposure. "
+            "Do not assume a succession plan exists unless evidence supports it. Unknown evidence should be described as unknown, not stated as fact; use a neutral score of 2 for a dimension with little evidence and reduce confidence. "
+            "Discuss sudden temporary absence, permanent departure, and a damaging event such as scandal or loss of credibility. Separate documented facts from inference. Keep evidence concise and specific; do not invent source details."
+        )
+        response = await client.responses.create(
+            model=os.getenv("OPENAI_ANALYSIS_MODEL", os.getenv("OPENAI_MODEL", "gpt-5-mini")),
+            tools=[{"type": "web_search"}], reasoning={"effort": "low"}, instructions=instructions,
+            input=json.dumps({"ticker": symbol, "peak": row["peak"], "risk_dimensions": dimensions,
+                              "recent_saved_stock_analysis": [dict(item) for item in saved]}, ensure_ascii=False),
+            text={"format": {"type": "json_schema", "name": "ceo_risk_assessment", "strict": True, "schema": schema}},
+            max_output_tokens=5000, max_tool_calls=8, store=False,
+        )
+        result = json.loads((response.output_text or "{}").strip())
+        factors = sorted(result.get("factors", []), key=lambda item: int(item.get("id", 0)))
+        if len(factors) != 6:
+            raise ValueError("Research response did not contain all six CEO Risk factors.")
+        weights = [20, 20, 15, 15, 15, 15]
+        risk_score = round(sum(max(0, min(4, int(factor["risk_score"]))) / 4 * weight for factor, weight in zip(factors, weights)), 1)
+        risk_rating = "Low" if risk_score < 20 else "Moderate" if risk_score < 40 else "Elevated" if risk_score < 60 else "High" if risk_score < 80 else "Critical"
+        citations, seen = [], set()
+        for output_item in getattr(response, "output", []) or []:
+            for content_item in getattr(output_item, "content", []) or []:
+                for annotation in getattr(content_item, "annotations", []) or []:
+                    cite = getattr(annotation, "url_citation", None)
+                    url = getattr(cite, "url", "") if cite else ""
+                    if url.startswith("http") and url not in seen:
+                        citations.append({"title": getattr(cite, "title", "") or url, "url": url})
+                        seen.add(url)
+        created_at = datetime.now(timezone.utc).isoformat()
+        report = {**result, "risk_score": risk_score, "risk_rating": risk_rating,
+                  "scoring_scale": "Weighted 0–100 key-person risk; higher means greater exposure",
+                  "factor_weights": weights, "citations": citations[:50]}
+        report_json = json.dumps(report, ensure_ascii=False)
+        with closing(connect_watchlist_db()) as connection:
+            connection.execute(
+                "INSERT INTO ceo_risk_reports(symbol, created_at, risk_score, risk_rating, report_json) VALUES (?, ?, ?, ?, ?)",
+                (symbol, created_at, risk_score, risk_rating, report_json),
+            )
+            count = int(connection.execute("SELECT COUNT(*) FROM ceo_risk_reports WHERE symbol = ?", (symbol,)).fetchone()[0])
+            connection.commit()
+        return {"symbol": symbol, "created_at": created_at, "report_count": count, **report}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(502, f"CEO Risk research failed for {symbol}: {str(exc)[:400]}") from exc
+
+
+@app.get("/api/ceo-risk/reports/{symbol}")
+async def get_ceo_risk_report(symbol: str, offset: int = Query(default=0, ge=0)):
+    symbol = symbol.strip().upper()
+    if not SYMBOL_PATTERN.fullmatch(symbol):
+        raise HTTPException(400, "Enter a valid ticker symbol.")
+    with closing(connect_watchlist_db()) as connection:
+        count = int(connection.execute("SELECT COUNT(*) FROM ceo_risk_reports WHERE symbol = ?", (symbol,)).fetchone()[0])
+        row = connection.execute(
+            "SELECT report_id, created_at, report_json FROM ceo_risk_reports WHERE symbol = ? "
+            "ORDER BY created_at DESC, report_id DESC LIMIT 1 OFFSET ?", (symbol, offset),
+        ).fetchone()
+    if count == 0:
+        raise HTTPException(404, f"No saved CEO Risk reports exist for {symbol}.")
+    if not row:
+        raise HTTPException(404, "There are no more CEO Risk reports in that direction.")
+    report = json.loads(row["report_json"])
+    report.update({"report_id": row["report_id"], "created_at": row["created_at"]})
+    return {"symbol": symbol, "report_count": count, "offset": offset, "report": report}
+
+
+@app.delete("/api/ceo-risk/reports")
+async def purge_all_ceo_risk_reports():
+    with closing(connect_watchlist_db()) as connection:
+        deleted = connection.execute("DELETE FROM ceo_risk_reports").rowcount
+        connection.commit()
+    return {"deleted_count": int(deleted or 0), "report_count": 0}
+
+
+@app.delete("/api/ceo-risk/reports/{symbol}/{report_id}")
+async def delete_ceo_risk_report(symbol: str, report_id: int):
+    symbol = symbol.strip().upper()
+    if not SYMBOL_PATTERN.fullmatch(symbol):
+        raise HTTPException(400, "Enter a valid ticker symbol.")
+    with closing(connect_watchlist_db()) as connection:
+        deleted = connection.execute("DELETE FROM ceo_risk_reports WHERE symbol = ? AND report_id = ?", (symbol, report_id)).rowcount
+        if not deleted:
+            raise HTTPException(404, f"CEO Risk report {report_id} does not exist for {symbol}.")
+        count = int(connection.execute("SELECT COUNT(*) FROM ceo_risk_reports WHERE symbol = ?", (symbol,)).fetchone()[0])
+        connection.commit()
+    return {"symbol": symbol, "deleted_count": int(deleted), "report_count": count}
+
+
+@app.delete("/api/ceo-risk/reports/{symbol}")
+async def delete_all_ceo_risk_reports(symbol: str):
+    symbol = symbol.strip().upper()
+    if not SYMBOL_PATTERN.fullmatch(symbol):
+        raise HTTPException(400, "Enter a valid ticker symbol.")
+    with closing(connect_watchlist_db()) as connection:
+        deleted = connection.execute("DELETE FROM ceo_risk_reports WHERE symbol = ?", (symbol,)).rowcount
+        connection.commit()
+    return {"symbol": symbol, "deleted_count": int(deleted or 0), "report_count": 0}
+
 
 @app.get("/api/opportunities")
 async def opportunities(
