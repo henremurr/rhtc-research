@@ -106,3 +106,25 @@ def test_null_origin_without_form_token_is_rejected(monkeypatch, tmp_path):
     client = client_for(monkeypatch, tmp_path)
     client.get('/options/api/youtube/connect')
     assert client.post('/options/api/youtube/connect', headers={'origin': 'null'}).status_code == 403
+
+
+def test_real_dashboard_middleware_accepts_google_callback_without_dashboard_cookie(monkeypatch, tmp_path):
+    import re
+    from app.options.api import app as dashboard, DASHBOARD_SESSION_COOKIE, dashboard_session_token
+    client_for(monkeypatch, tmp_path)
+    password = 'test-dashboard-password-long-enough'
+    monkeypatch.setenv('RHTC_DASHBOARD_PASSWORD', password)
+    parent = FastAPI()
+    parent.mount('/options', dashboard)
+    client = TestClient(parent, base_url='https://testserver')
+    client.cookies.set(DASHBOARD_SESSION_COOKIE, dashboard_session_token(password), path='/options')
+    state = start(client)
+    client.cookies.delete(DASHBOARD_SESSION_COOKIE, path='/options')
+    result = httpx.Response(200, json={'refresh_token': 'callback-token', 'scope': oauth.SCOPE})
+    with patch.object(oauth.httpx.AsyncClient, 'post', new_callable=AsyncMock, return_value=result):
+        response = client.get('/options/api/youtube/callback', params={'state': state, 'code': 'code'}, follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers['location'] == '/options/?youtube=connected'
+    assert oauth.saved_refresh_token() == 'callback-token'
+    assert client.get('/options/api/youtube/status').status_code == 401
+    assert client.get('/options/api/youtube/callback?state=forged&code=code').status_code == 400

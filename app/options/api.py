@@ -132,6 +132,10 @@ try{{const response=await fetch(base+'/auth/login',{{method:'POST',headers:{{'Co
 async def require_dashboard_signin(request: Request, call_next):
     path = dashboard_local_path(request)
     public_paths = {"/login", "/auth/login", "/auth/logout", "/static/rhtc-signin-background.jpeg"}
+    # Google returns without the Strict dashboard cookie. The callback validates
+    # its own one-time state, browser cookie and PKCE before saving anything.
+    if path == "/api/youtube/callback" and request.method == "GET":
+        return await call_next(request)
     if path in public_paths:
         return await call_next(request)
 

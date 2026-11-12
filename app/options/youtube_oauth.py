@@ -110,6 +110,12 @@ def youtube_connect(request: Request, csrf: str = Form("")):
     params = dict(client_id=os.environ["YOUTUBE_CLIENT_ID"], redirect_uri=uri, response_type="code", scope=SCOPE, access_type="offline", prompt="consent select_account", state=state, code_challenge=base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("="), code_challenge_method="S256")
     response = RedirectResponse("https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params), status_code=303)
     response.set_cookie(COOKIE, browser, max_age=600, httponly=True, secure=True, samesite="lax", path=base(request) + "/api/youtube")
+    # Allow the existing signed dashboard session on Google's top-level return.
+    # Its original signed expiry is still enforced by the dashboard middleware.
+    from app.options.api import DASHBOARD_SESSION_COOKIE, DASHBOARD_SESSION_TTL
+    session = request.cookies.get(DASHBOARD_SESSION_COOKIE)
+    if session:
+        response.set_cookie(DASHBOARD_SESSION_COOKIE, session, max_age=DASHBOARD_SESSION_TTL, httponly=True, secure=True, samesite="lax", path=base(request))
     response.headers["Cache-Control"] = "no-store"
     return response
 
