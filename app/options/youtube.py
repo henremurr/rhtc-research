@@ -12,6 +12,7 @@ import httpx
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 
 from app.options.news import NewsPublishedInput, mark_news_published
+from app.options.youtube_oauth import saved_refresh_token
 
 router = APIRouter(prefix="/api/youtube", tags=["youtube"])
 BASE = Path(__file__).parent
@@ -33,9 +34,9 @@ SERIES_ARTWORKS: dict[str, tuple[str, str]] = {
 def missing_youtube_settings() -> list[str]:
     return [
         key
-        for key in ("YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET", "YOUTUBE_REFRESH_TOKEN")
+        for key in ("YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET")
         if not os.getenv(key)
-    ]
+    ] + ([] if saved_refresh_token() else ["YOUTUBE_REFRESH_TOKEN"])
 
 
 def artwork_for_series(series: str) -> Path:
@@ -113,7 +114,7 @@ async def refresh_access_token(client: httpx.AsyncClient) -> str:
         data={
             "client_id": os.environ["YOUTUBE_CLIENT_ID"],
             "client_secret": os.environ["YOUTUBE_CLIENT_SECRET"],
-            "refresh_token": os.environ["YOUTUBE_REFRESH_TOKEN"],
+            "refresh_token": saved_refresh_token(),
             "grant_type": "refresh_token",
         },
     )

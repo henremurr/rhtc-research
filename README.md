@@ -73,3 +73,18 @@ For Railway, add these secrets to the service Variables:
 - `YOUTUBE_REFRESH_TOKEN`
 
 The refresh token must be authorized for the YouTube upload scope and associated with the intended Rocking Horse Trading Company channel. The Google Cloud project must have YouTube Data API v3 enabled. New or unverified API projects may be restricted to private uploads until Google completes its compliance audit. The upload endpoint is protected by the existing dashboard sign-in. MP4 files are temporary and are deleted after the upload completes.
+
+### Connect YouTube from the dashboard
+Open **☰ → Connect YouTube**. Add the callback URL shown on that page to the
+Google Cloud web OAuth client's **Authorized redirect URIs**, and set
+`YOUTUBE_REDIRECT_URI` in Railway to that exact HTTPS URL. Keep the existing
+`YOUTUBE_CLIENT_ID` and `YOUTUBE_CLIENT_SECRET` for that client.
+The callback is `/options/api/youtube/callback` on the production dashboard domain.
+
+After consent, RHTC exchanges the code server-side, saves the refresh token encrypted
+in its existing SQLite database, and returns to the dashboard with a connection
+confirmation. Uploads automatically prefer this saved token over the legacy
+`YOUTUBE_REFRESH_TOKEN`. Use persistent `RHTC_DATA_DIR` storage so the connection
+survives deployments. Changing the client secret requires reconnecting the channel.
+The connection is shared by authorized users of this single-channel dashboard.
+Record this flow followed by a confirmed upload for the OAuth verification demo.

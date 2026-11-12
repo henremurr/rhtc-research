@@ -41,6 +41,8 @@ app = FastAPI(title="RHTC Options Dashboard", version="0.1.0")
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 app.include_router(news_router)
 app.include_router(youtube_router)
+from app.options.youtube_oauth import router as youtube_oauth_router
+app.include_router(youtube_oauth_router)
 app.include_router(x_router)
 app.include_router(user_guide_router)
 
