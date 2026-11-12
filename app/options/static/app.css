@@ -1227,3 +1227,18 @@ body.news-mode .workspace-toolbar-heading{gap:8px}
   #symbol-list .symbol-option-details{gap:2px}
   #symbol-list .symbol-description .symbol-lt-details{font-size:8px!important;letter-spacing:-.2px}
 }
+
+/* Keep the compact tablet rows readable after fitting every field on one line. */
+@media(max-width:1200px){
+  #symbol-list .symbol-entry:not(.editing){grid-template-columns:28px 3.5ch 5ch 5.3ch minmax(0,1fr) 28px!important;gap:2px;min-height:34px;padding:2px 2px}
+  #symbol-list .symbol-entry:not(.editing) .symbol-description{grid-template-columns:46px 42px 118px 135px 90px minmax(0,1fr);gap:3px}
+  #symbol-list .symbol-entry:not(.editing) .symbol-description b,
+  #symbol-list .symbol-entry:not(.editing) .symbol-description small,
+  #symbol-list .symbol-entry:not(.editing)>.symbol-pg-details{font-size:11px!important;line-height:1.15}
+  #symbol-list .symbol-buffett-score{width:5ch;font-size:12px!important}
+  #symbol-list .symbol-ceo-risk-score{width:5.3ch;font-size:12px}
+  #symbol-list .symbol-actions button.icon-button{width:28px;height:28px}
+  #symbol-list .symbol-actions button.icon-button svg{width:14px;height:14px}
+  #symbol-list .symbol-option-details{gap:3px}
+  #symbol-list .symbol-description .symbol-lt-details{font-size:10px!important;letter-spacing:-.15px}
+}
