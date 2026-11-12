@@ -1197,3 +1197,7 @@ body.news-mode .workspace-toolbar-heading{gap:8px}
 .symbol-buffett-score:hover{color:#80652e;text-decoration:underline;text-underline-offset:2px}
 .symbol-buffett-score:focus-visible,.symbol-ceo-risk-score:focus-visible,.buffett-report-ticker:focus-visible{outline:2px solid #b9944a;outline-offset:2px;border-radius:2px}
 :root[data-theme="dark"] .symbol-buffett-score:hover{color:#ffe58b}
+
+/* CEO Risk reports contain long evidence sections; make the report itself scrollable. */
+.ceo-risk-report-modal{display:block;overflow-x:hidden;overflow-y:auto;overscroll-behavior-y:contain;-webkit-overflow-scrolling:touch;touch-action:pan-y}
+.ceo-risk-report-modal .buffett-criterion p,.ceo-risk-report-modal .ceo-risk-scenario p{overflow-wrap:anywhere}
