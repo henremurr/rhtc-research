@@ -53,6 +53,11 @@ class NewsPeakInput(BaseModel):
     peak: str = Field(min_length=1, max_length=20)
 
 
+class NewsArtworkInput(BaseModel):
+    url: str = Field(min_length=8, max_length=2000)
+    artwork_theme: str = Field(min_length=1, max_length=50)
+
+
 class NewsDeleteInput(BaseModel):
     url: str = Field(min_length=8, max_length=2000)
 
@@ -70,6 +75,10 @@ class NewsContentInput(BaseModel):
 
 
 NEWS_PEAKS = {"AI/I", "EFM/I", "DS/I", "Cross-Peak", "Other"}
+NEWS_ARTWORK_THEMES = {
+    "ai_infrastructure", "energy_fuels_infrastructure", "defense_space_infrastructure",
+    "policy_power_news", "think_tank_watch", "three_peaks_audio_brief", "pentagon_contract_watch",
+}
 
 
 def detect_news_language(title: str, snippet: str) -> str:
@@ -153,6 +162,7 @@ def connect_db() -> sqlite3.Connection:
             published_at TEXT NOT NULL DEFAULT '',
             snippet TEXT NOT NULL DEFAULT '',
             peak TEXT NOT NULL DEFAULT 'Other',
+            youtube_series TEXT NOT NULL DEFAULT '',
             first_seen_at TEXT NOT NULL,
             last_seen_at TEXT NOT NULL,
             youtube_published INTEGER NOT NULL DEFAULT 0,
@@ -168,6 +178,7 @@ def connect_db() -> sqlite3.Connection:
     )
     existing_columns = {row["name"] for row in connection.execute("PRAGMA table_info(news_items)")}
     for column, declaration in (
+        ("youtube_series", "TEXT NOT NULL DEFAULT ''),
         ("youtube_published", "INTEGER NOT NULL DEFAULT 0"),
         ("youtube_video_id", "TEXT NOT NULL DEFAULT ''"),
         ("youtube_url", "TEXT NOT NULL DEFAULT ''"),
@@ -536,7 +547,7 @@ async def get_news(
     q: str | None = Query(default=None, max_length=120),
     publication: str | None = None,
 ):
-    query = """SELECT url,title,source,published_at,snippet,peak,first_seen_at,last_seen_at,youtube_published,youtube_video_id,youtube_url,youtube_published_at,youtube_privacy_status,x_published,x_post_id,x_post_url,x_published_at FROM news_items WHERE 1=1"""
+    query = """SELECT url,title,source,published_at,snippet,peak,youtube_series,first_seen_at,last_seen_at,youtube_published,youtube_video_id,youtube_url,youtube_published_at,youtube_privacy_status,x_published,x_post_id,x_post_url,x_published_at FROM news_items WHERE 1=1"""
     params: list[Any] = []
     if peak and peak not in {"All", "All Peaks"}:
         query += " AND peak = ?"
@@ -580,6 +591,25 @@ async def update_news_peak(data: NewsPeakInput) -> dict[str, Any]:
             raise HTTPException(404, "The story is no longer in the stored news feed.")
         connection.commit()
     return {"status": "updated", "url": url, "peak": data.peak}
+
+
+@router.patch("/artwork")
+async def update_news_artwork(data: NewsArtworkInput) -> dict[str, Any]:
+    """Save the theme artwork assigned to one news story."""
+    if data.artwork_theme not in NEWS_ARTWORK_THEMES:
+        raise HTTPException(400, "Choose a valid RHTC artwork theme.")
+    url = canonical_news_url(data.url)
+    if not url:
+        raise HTTPException(400, "A valid story URL is required.")
+    with closing(connect_db()) as connection:
+        result = connection.execute(
+            "UPDATE news_items SET youtube_series=? WHERE url=?",
+            (data.artwork_theme, url),
+        )
+        if result.rowcount == 0:
+            raise HTTPException(404, "The story is no longer in the stored news feed.")
+        connection.commit()
+    return {"status": "updated", "url": url, "artwork_theme": data.artwork_theme}
 
 
 @router.post("/add-content")
