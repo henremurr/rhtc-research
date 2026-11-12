@@ -1191,3 +1191,9 @@ body.news-mode .workspace-toolbar-heading{gap:8px}
 :root[data-theme="dark"] .ceo-risk-report-modal .ceo-risk-rating-high,:root[data-theme="dark"] .ceo-risk-report-modal .ceo-risk-rating-critical{background:#3c2728;color:#efb0ac}
 :root[data-theme="dark"] .ceo-risk-summary,:root[data-theme="dark"] .ceo-risk-scenario{color:#d1dae4;border-color:#3b4654}
 @media(max-width:760px){.ceo-risk-report-profile{grid-template-columns:1fr}.ceo-risk-report-profile .ceo-risk-summary{grid-column:auto}}
+
+/* Report links in the watchlist map directly to their matching report screens. */
+.symbol-buffett-score{appearance:none;padding:0;border:0;background:transparent;cursor:pointer;text-align:right}
+.symbol-buffett-score:hover{color:#80652e;text-decoration:underline;text-underline-offset:2px}
+.symbol-buffett-score:focus-visible,.symbol-ceo-risk-score:focus-visible,.buffett-report-ticker:focus-visible{outline:2px solid #b9944a;outline-offset:2px;border-radius:2px}
+:root[data-theme="dark"] .symbol-buffett-score:hover{color:#ffe58b}
