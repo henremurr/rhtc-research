@@ -178,7 +178,7 @@ def connect_db() -> sqlite3.Connection:
     )
     existing_columns = {row["name"] for row in connection.execute("PRAGMA table_info(news_items)")}
     for column, declaration in (
-        ("youtube_series", "TEXT NOT NULL DEFAULT ''),
+        ("youtube_series", "TEXT NOT NULL DEFAULT ''"),
         ("youtube_published", "INTEGER NOT NULL DEFAULT 0"),
         ("youtube_video_id", "TEXT NOT NULL DEFAULT ''"),
         ("youtube_url", "TEXT NOT NULL DEFAULT ''"),
