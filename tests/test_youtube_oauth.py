@@ -74,3 +74,21 @@ def test_missing_permission_keeps_existing_token(monkeypatch, tmp_path):
         response = client.get('/options/api/youtube/callback', params={'state': state, 'code': 'code'})
     assert 'did not grant' in response.text
     assert oauth.saved_refresh_token() == 'existing'
+
+
+def test_invalid_callback_shows_setup_instead_of_json_error(monkeypatch, tmp_path):
+    client = client_for(monkeypatch, tmp_path)
+    monkeypatch.setenv('YOUTUBE_REDIRECT_URI', 'wrong')
+    response = client.post('/options/api/youtube/connect', headers={'origin': 'https://testserver'})
+    assert response.status_code == 200
+    assert 'text/html' in response.headers['content-type']
+    assert 'Return to dashboard' in response.text
+    assert 'https://testserver/options/api/youtube/callback' in response.text
+    assert 'disabled' in response.text
+
+
+def test_railway_domain_supplies_default_callback(monkeypatch, tmp_path):
+    client_for(monkeypatch, tmp_path)
+    monkeypatch.delenv('YOUTUBE_REDIRECT_URI')
+    monkeypatch.setenv('RAILWAY_PUBLIC_DOMAIN', 'example.up.railway.app')
+    assert oauth.redirect_uri() == 'https://example.up.railway.app/options/api/youtube/callback'
