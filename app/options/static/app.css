@@ -1211,3 +1211,19 @@ body.news-mode .workspace-toolbar-heading{gap:8px}
 :root[data-theme="dark"] .buffett-screen-controls #buffett-screen-btn:hover{background:#4a3f29}
 :root[data-theme="dark"] .buffett-screen-controls #ceo-risk-screen-btn{border-color:#805052;background:#3c2728;color:#f09b91}
 :root[data-theme="dark"] .buffett-screen-controls #ceo-risk-screen-btn:hover{background:#4b2f31}
+
+/* Compact the Watchlist Manager on tablet screens without wrapping row content. */
+@media(max-width:1200px){
+  #symbol-list{overflow-x:hidden!important}
+  #symbol-list .symbol-entry:not(.editing){grid-template-columns:26px 3.5ch 4.5ch 4.8ch minmax(0,1fr) 26px!important;gap:2px;min-height:32px;padding:1px 2px}
+  #symbol-list .symbol-entry:not(.editing) .symbol-description{grid-template-columns:42px 38px 105px 120px 78px minmax(0,1fr);gap:2px;min-width:0}
+  #symbol-list .symbol-entry:not(.editing) .symbol-description b,
+  #symbol-list .symbol-entry:not(.editing) .symbol-description small,
+  #symbol-list .symbol-entry:not(.editing)>.symbol-pg-details{font-size:9px!important;line-height:1.1}
+  #symbol-list .symbol-buffett-score{width:4.5ch;font-size:10px!important}
+  #symbol-list .symbol-ceo-risk-score{width:4.8ch;font-size:10px}
+  #symbol-list .symbol-actions button.icon-button{width:26px;height:26px}
+  #symbol-list .symbol-actions button.icon-button svg{width:13px;height:13px}
+  #symbol-list .symbol-option-details{gap:2px}
+  #symbol-list .symbol-description .symbol-lt-details{font-size:8px!important;letter-spacing:-.2px}
+}
