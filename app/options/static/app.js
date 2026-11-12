@@ -732,9 +732,62 @@ async function copyAnalysisPodcastTranscript(){const text=$('#analysis-podcast-t
 function preferredYouTubeSeries(story){const combined=(story.title+' '+story.snippet+' '+story.url).toLowerCase();if(/think[ -]?tank|hudson|fdd|heritage|csis|afpi/.test(combined))return'think_tank_watch';if(/pentagon|contract|award|procurement/.test(combined))return'pentagon_contract_watch';return({'AI/I':'ai_infrastructure','EFM/I':'energy_fuels_infrastructure','DS/I':'defense_space_infrastructure','Cross-Peak':'policy_power_news','Other':'policy_power_news'})[story.peak]||'policy_power_news'}
 function youtubeDescription(transcript,story,citationList=activeAnalysisCitations){const citations=citationList.map(item=>item.url).filter(Boolean).slice(0,10);const parts=[transcript.slice(0,2600).trim(),story.url?'Story: '+story.url:'',citations.length?'Additional sources:\n'+citations.join('\n'):'','RHTC Three Peaks analysis. Educational and informational content only; not investment advice.'];return parts.filter(Boolean).join('\n\n').slice(0,5000)}
 async function refreshYouTubeStatus(){const status=$('#youtube-publish-status');status.textContent='Checking YouTube connection…';try{const response=await fetch('/options/api/youtube/status');const data=await response.json();youtubeReady=Boolean(response.ok&&data.configured);if(youtubeReady){status.textContent='YouTube connected. News publishing requests Public visibility; YouTube may keep API uploads Private until this project passes its audit.'}else{const missing=(data.missing||[]).join(', ');status.textContent=missing?'Add '+missing+' in Railway Variables to enable uploads.':'MP4 conversion is unavailable in this deployment.'}}catch(error){youtubeReady=false;status.textContent='Could not check YouTube upload readiness.'}updateYouTubePublishButton()}
-function updateYouTubePublishButton(){const button=$('#youtube-publish-btn');if(button)button.disabled=!youtubeReady||!analysisPodcastAudioBlob||!$('#youtube-review-confirm').checked}
+function updateYouTubePublishButton(){const button=$('#youtube-publish-btn');if(button)button.disabled=analysisPublishBusy||!youtubeReady||!analysisPodcastAudioBlob||!$('#youtube-review-confirm').checked}
 function setupYouTubePublish(title,subtitle,transcript){const section=$('#youtube-publish-section');if(!activeNewsStory){section.hidden=true;return}section.hidden=false;const story=activeNewsStory;$('#youtube-video-title').value=('RHTC Policy & Power | '+story.title).slice(0,100);$('#youtube-video-description').value=youtubeDescription(transcript,story);$('#youtube-series').value=preferredYouTubeSeries(story);$('#youtube-review-confirm').checked=false;$('#youtube-publish-status').textContent='Review the complete MP3, title, description, and artwork before uploading.';refreshYouTubeStatus()}
-async function publishAnalysisToYouTube(){const button=$('#youtube-publish-btn'),status=$('#youtube-publish-status');if(!analysisPodcastAudioBlob||!activeNewsStory){status.textContent='Create the analysis MP3 first.';return}if(!$('#youtube-review-confirm').checked){status.textContent='Confirm that you reviewed the MP3 and publishing details.';return}const form=new FormData();form.append('audio',analysisPodcastAudioBlob,'RHTC_news_analysis.mp3');form.append('title',$('#youtube-video-title').value.trim());form.append('description',$('#youtube-video-description').value.trim());form.append('series',$('#youtube-series').value);form.append('privacy_status',$('#youtube-privacy').value);button.disabled=true;button.textContent='Converting and uploading…';status.textContent='Creating the branded MP4 and uploading it to YouTube…';try{const response=await fetch('/options/api/youtube/publish',{method:'POST',body:form});const data=await response.json();if(!response.ok)throw Error(data.detail||'YouTube upload failed.');status.innerHTML='Uploaded as '+safe(data.privacy_status)+': <a href="'+safe(data.url)+'" target="_blank" rel="noopener noreferrer">Open on YouTube</a>';toast('YouTube upload complete.')}catch(error){status.textContent=error.message||'YouTube upload failed.'}finally{button.textContent='▶ Publish to YouTube';updateYouTubePublishButton()}}
+const analysisYouTubeUploads=new Map();
+let analysisPublishBusy=false,activeNewsPublishCard=null;
+async function publishAnalysisToYouTube(){
+  const button=$('#youtube-publish-btn'),status=$('#youtube-publish-status'),story=activeNewsStory;
+  if(analysisPublishBusy)return;
+  if(!analysisPodcastAudioBlob||!story){status.textContent='Create the analysis MP3 first.';return}
+  if(!$('#youtube-review-confirm').checked){status.textContent='Confirm that you reviewed the MP3 and publishing details.';return}
+  const sourceUrl=story.url||'';
+  const card=[...document.querySelectorAll('.news-item')].find(item=>item.dataset.newsUrl===sourceUrl)||activeNewsPublishCard;
+  if(!sourceUrl||!card||card.dataset.newsUrl!==sourceUrl){status.textContent='Reopen this story from the news feed before publishing.';return}
+  const feedButton=card.querySelector('.news-publish-btn');
+  if(feedButton.disabled&&card.dataset.newsYoutubePublished!=='true'){status.textContent='This story is already being published from the news feed.';return}
+  analysisPublishBusy=true;button.disabled=true;feedButton.disabled=true;
+  let uploaded=analysisYouTubeUploads.get(sourceUrl);
+  try{
+    if(!uploaded&&card.dataset.newsYoutubePublished==='true')uploaded={url:card.dataset.newsYoutubeUrl,privacy_status:card.dataset.newsYoutubePrivacy};
+    if(!uploaded){
+      const form=new FormData();
+      form.append('audio',analysisPodcastAudioBlob,'RHTC_news_analysis.mp3');
+      form.append('title',$('#youtube-video-title').value.trim());
+      form.append('description',$('#youtube-video-description').value.trim());
+      form.append('series',$('#youtube-series').value);
+      form.append('privacy_status',$('#youtube-privacy').value);
+      form.append('story_url',sourceUrl);
+      button.textContent='Converting and uploading…';status.textContent='Creating the branded MP4 and uploading it to YouTube…';
+      const response=await fetch('/options/api/youtube/publish',{method:'POST',body:form});
+      if(!response.ok)throw Error(await readApiError(response,'YouTube upload failed.'));
+      uploaded=await response.json();
+      if(!uploaded.url||!uploaded.video_id)throw Error('YouTube did not return a confirmed video link.');
+      analysisYouTubeUploads.set(sourceUrl,uploaded);
+    }
+    card.dataset.newsYoutubePublished='true';card.dataset.newsYoutubeUrl=uploaded.url;card.dataset.newsYoutubePrivacy=uploaded.privacy_status||'private';
+    updateNewsPublishControl(card);
+    if(!['public','unlisted'].includes(String(uploaded.privacy_status).toLowerCase())){
+      status.innerHTML='Uploaded to YouTube as '+safe(uploaded.privacy_status||'private')+'. Make the video Public or Unlisted before posting to X. <a href="'+safe(uploaded.url)+'" target="_blank" rel="noopener noreferrer">Open YouTube</a>';
+      return;
+    }
+    button.textContent='Posting to X…';status.textContent='YouTube uploaded. Posting its video link to X…';
+    const complete=await publishNewsStoryToX(card,feedButton);
+    if(complete){status.innerHTML='Published to YouTube and X. '+card.querySelector('.news-publish-status').innerHTML;toast('Published to YouTube and X.');}
+    else status.textContent='YouTube uploaded. '+card.querySelector('.news-publish-status').textContent;
+  }catch(error){
+    status.textContent=error.message||'Publishing failed.';
+    // The upload endpoint saves its confirmed video before responding. Recover
+    // that record so retrying the report does not upload the same story again.
+    await loadNews({quiet:true});
+    activeNewsPublishCard=[...document.querySelectorAll('.news-item')].find(item=>item.dataset.newsUrl===sourceUrl)||card;
+  }finally{
+    updateNewsPublishControl(card);
+    await loadNews({quiet:true});
+    analysisPublishBusy=false;button.textContent='▶ Publish to YouTube + X';updateYouTubePublishButton();
+  }
+}
+
 
 function updateAnalysisSpeechControls(){const read=$('#analysis-read-btn'),stop=$('#analysis-stop-btn'),supported='speechSynthesis'in window&&'SpeechSynthesisUtterance'in window;if(!read||!stop)return;read.hidden=!supported;read.disabled=!supported;read.textContent=activeAnalysisSpeech?(activeAnalysisSpeech.paused?'▶ Resume':'Ⅱ Pause'):'🔊 Read analysis';stop.hidden=!activeAnalysisSpeech}
 let autoReloadTimer=null;
@@ -747,7 +800,7 @@ function toggleNewsSpeech(card){if(!('speechSynthesis'in window)||!('SpeechSynth
 async function analyzeNewsStory(card,button){
   const modal=$('#symbol-analysis-modal'),body=$('#symbol-analysis-body'),sources=$('#symbol-analysis-sources'),status=$('#symbol-analysis-status');
   const title=card.dataset.newsTitle||card.querySelector('h3 a')?.textContent||'News story';
-  activeNewsStory={title,url:card.dataset.newsUrl||'',snippet:card.dataset.newsSnippet||'',peak:card.dataset.newsPeak||'Other'};activeAnalysisCitations=[];$('#symbol-analysis-title').textContent='RHTC Policy & Power';
+  activeNewsPublishCard=card;activeNewsStory={title,url:card.dataset.newsUrl||'',snippet:card.dataset.newsSnippet||'',peak:card.dataset.newsPeak||'Other'};activeAnalysisCitations=[];$('#symbol-analysis-title').textContent='RHTC Policy & Power';
   stopNewsSpeech(false);resetAnalysisPodcast();$('#analysis-read-btn').hidden=true;$('#analysis-mp3-btn').disabled=true;$('#symbol-analysis-subtitle').textContent=`${title} · Watchlist companies, Three Peaks, and thesis`;body.textContent='Checking current sources and mapping potential impacts…';sources.innerHTML='';status.textContent='Uses OpenAI web search. Impacts are analytical assessments, not price targets.';openFullscreenModal(modal,modal.querySelector('.analysis-modal'),$('#analysis-fullscreen-toggle'));button.disabled=true;
   try{
     const response=await fetch('/options/api/news/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,url:card.dataset.newsUrl||'',snippet:card.dataset.newsSnippet||'',published_at:card.dataset.newsPublishedAt||''})});
