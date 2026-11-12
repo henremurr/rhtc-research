@@ -3010,7 +3010,7 @@ async def create_analysis_podcast_transcript(data: AnalysisPodcastTranscriptInpu
     working_links = {url for url, reachable in zip(candidate_links, link_results) if reachable}
     analysis = clean_podcast_analysis_links(data.analysis.strip(), working_links)
     if not analysis:
-        analysis = data.analysis.strip()
+        analysis = "No usable source analysis remains after removing unreachable links."
     instructions = (
         "Turn the supplied RHTC analysis into a polished, audio-first episode script for YouTube. "
         "Use only facts and conclusions present in the source analysis; do not add or update facts. "
@@ -3023,7 +3023,7 @@ async def create_analysis_podcast_transcript(data: AnalysisPodcastTranscriptInpu
         "Do not invent a narrator name, date, price, forecast, source, or recommendation. "
         "Return only the spoken transcript, with no production notes, word count, or prefatory explanation."
     )
-    source = f"Episode subject: {data.title.strip()}\nContext: {data.subtitle.strip()}\n\nSource analysis:\n{analysis}
+    source = f"Episode subject: {data.title.strip()}\nContext: {data.subtitle.strip()}\n\nSource analysis:\n{analysis}"
     try:
         from openai import AsyncOpenAI
         client = AsyncOpenAI(api_key=key, timeout=150, max_retries=0)
