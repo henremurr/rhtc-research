@@ -22,8 +22,11 @@ def client_for(monkeypatch, tmp_path):
     return TestClient(parent, base_url='https://testserver')
 
 
-def start(client):
-    response = client.post('/options/api/youtube/connect', headers={'origin': 'https://testserver'}, follow_redirects=False)
+def start(client, origin='https://testserver'):
+    import re
+    page = client.get('/options/api/youtube/connect')
+    csrf = re.search(r'name="csrf" value="([^"]+)"', page.text).group(1)
+    response = client.post('/options/api/youtube/connect', headers={'origin': origin}, data={'csrf': csrf}, follow_redirects=False)
     assert response.status_code == 303
     return parse_qs(urlsplit(response.headers['location']).query)['state'][0]
 
@@ -92,3 +95,14 @@ def test_railway_domain_supplies_default_callback(monkeypatch, tmp_path):
     monkeypatch.delenv('YOUTUBE_REDIRECT_URI')
     monkeypatch.setenv('RAILWAY_PUBLIC_DOMAIN', 'example.up.railway.app')
     assert oauth.redirect_uri() == 'https://example.up.railway.app/options/api/youtube/callback'
+
+
+def test_null_origin_from_private_referrer_policy_is_accepted_with_csrf(monkeypatch, tmp_path):
+    client = client_for(monkeypatch, tmp_path)
+    assert start(client, origin='null')
+
+
+def test_null_origin_without_form_token_is_rejected(monkeypatch, tmp_path):
+    client = client_for(monkeypatch, tmp_path)
+    client.get('/options/api/youtube/connect')
+    assert client.post('/options/api/youtube/connect', headers={'origin': 'null'}).status_code == 403
