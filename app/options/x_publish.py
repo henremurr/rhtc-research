@@ -14,9 +14,11 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.options.news import NewsXPublishedInput, mark_news_x_published
+from app.options.youtube import ARTWORK_DIR, SERIES_ARTWORKS
 
 router = APIRouter(prefix="/api/x", tags=["x"])
 CREATE_POST_URL = "https://api.x.com/2/tweets"
+MEDIA_UPLOAD_URL = "https://api.x.com/2/media/upload"
 X_SETTINGS = ("X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_TOKEN_SECRET")
 
 
@@ -25,6 +27,7 @@ class XPublishInput(BaseModel):
     url: str = Field(min_length=8, max_length=2000)
     peak: str = Field(default="Other", max_length=30)
     story_url: str = Field(default="", max_length=2000)
+    artwork_theme: str = Field(default="policy_power_news", max_length=80)
 
 
 def missing_x_settings() -> list[str]:
@@ -57,6 +60,22 @@ def oauth1_header(method: str, url: str) -> str:
     return "OAuth " + ", ".join(
         f'{percent_encode(key)}="{percent_encode(value)}"' for key, value in sorted(params.items())
     )
+
+
+def x_error_message(response: httpx.Response, fallback: str) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        return fallback
+    if not isinstance(payload, dict):
+        return fallback
+    for key in ("detail", "title", "message"):
+        if payload.get(key):
+            return str(payload[key])
+    errors = payload.get("errors")
+    if isinstance(errors, list) and errors and isinstance(errors[0], dict):
+        return str(errors[0].get("message") or fallback)
+    return fallback
 
 
 def compose_x_post(title: str, url: str, peak: str) -> str:
@@ -92,20 +111,34 @@ async def publish_to_x(data: XPublishInput) -> dict[str, str]:
     hostname = (urlparse(data.url).hostname or "").lower()
     if hostname != "youtube.com" and not hostname.endswith(".youtube.com") and hostname != "youtu.be":
         raise HTTPException(400, "Publish the RHTC YouTube video first. X posts must link to its YouTube URL.")
+    artwork = SERIES_ARTWORKS.get(data.artwork_theme)
+    if not artwork:
+        raise HTTPException(400, "Choose a valid RHTC artwork theme before publishing to X.")
+    artwork_path = ARTWORK_DIR / artwork[1]
+    if not artwork_path.is_file():
+        raise HTTPException(503, f"The {artwork[0]} artwork is missing from this deployment.")
+
     text = compose_x_post(data.title, data.url, data.peak)
     async with httpx.AsyncClient(timeout=30) as client:
+        media_response = await client.post(
+            MEDIA_UPLOAD_URL,
+            files={"media": (artwork_path.name, artwork_path.read_bytes(), "image/jpeg")},
+            data={"media_category": "tweet_image"},
+            headers={"Authorization": oauth1_header("POST", MEDIA_UPLOAD_URL)},
+        )
+        if media_response.status_code not in (200, 201):
+            raise HTTPException(502, "X could not upload the selected artwork: " + x_error_message(media_response, "check the app's media upload permissions and API access."))
+        try:
+            media_id = str(media_response.json()["data"]["id"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(502, "X accepted the artwork but returned no media ID.") from exc
         response = await client.post(
             CREATE_POST_URL,
-            json={"text": text},
+            json={"text": text, "media": {"media_ids": [media_id]}},
             headers={"Authorization": oauth1_header("POST", CREATE_POST_URL)},
         )
     if response.status_code not in (200, 201):
-        try:
-            payload = response.json()
-            message = payload.get("detail") or payload.get("title") or payload.get("errors", [{}])[0].get("message")
-        except Exception:
-            message = ""
-        raise HTTPException(502, "X could not publish the article: " + (str(message) if message else "check the app's write permission and API credits."))
+        raise HTTPException(502, "X could not publish the article: " + x_error_message(response, "check the app's write permission and API credits."))
     try:
         post_id = str(response.json()["data"]["id"])
     except (KeyError, TypeError, ValueError) as exc:

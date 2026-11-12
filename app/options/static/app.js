@@ -895,7 +895,7 @@ function unlockXRetry(card){const sourceUrl=card.dataset.newsUrl||'';if(!sourceU
 async function publishNewsStoryToX(card,button){
   const status=card.querySelector('.news-publish-status');
   const sourceUrl=card.dataset.newsUrl||'',youtubeUrl=card.dataset.newsYoutubeUrl||'';
-  const story={title:card.dataset.newsTitle||card.querySelector('h3 a')?.textContent||'News story',url:youtubeUrl,peak:card.dataset.newsPeak||'Other',story_url:sourceUrl};
+  const story={title:card.dataset.newsTitle||card.querySelector('h3 a')?.textContent||'News story',url:youtubeUrl,peak:card.dataset.newsPeak||'Other',story_url:sourceUrl,artwork_theme:card.dataset.newsArtworkTheme||'policy_power_news'};
   if(!sourceUrl||sourceUrl==='#'){toast('This story has no valid source link.');return false}
   if(card.dataset.newsXPublished==='true'){updateNewsPublishControl(card);return true}
   if(!/^https?:\/\//i.test(youtubeUrl)||String(card.dataset.newsYoutubePrivacy||'').toLowerCase()==='private'){status.hidden=false;status.textContent='Publish this story publicly or unlisted to YouTube first so X can link to the RHTC video.';return false}
