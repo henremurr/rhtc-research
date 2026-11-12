@@ -55,6 +55,8 @@ def base(request):
 
 def redirect_uri():
     uri = os.getenv("YOUTUBE_REDIRECT_URI", "").strip()
+    if not uri and os.getenv("RAILWAY_PUBLIC_DOMAIN"):
+        uri = "https://" + os.environ["RAILWAY_PUBLIC_DOMAIN"].strip().rstrip("/") + "/options/api/youtube/callback"
     parsed = urlsplit(uri)
     if parsed.scheme != "https" or not parsed.netloc or parsed.query or parsed.fragment or not parsed.path.endswith("/api/youtube/callback"):
         raise HTTPException(503, "Set YOUTUBE_REDIRECT_URI to this dashboard's HTTPS callback URL and register it in Google Cloud.")
@@ -62,8 +64,15 @@ def redirect_uri():
 
 
 def page(request, message=""):
-    callback = str(request.url_for("youtube_callback"))
-    configured = all(os.getenv(k) for k in ("YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET", "YOUTUBE_REDIRECT_URI"))
+    callback = str(request.url_for("youtube_callback")).replace("http://", "https://", 1)
+    setup_error = ""
+    try:
+        callback = redirect_uri()
+    except HTTPException as exc:
+        setup_error = str(exc.detail)
+    configured = not setup_error and all(os.getenv(k) for k in ("YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET"))
+    if not message and setup_error:
+        message = "YouTube connection setup is incomplete. Follow the steps below; you can still return to the dashboard."
     with database() as db:
         connected = bool(db.execute("SELECT 1 FROM youtube_connection WHERE id=1").fetchone())
     prefix = html.escape(base(request), quote=True)
@@ -78,7 +87,10 @@ def youtube_connection_page(request: Request):
 
 @router.post("/connect")
 def youtube_connect(request: Request):
-    uri = redirect_uri()
+    try:
+        uri = redirect_uri()
+    except HTTPException:
+        return page(request, "The callback setting is missing or invalid. Use the HTTPS URL below in Google Cloud and Railway, then try again.")
     # A top-level form POST must originate from this dashboard.
     expected = urlsplit(uri)
     if request.headers.get("origin") != f"{expected.scheme}://{expected.netloc}":
