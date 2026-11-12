@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import sqlite3
 import sys
@@ -35,6 +36,58 @@ class OptionsRoutesTest(unittest.TestCase):
                             raise AssertionError(f"Test sign-in failed: {login.status_code} {login.text}")
                     return await client.request(method, path, **kwargs)
         return asyncio.run(run())
+
+    def test_ceo_risk_reports_save_navigate_delete_and_purge(self):
+        payload = {
+            "company_name": "Example Corp", "ceo_name": "Jane Doe", "as_of": "2026-11-12",
+            "confidence": 80, "summary": "Moderate CEO dependency with an established executive bench.",
+            "factors": [
+                {"id": i, "name": f"Factor {i}", "risk_score": score, "evidence": f"Evidence {i}."}
+                for i, score in enumerate([0, 1, 2, 3, 4, 1], 1)
+            ],
+            "scenarios": [
+                {"event": event, "likely_effect": "Leadership disruption.", "recovery_path": "The board and executives respond."}
+                for event in ["Temporary absence", "Permanent departure", "Damaging event"]
+            ],
+            "monitor_signals": ["Leadership departures", "Succession disclosures"],
+        }
+
+        class FakeResponse:
+            output_text = json.dumps(payload)
+            output = []
+
+        class FakeResponses:
+            async def create(self, **kwargs):
+                return FakeResponse()
+
+        class FakeOpenAI:
+            def __init__(self, **kwargs):
+                self.responses = FakeResponses()
+
+        page = self.request("GET", "/options/")
+        self.assertIn('id="ceo-risk-screen-btn"', page.text)
+        self.assertIn('id="ceo-risk-report-modal"', page.text)
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=False), patch("openai.AsyncOpenAI", FakeOpenAI):
+            created = self.request("POST", "/options/api/ceo-risk", json={"symbol": "MU"})
+        self.assertEqual(created.status_code, 200, created.text)
+        self.assertEqual(created.json()["risk_score"], 42.5)
+        self.assertEqual(created.json()["risk_rating"], "Elevated")
+        history = self.request("GET", "/options/api/ceo-risk/reports/MU?offset=0")
+        self.assertEqual(history.status_code, 200)
+        self.assertEqual(history.json()["report"]["company_name"], "Example Corp")
+        report_id = history.json()["report"]["report_id"]
+        deleted = self.request("DELETE", f"/options/api/ceo-risk/reports/MU/{report_id}")
+        self.assertEqual(deleted.status_code, 200)
+        self.assertEqual(deleted.json()["report_count"], 0)
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=False), patch("openai.AsyncOpenAI", FakeOpenAI):
+            self.assertEqual(self.request("POST", "/options/api/ceo-risk", json={"symbol": "MU"}).status_code, 200)
+        purged = self.request("DELETE", "/options/api/ceo-risk/reports")
+        self.assertEqual(purged.status_code, 200)
+        self.assertEqual(purged.json()["deleted_count"], 1)
+        rows = self.request("GET", "/options/api/watchlist").json()["rows"]
+        mu = next(row for row in rows if row["symbol"] == "MU")
+        self.assertEqual(mu["ceo_risk_report_count"], 0)
+        self.assertIsNone(mu["ceo_risk_score"])
 
     def test_options_unavailable_row_keeps_underlying_stock_quote(self):
         async def fake_get(provider, path, params=None):

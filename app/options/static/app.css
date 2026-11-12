@@ -1168,3 +1168,26 @@ body.news-mode .workspace-toolbar-heading{gap:8px}
   .paste-news-actions{align-items:stretch;flex-direction:column}
   .paste-news-actions button{justify-content:center;width:100%}
 }
+
+/* CEO Risk uses the same saved-report workflow and watchlist density as Buffett. */
+.symbol-entry:not(.editing){grid-template-columns:30px 3.5ch 5ch 5.5ch minmax(0,1fr) 30px!important}
+.symbol-ceo-risk-score{display:block;width:5.5ch;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0;border:0;background:transparent;color:#b34a40;font:700 11px var(--mono);text-align:right;cursor:pointer}
+.symbol-ceo-risk-score:hover{color:#7d2923;text-decoration:underline;text-underline-offset:2px}
+:root[data-theme="dark"] .symbol-ceo-risk-score{color:#f09b91}
+:root[data-theme="dark"] .symbol-ceo-risk-score:hover{color:#ffc3bb}
+.ceo-risk-report-modal>.modal-close{position:sticky;top:0;z-index:20;display:grid;place-items:center;width:44px;height:44px;margin:0 0 8px auto;padding:0;border:1px solid #e2e6ea;border-radius:50%;background:#fff;color:#596575;font-size:24px;line-height:1;touch-action:manipulation;box-shadow:0 1px 5px #1823331a}
+.ceo-risk-report-profile{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}
+.ceo-risk-summary{grid-column:1/-1;margin:8px 0;color:#536173;font:12px/1.6 var(--sans);white-space:pre-wrap}
+.ceo-risk-scenario{margin:0 0 8px;padding:10px 12px;border:1px solid #e8ebee;border-radius:5px;list-style-position:inside}
+.ceo-risk-scenario p{margin:5px 0 0;font:11px/1.5 var(--sans)}
+.ceo-risk-report-modal ul{font:11px/1.6 var(--sans)}
+.ceo-risk-report-modal .ceo-risk-rating-low{background:#e9f5ef;color:#267555}
+.ceo-risk-report-modal .ceo-risk-rating-moderate{background:#edf2f7;color:#435a73}
+.ceo-risk-report-modal .ceo-risk-rating-elevated{background:#f7f0df;color:#8a651d}
+.ceo-risk-report-modal .ceo-risk-rating-high,.ceo-risk-report-modal .ceo-risk-rating-critical{background:#fbefee;color:#a94540}
+:root[data-theme="dark"] .ceo-risk-report-modal .ceo-risk-rating-low{background:#19372f;color:#b5dec7}
+:root[data-theme="dark"] .ceo-risk-report-modal .ceo-risk-rating-moderate{background:#253342;color:#d1dae4}
+:root[data-theme="dark"] .ceo-risk-report-modal .ceo-risk-rating-elevated{background:#3b3323;color:#f2d28a}
+:root[data-theme="dark"] .ceo-risk-report-modal .ceo-risk-rating-high,:root[data-theme="dark"] .ceo-risk-report-modal .ceo-risk-rating-critical{background:#3c2728;color:#efb0ac}
+:root[data-theme="dark"] .ceo-risk-summary,:root[data-theme="dark"] .ceo-risk-scenario{color:#d1dae4;border-color:#3b4654}
+@media(max-width:760px){.ceo-risk-report-profile{grid-template-columns:1fr}.ceo-risk-report-profile .ceo-risk-summary{grid-column:auto}}
