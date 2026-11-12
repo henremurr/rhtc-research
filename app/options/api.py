@@ -2433,6 +2433,7 @@ class AnalysisPodcastTranscriptInput(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     subtitle: str = Field(default="", max_length=2000)
     analysis: str = Field(min_length=1, max_length=14000)
+    links: list[str] = Field(default_factory=list, max_length=30)
 
 
 class AnalysisPodcastAudioInput(BaseModel):
@@ -2957,11 +2958,59 @@ def strip_mp3_metadata(payload: bytes) -> bytes:
     return payload[start:end]
 
 
+async def podcast_link_is_reachable(value: str) -> bool:
+    current = value.strip()
+    timeout = httpx.Timeout(8.0, connect=3.0)
+    headers = {
+        "User-Agent": "RHTC-Research/1.0",
+        "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5",
+        "Range": "bytes=0-0",
+    }
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False, trust_env=False, headers=headers) as client:
+        for _ in range(6):
+            try:
+                await asyncio.to_thread(_validate_public_source_url, current)
+                async with client.stream("GET", current) as response:
+                    if response.is_redirect:
+                        location = response.headers.get("location")
+                        if not location:
+                            return False
+                        current = urljoin(current, location)
+                        continue
+                    return 200 <= response.status_code < 300
+            except (ValueError, httpx.HTTPError, OSError, asyncio.TimeoutError):
+                return False
+    return False
+
+
+def clean_podcast_analysis_links(analysis: str, working_links: set[str]) -> str:
+    markdown_link = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)", re.IGNORECASE)
+
+    def replace_markdown_link(match: re.Match[str]) -> str:
+        url = match.group(2).rstrip(".,;:!?")
+        return match.group(1) if url in working_links else ""
+
+    cleaned = markdown_link.sub(replace_markdown_link, analysis)
+    for raw_url in re.findall(r"https?://[^\s<>()\]]+", analysis, flags=re.IGNORECASE):
+        url = raw_url.rstrip(".,;:!?")
+        if url not in working_links:
+            cleaned = cleaned.replace(raw_url, "")
+    return re.sub(r"[ \t]{2,}", " ", cleaned).strip()
+
+
 @app.post("/api/analysis-podcast/transcript")
 async def create_analysis_podcast_transcript(data: AnalysisPodcastTranscriptInput):
     key = os.getenv("OPENAI_API_KEY")
     if not key:
         raise HTTPException(503, "YouTube transcript generation is unavailable. Configure OPENAI_API_KEY in the server settings.")
+    raw_urls = list(data.links)
+    raw_urls.extend(re.findall(r"https?://[^\s<>()\]]+", data.analysis, flags=re.IGNORECASE))
+    candidate_links = list(dict.fromkeys(url.rstrip(".,;:!?") for url in raw_urls if url.strip()))[:30]
+    link_results = await asyncio.gather(*(podcast_link_is_reachable(url) for url in candidate_links))
+    working_links = {url for url, reachable in zip(candidate_links, link_results) if reachable}
+    analysis = clean_podcast_analysis_links(data.analysis.strip(), working_links)
+    if not analysis:
+        analysis = data.analysis.strip()
     instructions = (
         "Turn the supplied RHTC analysis into a polished, audio-first episode script for YouTube. "
         "Use only facts and conclusions present in the source analysis; do not add or update facts. "
@@ -2974,7 +3023,7 @@ async def create_analysis_podcast_transcript(data: AnalysisPodcastTranscriptInpu
         "Do not invent a narrator name, date, price, forecast, source, or recommendation. "
         "Return only the spoken transcript, with no production notes, word count, or prefatory explanation."
     )
-    source = f"Episode subject: {data.title.strip()}\nContext: {data.subtitle.strip()}\n\nSource analysis:\n{data.analysis.strip()}"
+    source = f"Episode subject: {data.title.strip()}\nContext: {data.subtitle.strip()}\n\nSource analysis:\n{analysis}
     try:
         from openai import AsyncOpenAI
         client = AsyncOpenAI(api_key=key, timeout=150, max_retries=0)
@@ -2993,7 +3042,12 @@ async def create_analysis_podcast_transcript(data: AnalysisPodcastTranscriptInpu
     transcript = f"{RHTC_SAFE_HARBOR}\n\n{transcript}"
     if len(transcript) > MAX_YOUTUBE_TRANSCRIPT_CHARS:
         raise HTTPException(502, "The transcript exceeded 11,500 characters including the RHTC safe-harbor statement. Try again to generate a shorter version.")
-    return {"episode_title": data.title.strip(), "transcript": transcript, "character_count": len(transcript)}
+    return {
+        "episode_title": data.title.strip(),
+        "transcript": transcript,
+        "character_count": len(transcript),
+        "validated_links": [url for url in candidate_links if url in working_links],
+    }
 
 
 @app.post("/api/analysis-podcast/audio")
