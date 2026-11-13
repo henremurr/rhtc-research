@@ -179,6 +179,24 @@ function renderEarningsEvents(quote={}){
   const row=(label,event,actual)=>'<div class="earnings-event"><b>'+label+'</b><span>'+dateLabel(event?.date)+'</span><span>EPS '+(actual?'actual ':'estimate ')+amount(actual?event?.eps_actual:event?.eps_estimate)+'</span>'+(actual&&event?.eps_estimate!==null&&event?.eps_estimate!==undefined?'<span>Estimate '+amount(event.eps_estimate)+'</span>':'')+'</div>';
   return '<section class="earnings-events"><h3>Earnings dates and EPS</h3><div class="earnings-events-grid">'+row('Prior reported',prior,true)+row('Next scheduled',next,false)+'</div><small>EPS amounts are per share; next date and estimates depend on company/Finnhub reporting.</small></section>';
 }
+async function showEarningsReport(){
+  const modal=$('#earnings-report-modal'),status=$('#earnings-report-status'),content=$('#earnings-report-content');
+  modal.classList.add('open');status.textContent='Loading saved upcoming earnings…';content.innerHTML='';
+  try{
+    const response=await fetch('/options/api/earnings-report',{credentials:'same-origin',cache:'no-store'});
+    const data=await response.json();
+    if(!response.ok)throw Error(data.detail||'Could not load the earnings report.');
+    const events=Array.isArray(data.events)?data.events:[];
+    $('#earnings-report-meta').textContent='Future scheduled dates · as of '+(data.as_of||new Date().toISOString().slice(0,10));
+    content.innerHTML=events.length?'<div class="earnings-report-table-wrap"><table class="earnings-report-table"><thead><tr><th>Next earnings</th><th>Ticker</th><th>EPS estimate</th></tr></thead><tbody>'+events.map(event=>{
+      const eventDate=event.date?new Date(event.date+'T00:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',timeZone:'UTC'}):'—';
+      const eps=event.eps_estimate!==null&&event.eps_estimate!==undefined&&Number.isFinite(Number(event.eps_estimate))?'$'+Number(event.eps_estimate).toFixed(2):'Unavailable';
+      return '<tr><td>'+safe(eventDate)+'</td><td><b>'+safe(event.symbol||'')+'</b></td><td>'+safe(eps)+'</td></tr>';
+    }).join('')+'</tbody></table></div>':'<p class="earnings-report-empty">No upcoming earnings have been saved yet. Run Analyze Stock on tickers to populate the report.</p>';
+    status.textContent=events.length+' upcoming ticker'+(events.length===1?'':'s');
+  }catch(error){status.textContent=error.message}
+}
+function closeEarningsReport(){$('#earnings-report-modal').classList.remove('open')}
 function companyPublicHistory(ipo){
   if(!ipo)return 'Finnhub IPO date is unavailable.';
   const date=new Date(String(ipo)+'T00:00:00Z');
