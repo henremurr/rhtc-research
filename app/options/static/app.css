@@ -1099,6 +1099,7 @@ body.news-mode .workspace-toolbar-heading{gap:8px}
 :root[data-theme="dark"] .stock-report-modal>.modal-close,:root[data-theme="dark"] .buffett-report-modal>.modal-close{border-color:#465260;background:#202a35;color:#e0e6ed}
 .stock-report-modal>h2{margin-bottom:0}
 .stock-report-quote{margin:0!important;color:#8994a0!important;font:10px/1.5 var(--mono)!important}
+.earnings-events{margin:10px 0 14px;padding:12px 14px;border:1px solid #d5b45a;border-radius:8px;background:rgba(178,135,40,.12)}.earnings-events h3{margin:0 0 9px;font:600 13px var(--sans)}.earnings-events-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.earnings-event{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:baseline}.earnings-event b{width:100%;font:600 12px var(--sans)}.earnings-event span,.earnings-events small{color:#aab5c2;font:11px/1.5 var(--sans)}.earnings-events small{display:block;margin-top:8px}@media(max-width:520px){.earnings-events-grid{grid-template-columns:1fr}}
 .stock-report-navigation{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid #e8ebee;border-bottom:1px solid #e8ebee}
 .stock-report-navigation button{min-height:34px;padding:6px 12px;border:1px solid #d9dee5;border-radius:5px;background:#fff;color:#465467;font:600 11px var(--sans);cursor:pointer}
 .stock-report-navigation button:disabled{opacity:.4;cursor:not-allowed}
