@@ -962,12 +962,6 @@ class Tradier:
         result: dict[str, Any] = parse_finnhub_metrics(basic_profile, financials)
         result["insider_sentiment_mspr"], result["insider_sentiment_month"] = parse_finnhub_insider_sentiment(insider_sentiment)
         result["company_profile"] = parse_finnhub_company_overview(basic_profile, full_profile)
-        company_profile = result["company_profile"]
-        if not company_profile["description"] and company_profile["website"]:
-            website_description = await fetch_company_website_description(company_profile["website"])
-            if website_description:
-                company_profile["description"] = website_description
-                company_profile["description_source"] = "company website"
         if any(value is not None for key, value in result.items() if key != "company_profile") or (result.get("company_profile") or {}).get("name"):
             _FINNHUB_METRICS_CACHE[cache_key] = (time.monotonic(), result.copy())
         return result
@@ -1537,6 +1531,76 @@ class _CompanyWebsiteDescriptionParser(HTMLParser):
             content = values.get("content", "")
             if content:
                 self.descriptions.append(content)
+
+
+def _company_website_domain_matches(name: str | None, symbol: str, url: str) -> bool:
+    host = (urlsplit(url).hostname or "").lower().removeprefix("www.")
+    labels = set(host.split("."))
+    identity = re.findall(r"[a-z0-9]+", f"{name or ''} {symbol}".lower())
+    legal_suffixes = {"inc", "incorporated", "corp", "corporation", "company", "co", "limited", "ltd", "plc", "nv", "sa", "ag", "the"}
+    tokens = {token for token in identity if token not in legal_suffixes and len(token) >= 2}
+    return bool(tokens & labels)
+
+
+async def discover_company_website_description(
+    symbol: str, name: str | None, industry: str | None
+) -> tuple[str | None, str | None]:
+    api_key = os.getenv("PERPLEXITY_API_KEY", "").strip()
+    if not api_key or not (name or symbol):
+        return None, None
+    query = (
+        f'Find the official company website "About" or "Who we are" page for {name or symbol} '
+        f'(public ticker {symbol}) in the {industry or ""} industry. Return its official corporate page, '
+        "not an investor-data profile or third-party company summary."
+    )
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(18.0, connect=5.0), trust_env=False) as client:
+            response = await client.post(
+                "https://api.perplexity.ai/search",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={"query": query, "max_results": 6, "search_type": "fast", "search_context_size": "low"},
+            )
+            response.raise_for_status()
+            payload = response.json()
+        results = payload.get("results", []) if isinstance(payload, dict) else []
+        candidates = []
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            url = str(item.get("url") or "").strip()
+            if not url.startswith(("https://", "http://")) or not _company_website_domain_matches(name, symbol, url):
+                continue
+            title = str(item.get("title") or "")
+            snippet = re.sub(r"\s+", " ", unescape(str(item.get("snippet", item.get("content", ""))))).strip()
+            path = urlsplit(url).path.lower()
+            about_match = any(term in (path + " " + title.lower()) for term in ("about", "who-we-are", "who we are", "our-company", "company-overview"))
+            candidates.append((not about_match, url, snippet))
+        for _, url, snippet in sorted(candidates):
+            description = await fetch_company_website_description(url)
+            if description:
+                return url, description
+            if len(snippet) >= 80:
+                return url, snippet[:900].rstrip()
+        return None, None
+    except (httpx.HTTPError, ValueError, TypeError, KeyError):
+        return None, None
+
+
+async def enrich_company_profile_description(symbol: str, profile: dict[str, Any]) -> dict[str, Any]:
+    if str(profile.get("description") or "").strip():
+        return profile
+    website = str(profile.get("website") or "").strip() or None
+    description = await fetch_company_website_description(website) if website else None
+    if not description:
+        website, description = await discover_company_website_description(
+            symbol, str(profile.get("name") or "") or None, str(profile.get("industry") or "") or None
+        )
+    if website:
+        profile["website"] = website
+    if description:
+        profile["description"] = description
+        profile["description_source"] = "company website"
+    return profile
 
 
 async def fetch_company_website_description(website: str) -> str | None:
@@ -2621,6 +2685,24 @@ async def stock_quote(symbol: str):
         raise HTTPException(502, f"Stock quote request failed: {exc}") from exc
     finally:
         await provider.close()
+
+
+@app.get("/api/company-profile/{symbol}")
+async def stock_company_profile(symbol: str):
+    symbol = symbol.strip().upper()
+    if not SYMBOL_PATTERN.fullmatch(symbol):
+        raise HTTPException(404, "Invalid ticker symbol")
+    provider = Tradier(os.getenv("TRADIER_API_TOKEN", ""))
+    try:
+        metrics = await provider.company_metrics(symbol)
+    finally:
+        await provider.close()
+    profile = metrics.get("company_profile") or {}
+    profile = await enrich_company_profile_description(symbol, profile)
+    enriched = metrics.copy()
+    enriched["company_profile"] = profile
+    _FINNHUB_METRICS_CACHE[symbol] = (time.monotonic(), enriched)
+    return profile
 
 
 @app.get("/api/chain/{symbol}")
