@@ -171,6 +171,14 @@ function quoteCell(label,value,kind='price',hint=''){
   const title=hint?' title="'+safe(hint)+'"':'';
   return '<div class="detail-quote-stat"'+title+'><span>'+label+'</span><b class="'+cls+'">'+shown+'</b></div>';
 }
+function renderEarningsEvents(quote={}){
+  const prior=quote.prior_earnings&&typeof quote.prior_earnings==='object'?quote.prior_earnings:null;
+  const next=quote.next_earnings&&typeof quote.next_earnings==='object'?quote.next_earnings:null;
+  const dateLabel=value=>value?new Date(value+'T00:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',timeZone:'UTC'}):'Unavailable';
+  const amount=(value,unit='$')=>value===null||value===undefined||value===''||!Number.isFinite(Number(value))?'Unavailable':unit+Number(value).toFixed(2);
+  const row=(label,event,actual)=>'<div class="earnings-event"><b>'+label+'</b><span>'+dateLabel(event?.date)+'</span><span>EPS '+(actual?'actual ':'estimate ')+amount(actual?event?.eps_actual:event?.eps_estimate)+'</span>'+(actual&&event?.eps_estimate!==null&&event?.eps_estimate!==undefined?'<span>Estimate '+amount(event.eps_estimate)+'</span>':'')+'</div>';
+  return '<section class="earnings-events"><h3>Earnings dates and EPS</h3><div class="earnings-events-grid">'+row('Prior reported',prior,true)+row('Next scheduled',next,false)+'</div><small>EPS amounts are per share; next date and estimates depend on company/Finnhub reporting.</small></section>';
+}
 function companyPublicHistory(ipo){
   if(!ipo)return 'Finnhub IPO date is unavailable.';
   const date=new Date(String(ipo)+'T00:00:00Z');
@@ -317,7 +325,7 @@ async function viewChain(symbol){
   window.stockQuoteContext=null;
   $('#stock-reports-btn').disabled=true;$('#stock-reports-btn').textContent='View reports';
   $('#stock-analyze-btn').disabled=true;$('#stock-analysis-status').textContent='Uses current-source research and OpenAI API credits.';
-  $('#stock-analysis-results').hidden=true;$('#stock-analysis-summary').innerHTML='';$('#stock-analysis-details').innerHTML='';$('#stock-analysis-sources').innerHTML='';
+    $('#stock-analysis-results').hidden=true;$('#stock-analysis-summary').innerHTML='';$('#stock-analysis-details').innerHTML='';$('#stock-analysis-sources').innerHTML='';
   $('#ticker-news-btn').disabled=true;$('#ticker-news-btn').textContent='⌕ Search ticker news';$('#ticker-news-results').hidden=true;$('#ticker-news-content').innerHTML='';$('#ticker-news-sources').innerHTML='';
   $('#call-analyze-btn').disabled=true;$('#call-analyze-btn').textContent='✦ Analyze call';$('#call-analysis-status').textContent='Uses current-source research and OpenAI API credits.';$('#call-analysis-results').hidden=true;$('#call-analysis-details').innerHTML='';$('#call-analysis-sources').innerHTML='';
   quoteBox.innerHTML='<div class="loading">Retrieving stock quote…</div>';
@@ -331,6 +339,7 @@ async function viewChain(symbol){
     const quote=await responses[0].json(),chainData=await responses[1].json();
     if(!responses[0].ok)throw Error(quote.detail||'Stock quote unavailable.');
     window.stockQuoteContext={symbol,quote};
+    $('#detail-stock-earnings').innerHTML=renderEarningsEvents(quote);
     const stockReportCount=Number(((state.rows||[]).find(row=>row.symbol===symbol)||(state.watchlist||[]).find(row=>row.symbol===symbol))?.stock_report_count)||0;
     updateStockReportsButton(symbol,stockReportCount);
     $('#stock-analyze-btn').disabled=false;
@@ -525,6 +534,7 @@ async function viewStockReports(symbol,offset=0){
   $('#stock-report-details').innerHTML='';
   $('#stock-report-citations').innerHTML='';
   $('#stock-report-quote').textContent='';
+  $('#stock-report-earnings').innerHTML='';
   try{
     let response=await fetch('/options/api/stock-analysis/reports/'+encodeURIComponent(symbol)+'?offset='+encodeURIComponent(offset),{credentials:'same-origin',cache:'no-store'});
     let data=await response.json();
@@ -554,6 +564,7 @@ async function viewStockReports(symbol,offset=0){
     $('#stock-report-details').innerHTML=renderAnalysis(report.details||'Detailed analysis was not saved.');
     $('#stock-report-citations').innerHTML=(report.citations||[]).map(citation=>'<li><a href="'+safe(citation.url)+'" target="_blank" rel="noopener noreferrer">'+safe(citation.title||citation.url)+'</a></li>').join('');
     const quote=report.quote||{};
+    $('#stock-report-earnings').innerHTML=renderEarningsEvents(quote);
     const price=Number(quote.price);
     $('#stock-report-quote').textContent='Quote snapshot: '+(quote.price!==null&&quote.price!==undefined&&Number.isFinite(price)?'$'+price.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'price unavailable')+' · '+(quote.quote_time||'timestamp unavailable')+' · '+(quote.source||'source unavailable');
     $('#stock-report-previous').disabled=activeStockReportOffset>=activeStockReportCount-1;
