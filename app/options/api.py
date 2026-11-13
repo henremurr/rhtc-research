@@ -913,6 +913,40 @@ def parse_finnhub_company_overview(basic: dict[str, Any], full: dict[str, Any]) 
     }
 
 
+def parse_finnhub_earnings_calendar(payload: dict[str, Any], today: date | None = None) -> dict[str, Any]:
+    """Return the closest reported and scheduled earnings events from Finnhub."""
+    today = today or date.today()
+    events = payload.get("earningsCalendar", []) if isinstance(payload, dict) else []
+    if not isinstance(events, list):
+        events = []
+
+    def event_date(event: dict[str, Any]) -> date | None:
+        try:
+            return date.fromisoformat(str(event.get("date") or "")[:10])
+        except ValueError:
+            return None
+
+    def event_record(event: dict[str, Any], parsed_date: date) -> dict[str, Any]:
+        def number(key: str) -> float | None:
+            value = parse_number(event.get(key), math.nan) if event.get(key) is not None else None
+            return value if value is not None and math.isfinite(value) else None
+        return {
+            "date": parsed_date.isoformat(), "eps_actual": number("epsActual"),
+            "eps_estimate": number("epsEstimate"), "revenue_actual": number("revenueActual"),
+            "revenue_estimate": number("revenueEstimate"), "hour": event.get("hour"),
+        }
+
+    dated = [(event, event_date(event)) for event in events if isinstance(event, dict)]
+    past = [(event, parsed) for event, parsed in dated if parsed and parsed <= today]
+    future = [(event, parsed) for event, parsed in dated if parsed and parsed > today]
+    past.sort(key=lambda item: item[1], reverse=True)
+    future.sort(key=lambda item: item[1])
+    return {
+        "prior_earnings": event_record(*past[0]) if past else None,
+        "next_earnings": event_record(*future[0]) if future else None,
+    }
+
+
 class Tradier:
     DTE_WINDOWS = ((0, 7), (8, 14), (15, 22), (22, 28), (29, 35), (36, 42), (37, 49), (48, 56), (57, 63), (64, 70), (70, None))
 
@@ -931,7 +965,7 @@ class Tradier:
     async def company_metrics(self, symbol: str) -> dict[str, Any]:
         api_key = os.getenv("FINNHUB_API_KEY")
         if not api_key:
-            return {"market_cap": None, "price_earnings_ratio": None, "earnings_per_share": None, "profit_margin": None, "revenue": None, "shares_outstanding": None, "total_debt_to_capital": None, "insider_sentiment_mspr": None, "insider_sentiment_month": None, "company_profile": None}
+            return {"market_cap": None, "price_earnings_ratio": None, "earnings_per_share": None, "profit_margin": None, "revenue": None, "shares_outstanding": None, "total_debt_to_capital": None, "insider_sentiment_mspr": None, "insider_sentiment_month": None, "company_profile": None, "prior_earnings": None, "next_earnings": None}
 
         cache_key = symbol.upper()
         cached = _FINNHUB_METRICS_CACHE.get(cache_key)
@@ -948,20 +982,25 @@ class Tradier:
 
             sentiment_to = date.today()
             sentiment_from = sentiment_to - timedelta(days=365)
-            basic_profile, financials, full_profile, insider_sentiment = await asyncio.gather(
+            earnings_from = sentiment_to - timedelta(days=180)
+            earnings_to = sentiment_to + timedelta(days=365)
+            basic_profile, financials, full_profile, insider_sentiment, earnings_calendar = await asyncio.gather(
                 request("/stock/profile2"),
                 request("/stock/metric", {"metric": "all"}),
                 request("/stock/profile"),
                 request("/stock/insider-sentiment", {"from": sentiment_from.isoformat(), "to": sentiment_to.isoformat()}),
+                request("/calendar/earnings", {"from": earnings_from.isoformat(), "to": earnings_to.isoformat()}),
                 return_exceptions=True,
             )
         basic_profile = {} if isinstance(basic_profile, BaseException) else basic_profile
         financials = {} if isinstance(financials, BaseException) else financials
         full_profile = {} if isinstance(full_profile, BaseException) else full_profile
         insider_sentiment = {} if isinstance(insider_sentiment, BaseException) else insider_sentiment
+        earnings_calendar = {} if isinstance(earnings_calendar, BaseException) else earnings_calendar
         result: dict[str, Any] = parse_finnhub_metrics(basic_profile, financials)
         result["insider_sentiment_mspr"], result["insider_sentiment_month"] = parse_finnhub_insider_sentiment(insider_sentiment)
         result["company_profile"] = parse_finnhub_company_overview(basic_profile, full_profile)
+        result.update(parse_finnhub_earnings_calendar(earnings_calendar))
         if any(value is not None for key, value in result.items() if key != "company_profile") or (result.get("company_profile") or {}).get("name"):
             _FINNHUB_METRICS_CACHE[cache_key] = (time.monotonic(), result.copy())
         return result
@@ -3061,6 +3100,7 @@ async def analyze_stock(data: StockAnalysisInput):
         "previous_close", "market_cap", "price_earnings_ratio", "earnings_per_share",
         "profit_margin", "revenue", "shares_outstanding", "total_debt_to_capital",
         "insider_sentiment_mspr", "insider_sentiment_month", "company_profile",
+        "prior_earnings", "next_earnings",
     )
     quote = {field: data.quote.get(field) for field in quote_fields if field in data.quote}
     quote_json = json.dumps(quote, allow_nan=False, separators=(",", ":"))
