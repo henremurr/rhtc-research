@@ -909,6 +909,7 @@ def parse_finnhub_company_overview(basic: dict[str, Any], full: dict[str, Any]) 
         "country": str(full.get("country") or basic.get("country") or "").strip() or None,
         "ipo": str(full.get("ipo") or basic.get("ipo") or "").strip() or None,
         "website": str(full.get("weburl") or basic.get("weburl") or "").strip() or None,
+        "description_source": "Finnhub company profile" if str(full.get("description") or "").strip() else None,
     }
 
 
@@ -961,6 +962,12 @@ class Tradier:
         result: dict[str, Any] = parse_finnhub_metrics(basic_profile, financials)
         result["insider_sentiment_mspr"], result["insider_sentiment_month"] = parse_finnhub_insider_sentiment(insider_sentiment)
         result["company_profile"] = parse_finnhub_company_overview(basic_profile, full_profile)
+        company_profile = result["company_profile"]
+        if not company_profile["description"] and company_profile["website"]:
+            website_description = await fetch_company_website_description(company_profile["website"])
+            if website_description:
+                company_profile["description"] = website_description
+                company_profile["description_source"] = "company website"
         if any(value is not None for key, value in result.items() if key != "company_profile") or (result.get("company_profile") or {}).get("name"):
             _FINNHUB_METRICS_CACHE[cache_key] = (time.monotonic(), result.copy())
         return result
@@ -1513,6 +1520,78 @@ def _validate_public_source_url(url: str) -> tuple[str, str]:
         except OSError as dns_error:
             raise ValueError("Source host could not be resolved.") from dns_error
     return url, host
+
+
+class _CompanyWebsiteDescriptionParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.descriptions: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() != "meta":
+            return
+        values = {str(key or "").lower(): str(value or "").strip() for key, value in attrs}
+        name = values.get("name", "").lower()
+        prop = values.get("property", "").lower()
+        if name in {"description", "twitter:description"} or prop == "og:description":
+            content = values.get("content", "")
+            if content:
+                self.descriptions.append(content)
+
+
+async def fetch_company_website_description(website: str) -> str | None:
+    value = website.strip()
+    if not value:
+        return None
+    if not urlsplit(value).scheme:
+        value = "https://" + value
+    current = value
+    timeout = httpx.Timeout(7.0, connect=3.0)
+    headers = {
+        "User-Agent": "RHTC-Research/1.0 (+company profile)",
+        "Accept": "text/html,application/xhtml+xml;q=0.9",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False, trust_env=False, headers=headers) as client:
+            for redirect_count in range(4):
+                await asyncio.wait_for(asyncio.to_thread(_validate_public_source_url, current), timeout=4.5)
+                async with client.stream("GET", current) as response:
+                    if response.is_redirect:
+                        location = response.headers.get("location")
+                        if not location or redirect_count == 3:
+                            return None
+                        current = urljoin(current, location)
+                        continue
+                    if not response.is_success or "html" not in response.headers.get("content-type", "").lower():
+                        return None
+                    chunks: list[bytes] = []
+                    size = 0
+                    async for chunk in response.aiter_bytes():
+                        remaining = 1_000_000 - size
+                        if remaining <= 0:
+                            break
+                        chunks.append(chunk[:remaining])
+                        size += min(len(chunk), remaining)
+                        if size >= 1_000_000:
+                            break
+                encoding = response.encoding or "utf-8"
+                document = b"".join(chunks).decode(encoding, errors="replace")
+                metadata = _CompanyWebsiteDescriptionParser()
+                metadata.feed(document)
+                for candidate in metadata.descriptions:
+                    description = re.sub(r"\s+", " ", unescape(candidate)).strip()
+                    if len(description) >= 40:
+                        return description[:900].rstrip()
+                page = _SourceTextParser()
+                page.feed(document)
+                paragraphs = [re.sub(r"\s+", " ", unescape(part)).strip() for part in page.parts]
+                for paragraph in paragraphs:
+                    if len(paragraph) >= 100 and len(paragraph.split()) >= 16:
+                        return paragraph[:900].rstrip()
+                return None
+    except (ValueError, httpx.HTTPError, OSError, asyncio.TimeoutError, UnicodeError):
+        return None
+    return None
 
 
 def _compact_source_text(text: str, limit: int = 5200) -> str:
