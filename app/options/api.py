@@ -1536,75 +1536,148 @@ class _CompanyWebsiteDescriptionParser(HTMLParser):
 def _company_website_domain_matches(name: str | None, symbol: str, url: str) -> bool:
     host = (urlsplit(url).hostname or "").lower().removeprefix("www.")
     labels = set(host.split("."))
+    compact_host = re.sub(r"[^a-z0-9]", "", host)
     identity = re.findall(r"[a-z0-9]+", f"{name or ''} {symbol}".lower())
     legal_suffixes = {"inc", "incorporated", "corp", "corporation", "company", "co", "limited", "ltd", "plc", "nv", "sa", "ag", "the"}
     tokens = {token for token in identity if token not in legal_suffixes and len(token) >= 2}
-    return bool(tokens & labels)
+    return any(token in labels or (len(token) >= 4 and token in compact_host) for token in tokens)
+
+
+def _company_business_paragraphs(document: str) -> list[str]:
+    parser = _SourceTextParser()
+    parser.feed(document)
+    candidates = []
+    promo_terms = (
+        "hear from industry leaders", "listen to our podcast", "watch our webinar", "register now",
+        "join us at", "learn more about this event", "subscribe to", "watch the video",
+        "read the latest news", "customer story", "case study", "upcoming webinar",
+    )
+    business_terms = (
+        "products", "services", "solutions", "customers", "markets", "business", "segment",
+        "manufacture", "develop", "sell", "provides", "equipment", "software", "technology",
+        "network", "optical", "communications", "industry", "revenue", "applications",
+    )
+    for index, raw in enumerate(re.split(r"\n+", "".join(parser.parts))):
+        paragraph = re.sub(r"\s+", " ", unescape(raw)).strip(" \t\r\n•·")
+        lower = paragraph.lower()
+        if len(paragraph) < 120 or len(paragraph.split()) < 18 or any(term in lower for term in promo_terms):
+            continue
+        hits = sum(term in lower for term in business_terms)
+        if hits < 2:
+            continue
+        if paragraph not in [item[1] for item in candidates]:
+            candidates.append((hits * 100 - index, paragraph))
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    chosen = []
+    total = 0
+    for _, paragraph in candidates:
+        if any(paragraph[:100] in existing or existing[:100] in paragraph for existing in chosen):
+            continue
+        remaining = 2600 - total
+        if remaining < 180:
+            break
+        paragraph = paragraph[:remaining].rstrip()
+        chosen.append(paragraph)
+        total += len(paragraph)
+        if len(chosen) >= 4:
+            break
+    return chosen
 
 
 async def discover_company_website_description(
-    symbol: str, name: str | None, industry: str | None
-) -> tuple[str | None, str | None]:
+    symbol: str, name: str | None, industry: str | None, website_hint: str | None = None
+) -> tuple[str | None, str | None, list[dict[str, str]]]:
     api_key = os.getenv("PERPLEXITY_API_KEY", "").strip()
     if not api_key or not (name or symbol):
-        return None, None
-    query = (
-        f'Find the official company website "About" or "Who we are" page for {name or symbol} '
-        f'(public ticker {symbol}) in the {industry or ""} industry. Return its official corporate page, '
-        "not an investor-data profile or third-party company summary."
-    )
+        return None, None, []
+    company_label = name or symbol
+    queries = [
+        f'Official corporate overview: what {company_label} (ticker {symbol}) sells, who its customers are, and what problems its products solve',
+        f'Official products, services, technologies, and end markets of {company_label} (ticker {symbol})',
+        f'Official investor relations business segments and description of {company_label} (ticker {symbol})',
+    ]
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(18.0, connect=5.0), trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=5.0), trust_env=False) as client:
             response = await client.post(
                 "https://api.perplexity.ai/search",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={"query": query, "max_results": 6, "search_type": "fast", "search_context_size": "low"},
+                json={"query": queries, "max_results": 5, "search_type": "fast", "search_context_size": "low"},
             )
             response.raise_for_status()
             payload = response.json()
         results = payload.get("results", []) if isinstance(payload, dict) else []
-        candidates = []
+        candidates = {}
         for item in results:
             if not isinstance(item, dict):
                 continue
             url = str(item.get("url") or "").strip()
             if not url.startswith(("https://", "http://")) or not _company_website_domain_matches(name, symbol, url):
                 continue
-            title = str(item.get("title") or "")
+            title = re.sub(r"\s+", " ", str(item.get("title") or "Company source")).strip()
             snippet = re.sub(r"\s+", " ", unescape(str(item.get("snippet", item.get("content", ""))))).strip()
             path = urlsplit(url).path.lower()
-            about_match = any(term in (path + " " + title.lower()) for term in ("about", "who-we-are", "who we are", "our-company", "company-overview"))
-            candidates.append((not about_match, url, snippet))
-        for _, url, snippet in sorted(candidates):
-            description = await fetch_company_website_description(url)
-            if description:
-                return url, description
-            if len(snippet) >= 80:
-                return url, snippet[:900].rstrip()
-        return None, None
+            context = (path + " " + title.lower())
+            positive = sum(term in context for term in ("overview", "about", "who-we-are", "company", "business", "products", "solutions", "markets", "technology"))
+            negative = sum(term in context for term in ("news", "press-release", "podcast", "webinar", "event", "career", "blog", "video"))
+            score = positive * 4 - negative * 8
+            previous = candidates.get(url)
+            candidate = {"url": url, "title": title, "snippet": snippet, "score": score}
+            if previous is None or score > previous["score"]:
+                candidates[url] = candidate
+        ordered = sorted(candidates.values(), key=lambda item: (-item["score"], item["url"]))[:4]
+        pages = await asyncio.gather(*(fetch_company_website_description(item["url"]) for item in ordered))
+        descriptions: list[str] = []
+        sources: list[dict[str, str]] = []
+        for item, page_text in zip(ordered, pages):
+            if page_text and len(page_text) >= 200:
+                descriptions.extend(page_text.split("\n\n"))
+                sources.append({"title": item["title"][:180], "url": item["url"][:2000]})
+            elif len(item["snippet"]) >= 160 and not any(term in item["snippet"].lower() for term in ("podcast", "webinar", "register now", "hear from industry leaders")):
+                descriptions.append(item["snippet"][:800])
+                sources.append({"title": item["title"][:180], "url": item["url"][:2000]})
+            if len(sources) >= 3:
+                break
+        unique = []
+        for paragraph in descriptions:
+            if len(paragraph) < 100 or any(paragraph[:90] in existing or existing[:90] in paragraph for existing in unique):
+                continue
+            unique.append(paragraph)
+        summary = "\n\n".join(unique[:5])[:4200].rstrip() or None
+        source_url = sources[0]["url"] if sources else None
+        return source_url or website_hint, summary, sources
     except (httpx.HTTPError, ValueError, TypeError, KeyError):
-        return None, None
+        return None, None, []
 
 
 async def enrich_company_profile_description(symbol: str, profile: dict[str, Any]) -> dict[str, Any]:
-    if str(profile.get("description") or "").strip():
+    current = str(profile.get("description") or "").strip()
+    if current and len(current) >= 1800 and len(current.split()) >= 180 and not any(term in current.lower() for term in ("podcast", "webinar", "hear from", "register now")):
         return profile
     website = str(profile.get("website") or "").strip() or None
-    description = await fetch_company_website_description(website) if website else None
-    if not description:
-        website, description = await discover_company_website_description(
-            symbol, str(profile.get("name") or "") or None, str(profile.get("industry") or "") or None
-        )
-    if website:
-        profile["website"] = website
-    if description:
-        profile["description"] = description
+    direct_text = await fetch_company_website_description(website) if website else None
+    if direct_text and len(direct_text) >= 3000:
+        profile["description"] = direct_text
         profile["description_source"] = "company website"
+        profile["business_sources"] = [{"title": "Company website overview", "url": website}]
+        return profile
+    discovered_website, detailed_text, sources = await discover_company_website_description(
+        symbol, str(profile.get("name") or "") or None, str(profile.get("industry") or "") or None, website
+    )
+    if detailed_text and len(detailed_text) > len(direct_text or current):
+        profile["description"] = detailed_text
+        profile["description_source"] = "company website"
+        profile["business_sources"] = sources
+    elif direct_text:
+        profile["description"] = direct_text
+        profile["description_source"] = "company website"
+        profile["business_sources"] = [{"title": "Company website overview", "url": website or ""}]
+    elif discovered_website and not website:
+        profile["website"] = discovered_website
     return profile
 
 
-async def fetch_company_website_description(website: str) -> str | None:
-    value = website.strip()
+async def fetch_company_website_description(website: str | None) -> str | None:
+    value = str(website or "").strip()
     if not value:
         return None
     if not urlsplit(value).scheme:
@@ -1638,20 +1711,17 @@ async def fetch_company_website_description(website: str) -> str | None:
                         size += min(len(chunk), remaining)
                         if size >= 1_000_000:
                             break
-                encoding = response.encoding or "utf-8"
+                    encoding = response.encoding or "utf-8"
                 document = b"".join(chunks).decode(encoding, errors="replace")
+                paragraphs = _company_business_paragraphs(document)
+                if paragraphs:
+                    return "\n\n".join(paragraphs)
                 metadata = _CompanyWebsiteDescriptionParser()
                 metadata.feed(document)
                 for candidate in metadata.descriptions:
                     description = re.sub(r"\s+", " ", unescape(candidate)).strip()
-                    if len(description) >= 40:
-                        return description[:900].rstrip()
-                page = _SourceTextParser()
-                page.feed(document)
-                paragraphs = [re.sub(r"\s+", " ", unescape(part)).strip() for part in page.parts]
-                for paragraph in paragraphs:
-                    if len(paragraph) >= 100 and len(paragraph.split()) >= 16:
-                        return paragraph[:900].rstrip()
+                    if len(description) >= 240 and not any(term in description.lower() for term in ("podcast", "webinar", "hear from", "register now")):
+                        return description
                 return None
     except (ValueError, httpx.HTTPError, OSError, asyncio.TimeoutError, UnicodeError):
         return None
