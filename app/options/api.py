@@ -273,6 +273,12 @@ def connect_watchlist_db() -> sqlite3.Connection:
         analysis_text TEXT NOT NULL
     )""")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_stock_analysis_reports_symbol_created ON stock_analysis_reports(symbol, created_at DESC, report_id DESC)")
+    connection.execute("""CREATE TABLE IF NOT EXISTS ticker_earnings (
+        symbol TEXT PRIMARY KEY,
+        prior_json TEXT,
+        next_json TEXT,
+        updated_at TEXT NOT NULL
+    )""")
     connection.execute("""CREATE TABLE IF NOT EXISTS buffett_screen_reports (
         report_id INTEGER PRIMARY KEY AUTOINCREMENT,
         symbol TEXT NOT NULL,
@@ -395,6 +401,44 @@ def save_stock_analysis_report(
         ).fetchone()[0])
         connection.commit()
     return {"report_id": report_id, "created_at": created_at, "report_count": report_count}
+
+
+def persist_ticker_earnings(symbol: str, quote: dict[str, Any]) -> None:
+    """Save the latest known earnings dates and EPS values for this ticker."""
+    prior = quote.get("prior_earnings")
+    upcoming = quote.get("next_earnings")
+    if not isinstance(prior, dict) and not isinstance(upcoming, dict):
+        return
+    def serialize(event: Any) -> str | None:
+        if not isinstance(event, dict):
+            return None
+        try:
+            event_date = date.fromisoformat(str(event.get("date") or "")[:10])
+        except ValueError:
+            return None
+        record: dict[str, Any] = {"date": event_date.isoformat()}
+        for field in ("eps_actual", "eps_estimate", "revenue_actual", "revenue_estimate"):
+            value = event.get(field)
+            try:
+                number = float(value) if value is not None else None
+            except (TypeError, ValueError):
+                number = None
+            record[field] = number if number is not None and math.isfinite(number) else None
+        record["hour"] = str(event.get("hour") or "")[:40] or None
+        return json.dumps(record, allow_nan=False, separators=(",", ":"))
+    prior_json, next_json = serialize(prior), serialize(upcoming)
+    if prior_json is None and next_json is None:
+        return
+    with closing(connect_watchlist_db()) as connection:
+        connection.execute(
+            "INSERT INTO ticker_earnings(symbol, prior_json, next_json, updated_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(symbol) DO UPDATE SET "
+            "prior_json=COALESCE(excluded.prior_json, ticker_earnings.prior_json), "
+            "next_json=COALESCE(excluded.next_json, ticker_earnings.next_json), "
+            "updated_at=excluded.updated_at",
+            (symbol, prior_json, next_json, utc_now().isoformat()),
+        )
+        connection.commit()
 
 
 def optional_nonnegative_number(item: dict[str, Any], field: str) -> int | float | None:
@@ -3007,6 +3051,27 @@ def split_stock_analysis_sections(analysis: str) -> tuple[str, str]:
         details = text[summary_heading.end():].strip() if summary_heading else text
     return summary, details
 
+
+@app.get("/api/earnings-report")
+async def get_earnings_report():
+    today = date.today()
+    with closing(connect_watchlist_db()) as connection:
+        records = connection.execute(
+            "SELECT symbol, next_json, updated_at FROM ticker_earnings WHERE next_json IS NOT NULL"
+        ).fetchall()
+    events = []
+    for record in records:
+        try:
+            event = json.loads(record["next_json"] or "{}")
+            event_date = date.fromisoformat(str(event.get("date") or "")[:10])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if event_date < today:
+            continue
+        events.append({"symbol": record["symbol"], **event, "updated_at": record["updated_at"]})
+    events.sort(key=lambda event: (event["date"], event["symbol"]))
+    return {"as_of": today.isoformat(), "events": events, "count": len(events)}
+
 @app.get("/api/stock-analysis/reports/{symbol}")
 async def get_stock_analysis_report(symbol: str, offset: int = Query(default=0, ge=0)):
     symbol = symbol.strip().upper()
@@ -3090,6 +3155,7 @@ async def analyze_stock(data: StockAnalysisInput):
     symbol = data.symbol.strip().upper()
     if not SYMBOL_PATTERN.fullmatch(symbol):
         raise HTTPException(400, "Enter a valid ticker symbol.")
+    persist_ticker_earnings(symbol, data.quote)
     key = os.getenv("OPENAI_API_KEY")
     if not key:
         raise HTTPException(503, "Stock analysis is unavailable. Configure OPENAI_API_KEY in the server settings.")
