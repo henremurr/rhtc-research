@@ -186,7 +186,9 @@ function renderCompanyOverview(profile,symbol,quoteName){
   const info=profile&&typeof profile==='object'?profile:{};
   const name=info.name||quoteName||symbol;
   const summary=info.description||(
-    info.industry
+    info.description_pending
+      ? 'Looking up the official company website for a business description…'
+      : info.industry
       ? 'Finnhub classifies this company in the '+info.industry+' industry. A fuller business description is unavailable in the profile returned for this ticker.'
       : 'Finnhub did not return a business description for this ticker.'
   );
@@ -196,6 +198,22 @@ function renderCompanyOverview(profile,symbol,quoteName){
   const headquarters=[info.city,info.state,country].filter(Boolean).join(', ')||'Not available in Finnhub profile';
   const website=typeof info.website==='string'&&(info.website.startsWith('https://')||info.website.startsWith('http://'))?'<a href="'+safe(info.website)+'" target="_blank" rel="noopener noreferrer">Company website ↗</a>':'';
   return '<section class="company-overview"><div class="company-overview-heading"><h3>About '+safe(name)+'</h3>'+website+'</div><p>'+safe(summary)+'</p>'+descriptionAttribution+'<div class="company-overview-facts"><div><small>Industry</small><b>'+safe(info.industry||'Not available')+'</b></div><div><small>Headquarters</small><b>'+safe(headquarters)+'</b></div><div><small>Public-market history</small><b>'+safe(companyPublicHistory(info.ipo))+'</b></div></div><small class="company-overview-note">IPO date shows time as a public company; the business may be older.</small></section>';
+}
+async function loadCompanyWebsiteProfile(symbol,quoteName){
+  try{
+    const response=await fetch('/options/api/company-profile/'+encodeURIComponent(symbol),{credentials:'same-origin',cache:'no-store'});
+    const profile=await response.json();
+    if(!response.ok)throw Error(profile.detail||'Company profile unavailable.');
+    const context=window.stockQuoteContext;
+    if(!context||context.symbol!==symbol)return;
+    context.quote.company_profile={...(context.quote.company_profile||{}),...profile,description_pending:false};
+    $('#detail-company-overview').innerHTML=renderCompanyOverview(context.quote.company_profile,symbol,quoteName);
+  }catch(error){
+    const context=window.stockQuoteContext;
+    if(!context||context.symbol!==symbol)return;
+    context.quote.company_profile={...(context.quote.company_profile||{}),description_pending:false};
+    $('#detail-company-overview').innerHTML=renderCompanyOverview(context.quote.company_profile,symbol,quoteName);
+  }
 }
 async function analyzeStockQuote(){
   const context=window.stockQuoteContext||{};
@@ -318,7 +336,9 @@ async function viewChain(symbol){
     const sourceLabel=quote.source==='demo'?'Illustrative demo values · Not live market data':quote.source==='tradier_sandbox'?'Tradier sandbox quote · May be delayed':'Tradier stock quote';
     $('#detail-title').textContent=quote.description?symbol+' · '+quote.description:symbol+' stock quote and covered-call screen';
     $('#detail-subtitle').textContent=sourceLabel;
-    $('#detail-company-overview').innerHTML=renderCompanyOverview(quote.company_profile,symbol,quote.description);
+    const companyProfile=quote.company_profile&&typeof quote.company_profile==='object'?quote.company_profile:{};
+    if(!companyProfile.description){companyProfile.description_pending=true;quote.company_profile=companyProfile;void loadCompanyWebsiteProfile(symbol,quote.description)}
+    $('#detail-company-overview').innerHTML=renderCompanyOverview(companyProfile,symbol,quote.description);
     const rawTime=quote.quote_time;
     const quoteTime=rawTime&&Number.isFinite(Number(rawTime))&&Number(rawTime)>0?new Date(Number(rawTime)).toLocaleString():rawTime?String(rawTime):'Quote timestamp unavailable';
     quoteBox.innerHTML='<div class="detail-quote-stats">'+[
