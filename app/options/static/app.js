@@ -519,7 +519,7 @@ async function printTickerReport(){
       :'<div class="ticker-report-rating"><b>'+safe(ceoReport.risk_rating||'Unrated')+' CEO Risk · '+safe(String(ceoReport.risk_score??'—'))+'/100</b><span>Confidence '+safe(String(ceoReport.confidence??'—'))+'%</span></div>'+reportObjectMarkup(ceoReport)+'<h3>Sources</h3>'+reportCitationsMarkup(ceoReport.citations);
     const generated=new Date().toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'});
     const title=$('#detail-title').textContent.trim();
-    report.innerHTML='<div class="ticker-report-toolbar"><button class="refresh-btn" type="button" onclick="printPreparedTickerReport()">Generate PDF</button><button class="refresh-btn secondary" type="button" onclick="closeTickerReportPreview()">Back to quote</button><span>Use the print dialog to print or save the PDF.</span></div>'+
+    report.innerHTML='<div class="ticker-report-toolbar"><button class="refresh-btn" type="button" onclick="printPreparedTickerReport()">Generate PDF</button><button class="refresh-btn secondary" type="button" onclick="closeTickerReportPreview()">Back to quote</button><span>Generate a PDF to open, print, or save to Files.</span></div>'+
       '<header class="ticker-report-header"><div class="ticker-report-brand"><span class="ticker-report-mark">RHTC</span><span>THREE PEAKS · RESEARCH</span></div><p>COMPREHENSIVE TICKER REPORT</p><h1>'+safe(title)+'</h1><small>Prepared '+safe(generated)+' · Quote and research data may have different timestamps.</small></header>'+
       reportSection('Company overview',overview)+
       reportSection('Quote data',quoteData+quoteSource+callDetails)+
