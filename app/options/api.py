@@ -1026,7 +1026,7 @@ class Tradier:
 
             sentiment_to = date.today()
             sentiment_from = sentiment_to - timedelta(days=365)
-            earnings_from = sentiment_to - timedelta(days=180)
+            earnings_from = sentiment_to - timedelta(days=365)
             earnings_to = sentiment_to + timedelta(days=365)
             basic_profile, financials, full_profile, insider_sentiment, earnings_calendar = await asyncio.gather(
                 request("/stock/profile2"),
@@ -2896,6 +2896,8 @@ async def stock_quote(symbol: str):
         if not quote or quote.get("type") == "error":
             raise HTTPException(404, f"No stock quote was returned for {symbol}.")
         last = parse_number(quote.get("last")) or parse_number(quote.get("close"))
+        metrics = await provider.company_metrics(symbol)
+        persist_ticker_earnings(symbol, metrics)
         return {
             "symbol": symbol,
             "description": quote.get("description"),
@@ -2912,7 +2914,7 @@ async def stock_quote(symbol: str):
             "week_52_high": parse_number(quote.get("week_52_high")) if quote.get("week_52_high") is not None else None,
             "week_52_low": parse_number(quote.get("week_52_low")) if quote.get("week_52_low") is not None else None,
             "previous_close": parse_number(quote.get("prevclose")) if quote.get("prevclose") is not None else None,
-            **(await provider.company_metrics(symbol)),
+            **metrics,
             "quote_time": quote.get("trade_date") or quote.get("ask_date") or quote.get("bid_date"),
             "source": data_source(),
         }
