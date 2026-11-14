@@ -203,6 +203,31 @@ async function showEarningsReport(){
   }catch(error){status.textContent=error.message}
 }
 function closeEarningsReport(){$('#earnings-report-modal').classList.remove('open')}
+async function showOrphanedTickers(){
+  const modal=$('#orphaned-tickers-modal'),status=$('#orphaned-tickers-status'),content=$('#orphaned-tickers-content');
+  modal.classList.add('open');
+  status.textContent='Scanning saved ticker tables…';
+  content.innerHTML='';
+  try{
+    const response=await fetch('/options/api/watchlist/orphans',{credentials:'same-origin',cache:'no-store'});
+    const data=await response.json();
+    if(!response.ok)throw Error(data.detail||'Could not scan for orphaned tickers.');
+    const orphans=Array.isArray(data.orphans)?data.orphans:[];
+    status.textContent=orphans.length+' orphaned ticker'+(orphans.length===1?'':'s')+' found';
+    if(!orphans.length){
+      content.innerHTML='<p class="orphaned-tickers-empty">No saved ticker records were found without a matching watchlist entry.</p>';
+      return;
+    }
+    const labels={ticker_earnings:'Earnings',stock_analysis_reports:'Stock analysis reports',buffett_screen_reports:'Buffett reports',ceo_risk_reports:'CEO Risk reports'};
+    content.innerHTML='<div class="earnings-report-table-wrap orphaned-tickers-table-wrap"><table class="earnings-report-table orphaned-tickers-table"><thead><tr><th>Ticker</th><th>Saved records by table</th><th>Total</th></tr></thead><tbody>'+orphans.map(orphan=>{
+      const details=Object.entries(orphan.tables||{}).map(([table,count])=>'<span class="orphaned-ticker-record">'+safe(labels[table]||table.replace(/_/g,' '))+' <b>'+Number(count||0).toLocaleString()+'</b></span>').join('');
+      return '<tr><td><strong>'+safe(orphan.symbol)+'</strong></td><td class="orphaned-ticker-tables">'+details+'</td><td>'+Number(orphan.total_records||0).toLocaleString()+'</td></tr>';
+    }).join('')+'</tbody></table></div>';
+  }catch(error){
+    status.textContent=error.message||'Could not scan for orphaned tickers.';
+  }
+}
+function closeOrphanedTickers(){$('#orphaned-tickers-modal').classList.remove('open')}
 function companyPublicHistory(ipo){
   if(!ipo)return 'Finnhub IPO date is unavailable.';
   const date=new Date(String(ipo)+'T00:00:00Z');
@@ -1445,10 +1470,11 @@ $('#news-items').addEventListener('change',event=>{const artwork=event.target.cl
 $('#market-clock').textContent=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date())+' ET';
 initializeWatchlist();
 loadNews({quiet:true});
+$('#orphaned-tickers-btn').addEventListener('click',showOrphanedTickers);
 $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/options/auth/logout',{method:'POST',credentials:'same-origin'})}finally{location.replace('/options/login')}});
 
 
 // Keep the guide menu fully inside the current viewport, including on narrow phones.
-(()=>{const toggle=document.getElementById('guide-menu-toggle'),menu=document.getElementById('guide-menu'),guideToggle=document.getElementById('guide-submenu-toggle'),submenu=document.getElementById('guide-submenu');if(!toggle||!menu||!guideToggle||!submenu)return;const place=()=>{const rect=toggle.getBoundingClientRect(),width=menu.getBoundingClientRect().width,gap=12;const left=Math.max(gap,Math.min(rect.right-width,window.innerWidth-width-gap));const top=Math.max(gap,Math.min(rect.bottom+8,window.innerHeight-menu.offsetHeight-gap));menu.style.left=left+'px';menu.style.top=top+'px';menu.style.right='auto'};const collapseGuide=()=>{submenu.hidden=true;guideToggle.setAttribute('aria-expanded','false')};const close=()=>{menu.hidden=true;toggle.setAttribute('aria-expanded','false');collapseGuide()};toggle.addEventListener('click',event=>{event.stopPropagation();const opening=menu.hidden;menu.hidden=!opening;toggle.setAttribute('aria-expanded',String(opening));if(opening){collapseGuide();requestAnimationFrame(place)}});guideToggle.addEventListener('click',event=>{event.stopPropagation();submenu.hidden=!submenu.hidden;guideToggle.setAttribute('aria-expanded',String(!submenu.hidden));requestAnimationFrame(place)});menu.addEventListener('click',event=>{if(event.target.closest('a')||event.target.closest('#infra-audit-btn'))close()});document.addEventListener('click',event=>{if(!event.target.closest('.guide-menu-wrap'))close()});document.addEventListener('keydown',event=>{if(event.key==='Escape'){close();toggle.focus()}});window.addEventListener('resize',()=>{if(!menu.hidden)place()})})();
+(()=>{const toggle=document.getElementById('guide-menu-toggle'),menu=document.getElementById('guide-menu'),guideToggle=document.getElementById('guide-submenu-toggle'),submenu=document.getElementById('guide-submenu');if(!toggle||!menu||!guideToggle||!submenu)return;const place=()=>{const rect=toggle.getBoundingClientRect(),width=menu.getBoundingClientRect().width,gap=12;const left=Math.max(gap,Math.min(rect.right-width,window.innerWidth-width-gap));const top=Math.max(gap,Math.min(rect.bottom+8,window.innerHeight-menu.offsetHeight-gap));menu.style.left=left+'px';menu.style.top=top+'px';menu.style.right='auto'};const collapseGuide=()=>{submenu.hidden=true;guideToggle.setAttribute('aria-expanded','false')};const close=()=>{menu.hidden=true;toggle.setAttribute('aria-expanded','false');collapseGuide()};toggle.addEventListener('click',event=>{event.stopPropagation();const opening=menu.hidden;menu.hidden=!opening;toggle.setAttribute('aria-expanded',String(opening));if(opening){collapseGuide();requestAnimationFrame(place)}});guideToggle.addEventListener('click',event=>{event.stopPropagation();submenu.hidden=!submenu.hidden;guideToggle.setAttribute('aria-expanded',String(!submenu.hidden));requestAnimationFrame(place)});menu.addEventListener('click',event=>{if(event.target.closest('a')||event.target.closest('#infra-audit-btn')||event.target.closest('#orphaned-tickers-btn'))close()});document.addEventListener('click',event=>{if(!event.target.closest('.guide-menu-wrap'))close()});document.addEventListener('keydown',event=>{if(event.key==='Escape'){close();toggle.focus()}});window.addEventListener('resize',()=>{if(!menu.hidden)place()})})();
 
 if(new URLSearchParams(location.search).get("youtube")==="connected"){const notice=document.createElement("div");notice.setAttribute("role","status");notice.style.cssText="padding:16px;background:#174b35;color:white;text-align:center";notice.textContent="YouTube connected. You can now publish a reviewed video from the dashboard.";document.body.prepend(notice);const u=new URL(location.href);u.searchParams.delete("youtube");history.replaceState(null,"",u.pathname+u.search+u.hash);}
