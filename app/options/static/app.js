@@ -432,12 +432,13 @@ function reportHtmlToText(markup){
     if(node.nodeType===Node.TEXT_NODE)return node.nodeValue||'';
     if(node.nodeType!==Node.ELEMENT_NODE)return '';
     const tag=node.tagName;
-    if(tag==='BR')return '\\n';
+    if(tag==='BR')return '\n';
     let value=Array.from(node.childNodes).map(walk).join('');
-    if(tag==='A'&&node.href)value+=' ('+node.href+')';
-    return blockTags.has(tag)?'\\n'+value+'\\n':value;
+    if(tag==='A'&&node.href)value+=' — '+node.href;
+    if(tag==='LI')value='• '+value;
+    return blockTags.has(tag)?'\n'+value+'\n':value;
   };
-  return walk(root).replace(/[ \\t]+\\n/g,'\\n').replace(/\\n{3,}/g,'\\n\\n').trim();
+  return walk(root).replace(/[ \t]+\n/g,'\n').replace(/\n{3,}/g,'\n\n').trim();
 }
 async function printPreparedTickerReport(){
   const report=$('#ticker-print-report'),symbol=String(window.stockQuoteContext?.symbol||'').toUpperCase();
