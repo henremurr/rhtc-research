@@ -3316,12 +3316,12 @@ async def create_ticker_report_pdf(data: TickerReportPdfInput):
         if not body:
             story.append(Paragraph("Unavailable.", body_style))
             continue
-        blocks = re.split(r"\\n\\s*\\n", body)
+        blocks = re.split(r"\n\s*\n", body)
         for block in blocks:
             block = block.strip()
             if not block:
                 continue
-            safe_text = xml_escape(block).replace("\\n", "<br/>")
+            safe_text = xml_escape(block).replace("\n", "<br/>")
             story.append(Paragraph(safe_text, body_style))
 
     def draw_page(canvas, document):
