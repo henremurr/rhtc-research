@@ -466,14 +466,12 @@ async function printPreparedTickerReport(){
     const link=document.createElement('a');
     link.className='refresh-btn ticker-report-pdf-link';
     link.href=tickerReportPdfUrl;
-    link.target='_blank';
-    link.rel='noopener';
     link.download='RHTC_'+symbol+'_Research_Report.pdf';
-    link.textContent='Open / Save PDF';
+    link.textContent='Download PDF';
     const back=document.createElement('button');
     back.type='button';back.className='refresh-btn secondary';back.textContent='Back to quote';back.onclick=closeTickerReportPreview;
     const note=document.createElement('span');
-    note.textContent='PDF ready. Open it to print or save it to Files.';
+    note.textContent='PDF ready. Download it, then open it to print or save to Files.';
     toolbar.replaceChildren(link,back,note);
   }catch(error){
     action.disabled=false;action.textContent='Generate PDF';
