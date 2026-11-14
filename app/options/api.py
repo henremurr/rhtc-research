@@ -3195,6 +3195,33 @@ def screen_only_analysis(symbol: str, screen: dict[str, Any]) -> str:
     )
 
 
+def clean_research_text(text: str) -> str:
+    """Normalize AI prose for browser print/PDF output and keep source URLs in citations."""
+    value = str(text or "")
+    value = re.sub(r"\[([^\]]+)\]\(https?://[^)\s]+\)", r"\1", value)
+
+    def compact_url(match: re.Match[str]) -> str:
+        raw = match.group(0)
+        suffix = ""
+        while raw and raw[-1] in ".,;:!?)]":
+            suffix = raw[-1] + suffix
+            raw = raw[:-1]
+        host_match = re.match(r"(?:https?://)?([^/?#]+)", raw, re.IGNORECASE)
+        host = host_match.group(1) if host_match else "source"
+        return f"{host}{suffix}"
+
+    value = re.sub(r"https?://[^\s<>]+", compact_url, value, flags=re.IGNORECASE)
+    value = re.sub(r"\bwww\.[^\s<>]+", compact_url, value, flags=re.IGNORECASE)
+    value = value.translate(str.maketrans({
+        "\u00a0": " ", "\u2007": " ", "\u202f": " ",
+        "\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-",
+        "\u2014": "-", "\u2212": "-", "\u2018": "'", "\u2019": "'",
+        "\u201c": '"', "\u201d": '"', "\u2026": "...", "\u2248": "~",
+        "\u2264": "<=", "\u2265": ">=", "\u00d7": "x",
+    }))
+    return value
+
+
 @app.post("/api/summary")
 async def summarize(data: SummaryInput):
     rows = data.rows
@@ -3868,7 +3895,7 @@ async def analyze_symbol(data: SymbolAnalysisInput):
                 if url.startswith("https://") and url not in seen_urls:
                     citations.append({"title": title or url, "url": url})
                     seen_urls.add(url)
-    analysis = (getattr(response, "output_text", "") or "").strip()
+    analysis = clean_research_text((getattr(response, "output_text", "") or "").strip())
     if not analysis:
         analysis = screen_only_analysis(symbol, screen)
         total_score, average_score, analysis_count = record_call_score(symbol, analysis)
