@@ -1443,3 +1443,35 @@ body.news-mode .workspace-toolbar-heading{gap:8px}
 .detail-modal.report-preview-mode a { color:#725a27 !important; text-decoration:underline; overflow-wrap:anywhere; }
 .detail-modal.report-preview-mode .ticker-report-toolbar { background:#f3f5f7 !important; border-color:#cbd2d9 !important; }
 .detail-modal.report-preview-mode .ticker-report-toolbar>span { color:#536170 !important; }
+
+/* Isolate the report from the modal/app layout while the native print sheet renders */
+@media print {
+  html, body { min-height:0 !important; height:auto !important; background:#fff !important; }
+  body > :not(#ticker-print-report) { display:none !important; }
+  #detail-modal { display:none !important; }
+  body > #ticker-print-report {
+    display:block !important;
+    position:static !important;
+    inset:auto !important;
+    width:100% !important;
+    max-width:none !important;
+    height:auto !important;
+    max-height:none !important;
+    margin:0 !important;
+    padding:0 !important;
+    overflow:visible !important;
+    border:0 !important;
+    background:#fff !important;
+    color:#171d24 !important;
+    visibility:visible !important;
+  }
+  body > #ticker-print-report,
+  body > #ticker-print-report * {
+    visibility:visible !important;
+    color:#171d24 !important;
+    box-shadow:none !important;
+  }
+  body > #ticker-print-report * { background-color:transparent !important; }
+  body > #ticker-print-report .ticker-report-toolbar { display:none !important; }
+  body > #ticker-print-report a { color:#725a27 !important; }
+}
