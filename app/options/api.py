@@ -1689,7 +1689,7 @@ class _SourceTextParser(HTMLParser):
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if self.skip_depth:
             self.skip_depth += 1
-        elif tag in {"script", "style", "noscript", "svg", "nav", "footer", "header"}:
+        elif tag in {"script", "style", "noscript", "svg", "nav", "footer", "header", "table", "aside", "form", "button", "iframe", "select", "option"}:
             self.skip_depth = 1
         elif tag == "title":
             self.in_title = True
@@ -1765,6 +1765,33 @@ def _company_website_domain_matches(name: str | None, symbol: str, url: str) -> 
     return any(token in labels or (len(token) >= 4 and token in compact_host) for token in tokens)
 
 
+def _company_description_has_report_noise(value: str) -> bool:
+    raw = unescape(str(value or "")).strip()
+    text = re.sub(r"\s+", " ", raw)
+    lower = text.lower()
+    if text.count("|") >= 4 or text.count("**") >= 4:
+        return True
+    if len(re.findall(r"(?m)^\s*#{1,6}\s", raw)) >= 2:
+        return True
+    report_markers = (
+        "three months ended", "nine months ended", "dollars in millions",
+        "consolidated statements of operations", "consolidated balance sheets",
+        "earnings per share", "quarterly results", "quarterly report",
+        "annual report", "financial statements",
+    )
+    return sum(lower.count(marker) for marker in report_markers) >= 2
+
+
+def _company_description_is_useful(value: str | None) -> bool:
+    text = re.sub(r"\s+", " ", unescape(str(value or ""))).strip()
+    return (
+        len(text) >= 160
+        and len(re.findall(r"[A-Za-z0-9][A-Za-z0-9'-]*", text)) >= 24
+        and not _company_description_has_report_noise(text)
+        and not any(term in text.lower() for term in ("podcast", "webinar", "hear from", "register now"))
+    )
+
+
 def _company_business_paragraphs(document: str) -> list[str]:
     parser = _SourceTextParser()
     parser.feed(document)
@@ -1783,6 +1810,10 @@ def _company_business_paragraphs(document: str) -> list[str]:
         paragraph = re.sub(r"\s+", " ", unescape(raw)).strip(" \t\r\n•·")
         lower = paragraph.lower()
         if len(paragraph) < 120 or len(paragraph.split()) < 18 or any(term in lower for term in promo_terms):
+            continue
+        if paragraph.count("|") >= 2 or paragraph.count("**") >= 3 or re.match(r"^#{1,6}\s", paragraph):
+            continue
+        if _company_description_has_report_noise(paragraph):
             continue
         hits = sum(term in lower for term in business_terms)
         if hits < 2:
@@ -1839,9 +1870,11 @@ async def discover_company_website_description(
             snippet = re.sub(r"\s+", " ", unescape(str(item.get("snippet", item.get("content", ""))))).strip()
             path = urlsplit(url).path.lower()
             context = (path + " " + title.lower())
+            excluded = ("quarterly-results", "quarterly results", "earnings", "financial-results", "financials", "annual-report", "annual report", "10-k", "10-q", "press-release", "news", "podcast", "webinar", "event", "career", "blog", "video")
+            if any(term in context for term in excluded):
+                continue
             positive = sum(term in context for term in ("overview", "about", "who-we-are", "company", "business", "products", "solutions", "markets", "technology"))
-            negative = sum(term in context for term in ("news", "press-release", "podcast", "webinar", "event", "career", "blog", "video"))
-            score = positive * 4 - negative * 8
+            score = positive * 4
             previous = candidates.get(url)
             candidate = {"url": url, "title": title, "snippet": snippet, "score": score}
             if previous is None or score > previous["score"]:
@@ -1851,10 +1884,10 @@ async def discover_company_website_description(
         descriptions: list[str] = []
         sources: list[dict[str, str]] = []
         for item, page_text in zip(ordered, pages):
-            if page_text and len(page_text) >= 200:
+            if page_text and len(page_text) >= 160 and _company_description_is_useful(page_text):
                 descriptions.extend(page_text.split("\n\n"))
                 sources.append({"title": item["title"][:180], "url": item["url"][:2000]})
-            elif len(item["snippet"]) >= 160 and not any(term in item["snippet"].lower() for term in ("podcast", "webinar", "register now", "hear from industry leaders")):
+            elif _company_description_is_useful(item["snippet"]):
                 descriptions.append(item["snippet"][:800])
                 sources.append({"title": item["title"][:180], "url": item["url"][:2000]})
             if len(sources) >= 3:
@@ -1865,6 +1898,9 @@ async def discover_company_website_description(
                 continue
             unique.append(paragraph)
         summary = "\n\n".join(unique[:5])[:4200].rstrip() or None
+        if not _company_description_is_useful(summary):
+            summary = None
+            sources = []
         source_url = sources[0]["url"] if sources else None
         return source_url or website_hint, summary, sources
     except (httpx.HTTPError, ValueError, TypeError, KeyError):
@@ -1873,28 +1909,36 @@ async def discover_company_website_description(
 
 async def enrich_company_profile_description(symbol: str, profile: dict[str, Any]) -> dict[str, Any]:
     current = str(profile.get("description") or "").strip()
-    if current and len(current) >= 1800 and len(current.split()) >= 180 and not any(term in current.lower() for term in ("podcast", "webinar", "hear from", "register now")):
+    current_is_useful = _company_description_is_useful(current)
+    if current_is_useful and len(current) >= 1800:
         return profile
     website = str(profile.get("website") or "").strip() or None
     direct_text = await fetch_company_website_description(website) if website else None
-    if direct_text and len(direct_text) >= 3000:
+    if direct_text and _company_description_is_useful(direct_text):
         profile["description"] = direct_text
         profile["description_source"] = "company website"
-        profile["business_sources"] = [{"title": "Company website overview", "url": website}]
+        profile["business_sources"] = [{"title": "Company website overview", "url": website or ""}]
         return profile
     discovered_website, detailed_text, sources = await discover_company_website_description(
         symbol, str(profile.get("name") or "") or None, str(profile.get("industry") or "") or None, website
     )
-    if detailed_text and len(detailed_text) > len(direct_text or current):
+    if detailed_text and _company_description_is_useful(detailed_text) and len(detailed_text) > len(current):
         profile["description"] = detailed_text
         profile["description_source"] = "company website"
         profile["business_sources"] = sources
-    elif direct_text:
-        profile["description"] = direct_text
-        profile["description_source"] = "company website"
-        profile["business_sources"] = [{"title": "Company website overview", "url": website or ""}]
+    elif current_is_useful:
+        profile["description"] = current
+        profile["description_source"] = profile.get("description_source") or "Finnhub company profile"
+        profile.pop("business_sources", None)
     elif discovered_website and not website:
         profile["website"] = discovered_website
+        profile["description"] = None
+        profile.pop("description_source", None)
+        profile.pop("business_sources", None)
+    else:
+        profile["description"] = None
+        profile.pop("description_source", None)
+        profile.pop("business_sources", None)
     return profile
 
 
