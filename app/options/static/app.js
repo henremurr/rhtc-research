@@ -365,7 +365,6 @@ async function analyzeCallQuote(){
     button.disabled=false;button.textContent='✦ Analyze call';
   }
 }
-async 
 function reportSection(title,content,note=''){
   return '<section class="ticker-report-section"><h2>'+safe(title)+'</h2>'+(note?'<p class="ticker-report-note">'+safe(note)+'</p>':'')+(content||'<p>Unavailable.</p>')+'</section>';
 }
@@ -474,7 +473,7 @@ async function printTickerReport(){
   }
 }
 
-function viewChain(symbol){
+async function viewChain(symbol){
   const modal=$('#detail-modal'),quoteBox=$('#detail-quote-content'),detail=$('#detail-content');
   $('#detail-title').textContent=symbol+' stock quote and covered-call screen';
   $('#detail-subtitle').textContent='Loading stock quote and listed call candidates…';
