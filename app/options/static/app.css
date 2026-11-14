@@ -1352,3 +1352,40 @@ body.news-mode .workspace-toolbar-heading{gap:8px}
   .ticker-print-report .detail-quote-stats>div,.ticker-print-report .earnings-event,.ticker-print-report .detail-grid>div { break-inside:avoid; }
   .ticker-print-report .ticker-report-section:nth-of-type(5) { break-before:page; }
 }
+
+/* On-screen review step before printing the ticker report */
+.detail-modal.report-preview-mode {
+  display:block !important;
+  width:min(1000px,calc(100vw - 36px)) !important;
+  max-width:1000px !important;
+  max-height:calc(100dvh - 28px) !important;
+  overflow-y:auto !important;
+  padding:22px !important;
+  grid-template-columns:1fr !important;
+}
+.detail-modal.report-preview-mode > :not(#ticker-print-report) { display:none !important; }
+#detail-modal #ticker-print-report:not([hidden]) { display:block; width:100%; }
+.ticker-report-toolbar {
+  position:sticky;
+  top:0;
+  z-index:5;
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:10px;
+  margin:-8px 0 20px;
+  padding:10px;
+  border:1px solid #3b4654;
+  border-radius:10px;
+  background:#151e29;
+}
+.ticker-report-toolbar>span { color:#aab5c2; font-size:12px; }
+.ticker-report-toolbar .refresh-btn { min-height:42px; }
+@media(max-width:600px) {
+  .detail-modal.report-preview-mode { width:calc(100vw - 16px) !important; max-height:calc(100dvh - 16px) !important; padding:14px !important; }
+  .ticker-report-toolbar { top:0; }
+}
+@media print {
+  .ticker-report-toolbar { display:none !important; }
+  .detail-modal.report-preview-mode { display:block !important; position:static !important; width:100% !important; max-width:none !important; max-height:none !important; padding:0 !important; overflow:visible !important; }
+}
