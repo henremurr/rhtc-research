@@ -3264,80 +3264,108 @@ async def create_ticker_report_pdf(data: TickerReportPdfInput):
     from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate, Spacer
 
     output = BytesIO()
-    left = right = 0.68 * inch
-    top, bottom = 0.78 * inch, 0.62 * inch
+    left = right = 0.72 * inch
+    top, bottom = 0.92 * inch, 0.68 * inch
     doc = SimpleDocTemplate(
-        output,
-        pagesize=letter,
-        leftMargin=left,
-        rightMargin=right,
-        topMargin=top,
-        bottomMargin=bottom,
+        output, pagesize=letter, leftMargin=left, rightMargin=right,
+        topMargin=top, bottomMargin=bottom,
         title=f"RHTC {symbol} Research Report",
         author="RHTC Three Peaks Research",
         subject=f"Comprehensive ticker report for {symbol}",
     )
     gold = colors.HexColor("#A98537")
+    dark_gold = colors.HexColor("#705622")
     ink = colors.HexColor("#17202A")
-    muted = colors.HexColor("#536170")
+    muted = colors.HexColor("#586575")
+    pale_gold = colors.HexColor("#F7F3E8")
+    line = colors.HexColor("#D8D1BD")
     base = getSampleStyleSheet()
-    brand_style = ParagraphStyle(
-        "RHTCBrand", parent=base["Normal"], fontName="Helvetica-Bold",
-        fontSize=9, leading=12, textColor=gold, spaceAfter=8,
+    cover_style = ParagraphStyle(
+        "RHTCCover", parent=base["Normal"], fontName="Helvetica-Bold",
+        fontSize=8.5, leading=11, textColor=dark_gold, spaceAfter=7,
+        uppercase=True,
     )
     title_style = ParagraphStyle(
         "RHTCTitle", parent=base["Title"], fontName="Helvetica-Bold",
-        fontSize=21, leading=25, textColor=ink, alignment=TA_LEFT,
-        spaceBefore=4, spaceAfter=7,
+        fontSize=23, leading=28, textColor=ink, alignment=TA_LEFT,
+        spaceBefore=3, spaceAfter=7,
     )
     meta_style = ParagraphStyle(
         "RHTCMeta", parent=base["Normal"], fontName="Helvetica",
-        fontSize=8.5, leading=12, textColor=muted, spaceAfter=12,
+        fontSize=8.5, leading=12, textColor=muted, spaceAfter=11,
     )
     section_style = ParagraphStyle(
         "RHTCSection", parent=base["Heading2"], fontName="Helvetica-Bold",
-        fontSize=13, leading=16, textColor=gold, spaceBefore=14, spaceAfter=5,
+        fontSize=13, leading=16, textColor=dark_gold,
+        backColor=pale_gold, borderColor=line, borderWidth=0.5,
+        borderPadding=(5, 7, 5, 7), spaceBefore=12, spaceAfter=5,
         keepWithNext=True,
     )
     body_style = ParagraphStyle(
         "RHTCBody", parent=base["BodyText"], fontName="Helvetica",
-        fontSize=9, leading=12.5, textColor=ink, spaceAfter=6,
+        fontSize=9.1, leading=13, textColor=ink, spaceAfter=7,
         wordWrap="CJK",
     )
+    bullet_style = ParagraphStyle(
+        "RHTCBullet", parent=body_style, leftIndent=13,
+        firstLineIndent=-10, spaceAfter=4,
+    )
     story = [
-        Paragraph("RHTC  |  THREE PEAKS RESEARCH", brand_style),
-        HRFlowable(width="100%", thickness=2, color=gold, spaceAfter=11),
+        Paragraph("COMPREHENSIVE TICKER REPORT  ·  " + xml_escape(symbol), cover_style),
+        HRFlowable(width="100%", thickness=2, color=gold, spaceAfter=12),
         Paragraph(xml_escape(data.title), title_style),
-        Paragraph("Prepared " + xml_escape(data.generated_at or datetime.now().astimezone().strftime("%b %d, %Y %I:%M %p %Z")), meta_style),
+        Paragraph(
+            "Prepared " + xml_escape(data.generated_at or datetime.now().astimezone().strftime("%b %d, %Y %I:%M %p %Z"))
+            + "  ·  RHTC Three Peaks Research",
+            meta_style,
+        ),
     ]
     for section in data.sections:
         story.append(Paragraph(xml_escape(section.title), section_style))
-        body = section.text.strip()
+        body = section.text.replace("\\r\\n", "\\n").replace("\\n", "\n").replace("\\r", "\n").strip()
         if not body:
             story.append(Paragraph("Unavailable.", body_style))
             continue
-        blocks = re.split(r"\n\s*\n", body)
+        blocks = [block.strip() for block in re.split(r"\\n\\s*\\n", body) if block.strip()]
         for block in blocks:
-            block = block.strip()
-            if not block:
+            lines = [line.strip() for line in block.splitlines() if line.strip()]
+            if not lines:
+                continue
+            if all(line.startswith("• ") for line in lines):
+                for item in lines:
+                    safe_item = item[2:].encode("cp1252", "replace").decode("cp1252")
+                    story.append(Paragraph(xml_escape(safe_item), bullet_style, bulletText="•"))
                 continue
             safe_block = block.encode("cp1252", "replace").decode("cp1252")
-            safe_text = xml_escape(safe_block).replace("\n", "<br/>")
+            safe_text = xml_escape(safe_block).replace("\\n", "<br/>")
             story.append(Paragraph(safe_text, body_style))
 
     def draw_page(canvas, document):
         canvas.saveState()
         page_width, page_height = letter
+        badge_x = document.leftMargin + 10
+        badge_y = page_height - 0.43 * inch
         canvas.setFillColor(gold)
+        canvas.circle(badge_x, badge_y, 10, stroke=0, fill=1)
+        canvas.setFillColor(colors.white)
+        canvas.setFont("Helvetica-Bold", 5.4)
+        canvas.drawCentredString(badge_x, badge_y - 2, "RHTC")
+        canvas.setFillColor(dark_gold)
         canvas.setFont("Helvetica-Bold", 8)
-        canvas.drawString(document.leftMargin, page_height - 0.43 * inch, "RHTC  |  THREE PEAKS RESEARCH")
-        canvas.setStrokeColor(gold)
-        canvas.setLineWidth(1.2)
-        canvas.line(document.leftMargin, page_height - 0.52 * inch, page_width - document.rightMargin, page_height - 0.52 * inch)
+        canvas.drawString(document.leftMargin + 27, badge_y - 2, "THREE PEAKS  |  RESEARCH")
         canvas.setFillColor(muted)
-        canvas.setFont("Helvetica", 8)
-        canvas.drawString(document.leftMargin, 0.35 * inch, f"{symbol}  ·  Informational research")
-        canvas.drawRightString(page_width - document.rightMargin, 0.35 * inch, f"Page {document.page}")
+        canvas.setFont("Helvetica-Bold", 7)
+        canvas.drawRightString(page_width - document.rightMargin, badge_y - 2, symbol)
+        canvas.setStrokeColor(gold)
+        canvas.setLineWidth(1.1)
+        canvas.line(document.leftMargin, page_height - 0.61 * inch, page_width - document.rightMargin, page_height - 0.61 * inch)
+        canvas.setStrokeColor(line)
+        canvas.setLineWidth(0.6)
+        canvas.line(document.leftMargin, 0.52 * inch, page_width - document.rightMargin, 0.52 * inch)
+        canvas.setFillColor(muted)
+        canvas.setFont("Helvetica", 7.5)
+        canvas.drawString(document.leftMargin, 0.34 * inch, f"{symbol}  ·  Informational research")
+        canvas.drawRightString(page_width - document.rightMargin, 0.34 * inch, f"PAGE {document.page}")
         canvas.restoreState()
 
     try:
