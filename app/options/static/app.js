@@ -386,6 +386,31 @@ function reportObjectMarkup(value,depth=0){
   }
   return '<p>'+safe(String(value))+'</p>';
 }
+function ceoRiskReportMarkup(report){
+  const profile=[
+    ['Company',report.company_name||'Not identified','CEO',report.ceo_name||'Not identified'],
+    ['Assessment date',report.as_of||'Not specified','Confidence',(report.confidence??'—')+'%']
+  ];
+  const factors=Array.isArray(report.factors)?report.factors:[];
+  const scenarios=Array.isArray(report.scenarios)?report.scenarios:[];
+  const signals=Array.isArray(report.monitor_signals)?report.monitor_signals:[];
+  const factorRows=factors.map(item=>{
+    const score=Math.max(0,Math.min(4,Number(item.risk_score)||0));
+    const grades=['Low','Limited','Moderate','High','Severe'];
+    return '<tr><th>'+safe(item.name||'Risk factor')+'</th><td>'+grades[score]+' · '+score+'/4</td><td>'+safe(item.evidence||'No supporting evidence was saved.')+'</td></tr>';
+  }).join('');
+  const scenarioRows=scenarios.map(item=>'<tr><td>'+safe(item.event||'Scenario')+'</td><td>'+safe(item.likely_effect||'Not specified')+'</td><td>'+safe(item.recovery_path||'Not specified')+'</td></tr>').join('');
+  const weights=Array.isArray(report.factor_weights)?report.factor_weights:[];
+  const weightRows=factors.map((item,index)=>'<tr><th>'+safe(item.name||'Risk factor')+'</th><td>'+safe(String(weights[index]??'—'))+'%</td></tr>').join('');
+  const fields=rows=>'<table class="ticker-report-data"><tbody>'+rows.map(row=>'<tr><th>'+safe(row[0])+'</th><td>'+safe(row[1])+'</td><th>'+safe(row[2])+'</th><td>'+safe(row[3])+'</td></tr>').join('')+'</tbody></table>';
+  return fields(profile)+
+    '<h3>Summary</h3><p>'+safe(report.summary||'No summary was returned.')+'</p>'+
+    '<h3>Risk factors</h3><table class="ticker-report-data"><thead><tr><th>Factor</th><th>Score</th><th>Evidence</th></tr></thead><tbody>'+factorRows+'</tbody></table>'+
+    '<h3>Departure and disruption scenarios</h3><table class="ticker-report-data"><thead><tr><th>Event</th><th>Likely effect</th><th>Recovery path</th></tr></thead><tbody>'+scenarioRows+'</tbody></table>'+
+    '<h3>Monitor signals</h3>'+(signals.length?'<ul>'+signals.map(item=>'<li>'+safe(item)+'</li>').join('')+'</ul>':'<p>No monitor signals were returned.</p>')+
+    '<h3>Scoring details</h3><p><b>Scale:</b> '+safe(report.scoring_scale||'Weighted 0–100 key-person risk; higher means greater exposure')+'</p>'+
+    (weightRows?'<table class="ticker-report-data"><thead><tr><th>Factor weight</th><th>Weight</th></tr></thead><tbody>'+weightRows+'</tbody></table>':'');
+}
 async function reportJson(url,options={}){
   const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),90000);
   try{
@@ -453,6 +478,8 @@ async function printPreparedTickerReport(){
   const toolbar=document.querySelector('.ticker-report-toolbar');
   if(!symbol||!report||report.hidden||!toolbar)return;
   action.disabled=true;action.textContent='Generating PDF…';
+  let pdfWindow=null;
+  try{pdfWindow=window.open('about:blank','_blank');if(pdfWindow){pdfWindow.document.title='Preparing RHTC PDF';pdfWindow.document.body.textContent='Preparing your PDF…'}}catch(error){}
   const sections=Array.from(report.querySelectorAll('.ticker-report-section')).map(section=>{
     const copy=section.cloneNode(true);
     const heading=copy.querySelector('h2');
@@ -471,17 +498,29 @@ async function printPreparedTickerReport(){
     const blob=await response.blob();
     if(tickerReportPdfUrl)URL.revokeObjectURL(tickerReportPdfUrl);
     tickerReportPdfUrl=URL.createObjectURL(blob);
+    if(pdfWindow){
+      const viewer=pdfWindow.document;
+      viewer.open();
+      viewer.write('<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>RHTC '+safe(symbol)+' Research Report</title><style>*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;font:16px system-ui,-apple-system,sans-serif;color:#17202a;background:#eef1f4}header{height:58px;display:flex;align-items:center;gap:12px;padding:8px 14px;background:#17202a;color:#fff}button,a{font:600 14px system-ui,-apple-system,sans-serif;padding:9px 13px;border-radius:6px;border:1px solid #b9944a;background:#f7f3e8;color:#17202a;text-decoration:none}header span{margin-left:auto;font-size:13px}iframe{display:block;width:100%;height:calc(100% - 58px);border:0;background:#fff}@media(max-width:520px){header{height:auto;min-height:58px;flex-wrap:wrap}header span{margin-left:0}iframe{height:calc(100% - 94px)}}</style></head><body><header><button id="back" type="button">Back to quote</button><a id="download">Download PDF</a><span>RHTC · '+safe(symbol)+' report</span></header><iframe title="RHTC '+safe(symbol)+' research report"></iframe></body></html>');
+      viewer.close();
+      viewer.getElementById('back').addEventListener('click',()=>{pdfWindow.close();try{window.focus()}catch(error){}});
+      const viewerDownload=viewer.getElementById('download');viewerDownload.href=tickerReportPdfUrl;viewerDownload.download='RHTC_'+symbol+'_Research_Report.pdf';
+      viewer.querySelector('iframe').src=tickerReportPdfUrl;
+    }
     const link=document.createElement('a');
     link.className='refresh-btn ticker-report-pdf-link';
     link.href=tickerReportPdfUrl;
     link.download='RHTC_'+symbol+'_Research_Report.pdf';
     link.textContent='Download PDF';
+    const viewLink=document.createElement('a');
+    viewLink.className='refresh-btn secondary';viewLink.href=tickerReportPdfUrl;viewLink.target='_blank';viewLink.rel='noopener';viewLink.textContent='Open PDF';
     const back=document.createElement('button');
     back.type='button';back.className='refresh-btn secondary';back.textContent='Back to quote';back.onclick=closeTickerReportPreview;
     const note=document.createElement('span');
-    note.textContent='PDF ready. Download it, then open it to print or save to Files.';
-    toolbar.replaceChildren(link,back,note);
+    note.textContent=pdfWindow?'PDF opened in a separate tab. Use Back to quote in that tab to return here.':'PDF ready. Open it in a new tab or download it.';
+    toolbar.replaceChildren(viewLink,link,back,note);
   }catch(error){
+    if(pdfWindow&&!pdfWindow.closed)pdfWindow.close();
     action.disabled=false;action.textContent='Generate PDF';
     const status=document.createElement('span');status.className='ticker-report-error';status.textContent='Could not create PDF: '+error.message;
     toolbar.appendChild(status);
@@ -522,7 +561,7 @@ async function printTickerReport(){
     const ceoReport=ceo.data||{};
     const ceoMarkup=ceo.error
       ?'<p class="ticker-report-unavailable">CEO Risk report unavailable: '+safe(ceo.error.message)+'</p>'
-      :'<div class="ticker-report-rating"><b>'+safe(ceoReport.risk_rating||'Unrated')+' CEO Risk · '+safe(String(ceoReport.risk_score??'—'))+'/100</b><span>Confidence '+safe(String(ceoReport.confidence??'—'))+'%</span></div>'+reportObjectMarkup(ceoReport)+'<h3>Sources</h3>'+reportCitationsMarkup(ceoReport.citations);
+      :'<div class="ticker-report-rating"><b>'+safe(ceoReport.risk_rating||'Unrated')+' CEO Risk · '+safe(String(ceoReport.risk_score??'—'))+'/100</b><span>Confidence '+safe(String(ceoReport.confidence??'—'))+'%</span></div>'+ceoRiskReportMarkup(ceoReport)+'<h3>Sources</h3>'+reportCitationsMarkup(ceoReport.citations);
     const generated=new Date().toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'});
     const title=$('#detail-title').textContent.trim();
     report.innerHTML='<div class="ticker-report-toolbar"><button class="refresh-btn" type="button" onclick="printPreparedTickerReport()">Generate PDF</button><button class="refresh-btn secondary" type="button" onclick="closeTickerReportPreview()">Back to quote</button><span>Generate a PDF to open, print, or save to Files.</span></div>'+
