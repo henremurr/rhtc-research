@@ -192,7 +192,9 @@ async function showEarningsReport(){
       const eventDate=event.date?new Date(event.date+'T00:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',timeZone:'UTC'}):'—';
       const epsValue=Number(event.eps_estimate);
       const epsAvailable=event.eps_estimate!==null&&event.eps_estimate!==undefined&&Number.isFinite(epsValue);
-      const eps=epsAvailable?'
+      const eps=epsAvailable?String.fromCharCode(36)+epsValue.toFixed(2):'Unavailable';
+      const epsColor=epsAvailable?(epsValue>0?'#58d68d':'#ff6b6b'):'';
+      return `<tr><td>${safe(eventDate)}</td><td><b>${safe(event.symbol||'')}</b></td><td style="${epsColor?'color:'+epsColor:''}">${safe(eps)}</td></tr>`;
     }).join('')+'</tbody></table></div>':'<p class="earnings-report-empty">No upcoming earnings have been saved yet. Run Analyze Stock on tickers to populate the report.</p>';
     status.textContent=events.length+' upcoming ticker'+(events.length===1?'':'s');
   }catch(error){status.textContent=error.message}
