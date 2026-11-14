@@ -1389,3 +1389,57 @@ body.news-mode .workspace-toolbar-heading{gap:8px}
   .ticker-report-toolbar { display:none !important; }
   .detail-modal.report-preview-mode { display:block !important; position:static !important; width:100% !important; max-width:none !important; max-height:none !important; padding:0 !important; overflow:visible !important; }
 }
+
+/* Readable white ticker report preview, independent of the dashboard theme */
+.detail-modal.report-preview-mode {
+  background:#fff !important;
+  color:#17202a !important;
+  --ink:#17202a;
+  --muted:#536170;
+  --line:#cbd2d9;
+  --bg:#fff;
+}
+.detail-modal.report-preview-mode #ticker-print-report,
+.detail-modal.report-preview-mode #ticker-print-report * {
+  color:#17202a !important;
+  box-shadow:none !important;
+}
+.detail-modal.report-preview-mode #ticker-print-report {
+  background:#fff !important;
+  color:#17202a !important;
+  font-family:Arial,Helvetica,sans-serif !important;
+}
+.detail-modal.report-preview-mode .ticker-report-header { padding:0 0 18px; margin:0 0 18px; border-bottom:3px solid #b9944a; }
+.detail-modal.report-preview-mode .ticker-report-brand { display:flex; align-items:center; gap:9px; color:#705622 !important; font-weight:700; letter-spacing:1.5px; }
+.detail-modal.report-preview-mode .ticker-report-mark { display:inline-grid; place-items:center; width:36px; height:36px; border:2px solid #b9944a; border-radius:50%; color:#705622 !important; font-weight:800; }
+.detail-modal.report-preview-mode .ticker-report-header>p { margin:14px 0 4px; color:#80652e !important; font-size:12px; font-weight:700; letter-spacing:2px; }
+.detail-modal.report-preview-mode .ticker-report-header h1 { margin:0 0 7px; color:#141a21 !important; font-size:28px; line-height:1.2; }
+.detail-modal.report-preview-mode .ticker-report-header small,
+.detail-modal.report-preview-mode .ticker-report-note { color:#536170 !important; font-size:13px; }
+.detail-modal.report-preview-mode .ticker-report-section { margin:18px 0 0; padding:0 0 14px; border-bottom:1px solid #cbd2d9; }
+.detail-modal.report-preview-mode .ticker-report-section>h2 { margin:0 0 10px; padding:0 0 6px; border-bottom:1px solid #d7dbe0; color:#725a27 !important; font-size:20px; }
+.detail-modal.report-preview-mode .ticker-report-section h3 { margin:12px 0 5px; color:#313b47 !important; font-size:15px; }
+.detail-modal.report-preview-mode .ticker-report-rating { display:flex; align-items:center; gap:10px; margin:8px 0; padding:8px 10px; border:1px solid #b9944a; border-radius:5px; background:#f8f5ed !important; }
+.detail-modal.report-preview-mode .ticker-report-rating * { color:#17202a !important; }
+.detail-modal.report-preview-mode .ticker-report-unavailable { padding:8px; border-left:3px solid #a15b55; color:#723b36 !important; background:#fbf1f0 !important; }
+.detail-modal.report-preview-mode .ticker-report-field { margin:8px 0; }
+.detail-modal.report-preview-mode .ticker-report-field dt { color:#725a27 !important; font-weight:700; text-transform:capitalize; }
+.detail-modal.report-preview-mode .ticker-report-field dd { margin:3px 0 0 12px; }
+.detail-modal.report-preview-mode .ticker-report-footer { margin-top:18px; padding-top:8px; border-top:2px solid #b9944a; color:#536170 !important; font-size:12px; line-height:1.5; }
+.detail-modal.report-preview-mode .company-overview,
+.detail-modal.report-preview-mode .earnings-events,
+.detail-modal.report-preview-mode .detail-quote-stats>div,
+.detail-modal.report-preview-mode .detail-grid>div,
+.detail-modal.report-preview-mode .detail-call-block>div {
+  background:#fff !important;
+  color:#17202a !important;
+  border-color:#cbd2d9 !important;
+}
+.detail-modal.report-preview-mode .company-overview *,
+.detail-modal.report-preview-mode .earnings-events *,
+.detail-modal.report-preview-mode .detail-quote-stats *,
+.detail-modal.report-preview-mode .detail-grid *,
+.detail-modal.report-preview-mode .detail-call-block * { color:#17202a !important; }
+.detail-modal.report-preview-mode a { color:#725a27 !important; text-decoration:underline; overflow-wrap:anywhere; }
+.detail-modal.report-preview-mode .ticker-report-toolbar { background:#f3f5f7 !important; border-color:#cbd2d9 !important; }
+.detail-modal.report-preview-mode .ticker-report-toolbar>span { color:#536170 !important; }
