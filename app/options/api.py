@@ -3321,7 +3321,8 @@ async def create_ticker_report_pdf(data: TickerReportPdfInput):
             block = block.strip()
             if not block:
                 continue
-            safe_text = xml_escape(block).replace("\n", "<br/>")
+            safe_block = block.encode("cp1252", "replace").decode("cp1252")
+            safe_text = xml_escape(safe_block).replace("\n", "<br/>")
             story.append(Paragraph(safe_text, body_style))
 
     def draw_page(canvas, document):
