@@ -3403,19 +3403,30 @@ async def create_ticker_report_pdf(data: TickerReportPdfInput):
         return None
 
     def render_plain(block, section_title):
-        lines = [line.strip() for line in block.splitlines() if line.strip()]
-        if not lines:
+        lines = block.splitlines()
+        if not any(line.strip() for line in lines):
             return
         field_rows = []
         prose = []
+        earnings_rows = []
+        period = None
+
         def flush_fields():
             if field_rows:
                 add_table([["Metric", "Value"], *field_rows], header=True)
                 field_rows.clear()
-        period = None
-        earnings_rows = []
+
+        def flush_prose():
+            if prose:
+                story.append(paragraph("\n".join(prose)))
+                prose.clear()
+
         date_pattern = re.compile(r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},?\s+\d{4}\b", re.I)
-        for line in lines:
+        for raw_line in lines:
+            line = raw_line.strip()
+            if not line:
+                flush_prose()
+                continue
             if section_title.casefold() == "earnings dates and eps":
                 status = re.search(r"\b(Prior reported|Next scheduled)\b", line, re.I)
                 if status:
@@ -3426,28 +3437,27 @@ async def create_ticker_report_pdf(data: TickerReportPdfInput):
                     actual = re.search(r"EPS actual\s*(Unavailable|-?\$?[\d,]+(?:\.\d+)?)", line, re.I)
                     estimate = re.search(r"EPS estimate\s*(Unavailable|-?\$?[\d,]+(?:\.\d+)?)|Estimate\s*\$?(-?[\d,]+(?:\.\d+)?)", line, re.I)
                     actual_value = actual.group(1) if actual else "—"
-                    estimate_value = next((v for v in estimate.groups() if v), "—") if estimate else "—"
+                    estimate_value = next((value for value in estimate.groups() if value), "—") if estimate else "—"
                     earnings_rows.append([period, date_value, actual_value, estimate_value])
                     continue
                 if line.casefold() in {"prior reported", "next scheduled"}:
                     continue
             pair = split_field(line)
             if pair:
+                flush_prose()
                 field_rows.append([pair[0], pair[1]])
             elif line.startswith("• "):
                 flush_fields()
-                if prose:
-                    story.append(paragraph("\n".join(prose)))
-                    prose.clear()
-                story.append(Paragraph(xml_escape(line[2:].encode("cp1252", "replace").decode("cp1252")), bullet_style, bulletText="•"))
+                flush_prose()
+                bullet_text = line[2:].encode("cp1252", "replace").decode("cp1252")
+                story.append(Paragraph(xml_escape(bullet_text), bullet_style, bulletText="•"))
             else:
                 flush_fields()
                 prose.append(line)
         flush_fields()
+        flush_prose()
         if earnings_rows:
             add_table([["Period", "Earnings date", "EPS actual", "EPS estimate"], *earnings_rows], header=True)
-        if prose:
-            story.append(paragraph("\n".join(prose)))
 
     def render_body(text, section_title):
         marker = re.compile(r"@@RHTC_TABLE:(\d+)@@\s*\n(.*?)\n@@END_RHTC_TABLE@@", re.S)
@@ -3455,8 +3465,7 @@ async def create_ticker_report_pdf(data: TickerReportPdfInput):
         for match in marker.finditer(text):
             leading = text[cursor:match.start()].strip()
             if leading:
-                for block in re.split(r"\n\s*\n", leading):
-                    render_plain(block.strip(), section_title)
+                render_plain(leading, section_title)
             rows = []
             for row in match.group(2).splitlines():
                 cells = [cell.strip() for cell in row.split("\t")]
@@ -3466,8 +3475,7 @@ async def create_ticker_report_pdf(data: TickerReportPdfInput):
             cursor = match.end()
         trailing = text[cursor:].strip()
         if trailing:
-            for block in re.split(r"\n\s*\n", trailing):
-                render_plain(block.strip(), section_title)
+            render_plain(trailing, section_title)
 
     for section in data.sections:
         story.append(Paragraph(xml_escape(section.title), section_style))
