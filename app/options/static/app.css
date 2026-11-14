@@ -1320,3 +1320,35 @@ body.news-mode .workspace-toolbar-heading{gap:8px}
   }
   #detail-modal a { color: #111 !important; text-decoration: underline; }
 }
+
+/* Comprehensive ticker report PDF */
+@media print {
+  #detail-modal .detail-modal > :not(#ticker-print-report) { display:none !important; }
+  #detail-modal #ticker-print-report { display:block !important; width:100% !important; margin:0 !important; padding:0 !important; }
+  .ticker-report-header { padding:0 0 18px; margin:0 0 18px; border-bottom:3px solid #b9944a; }
+  .ticker-report-brand { display:flex; align-items:center; gap:9px; color:#705622 !important; font:700 10pt var(--mono,monospace); letter-spacing:1.5px; }
+  .ticker-report-mark { display:inline-grid; place-items:center; width:36px; height:36px; border:2px solid #b9944a; border-radius:50%; color:#705622 !important; font:800 9pt var(--display,sans-serif); letter-spacing:-.5px; }
+  .ticker-report-header>p { margin:14px 0 4px; color:#80652e !important; font:700 9pt var(--mono,monospace); letter-spacing:2px; }
+  .ticker-report-header h1 { margin:0 0 7px; color:#141a21 !important; font:800 24pt var(--display,sans-serif); }
+  .ticker-report-header small,.ticker-report-note { color:#596575 !important; font:9pt var(--sans,sans-serif); }
+  .ticker-report-section { margin:18px 0 0; padding:0 0 14px; border-bottom:1px solid #cbd0d6; break-inside:auto; }
+  .ticker-report-section>h2 { margin:0 0 10px; padding:0 0 6px; border-bottom:1px solid #d7dbe0; color:#725a27 !important; font:700 14pt var(--display,sans-serif); }
+  .ticker-report-section h3 { margin:12px 0 5px; color:#313b47 !important; font:700 10pt var(--sans,sans-serif); }
+  .ticker-report-rating { display:flex; align-items:center; gap:10px; margin:8px 0; padding:8px 10px; border:1px solid #b9944a; border-radius:5px; color:#17202a !important; background:#f8f5ed !important; }
+  .ticker-report-rating b { color:#17202a !important; }
+  .ticker-report-unavailable { padding:8px; border-left:3px solid #a15b55; color:#723b36 !important; background:#fbf1f0 !important; }
+  .ticker-report-citations { margin:5px 0 0; padding-left:20px; }
+  .ticker-report-citations li { margin:4px 0; overflow-wrap:anywhere; }
+  .ticker-report-field { margin:8px 0; }
+  .ticker-report-field dt { color:#725a27 !important; font-weight:700; text-transform:capitalize; }
+  .ticker-report-field dd { margin:3px 0 0 12px; }
+  .ticker-report-field dd>p:first-child { margin-top:0; }
+  .ticker-report-footer { margin-top:18px; padding-top:8px; border-top:2px solid #b9944a; color:#596575 !important; font:8pt/1.5 var(--sans,sans-serif); }
+  .ticker-print-report,.ticker-print-report * { color:#171d24 !important; box-shadow:none !important; }
+  .ticker-print-report .company-overview,.ticker-print-report .earnings-events,.ticker-print-report .detail-quote-stats>div,.ticker-print-report .detail-grid>div,.ticker-print-report .detail-call-block>div,.ticker-print-report .ticker-report-rating { background:#fff !important; border-color:#cbd0d6 !important; }
+  .ticker-print-report a { color:#725a27 !important; text-decoration:underline; overflow-wrap:anywhere; }
+  .ticker-print-report p,.ticker-print-report li,.ticker-print-report dd { font-size:9pt !important; line-height:1.45 !important; }
+  .ticker-print-report .detail-quote-stats,.ticker-print-report .detail-grid,.ticker-print-report .earnings-events-grid { gap:5px !important; }
+  .ticker-print-report .detail-quote-stats>div,.ticker-print-report .earnings-event,.ticker-print-report .detail-grid>div { break-inside:avoid; }
+  .ticker-print-report .ticker-report-section:nth-of-type(5) { break-before:page; }
+}
