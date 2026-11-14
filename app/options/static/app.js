@@ -88,7 +88,7 @@ function peakOptions(selected){return [['','Select Peak'],['AI/I','AI / Infrastr
 function accountOptions(selected){return [['','No account'],['Fidelity Brokerage','Fidelity Brokerage'],['Fidelity IRA','Fidelity IRA'],['Schwab PRCA','Schwab PRCA'],['Vanguard 401k','Vanguard 401k'],['Vanguard IRA-M','Vanguard IRA-M']].map(([value,label])=>`<option value="${safe(value)}"${(selected||'')===value?' selected':''}>${safe(label)}</option>`).join('')}
 function openFullscreenModal(backdrop,modal,toggle=null){modal.classList.add('is-fullscreen');backdrop.classList.add('is-fullscreen','open');if(toggle){toggle.setAttribute('aria-label','Exit full screen');toggle.title='Exit full screen';toggle.setAttribute('aria-pressed','true')}}
 function resetFullscreenModal(backdrop,modal,toggle=null){modal.classList.remove('is-fullscreen');backdrop.classList.remove('is-fullscreen','open');if(toggle){toggle.setAttribute('aria-label','Enter full screen');toggle.title='Enter full screen';toggle.setAttribute('aria-pressed','false')}}
-function openSymbols(){state.editingSymbol=null;setSymbolError();$('#symbol-filter').value='';$('#symbol-peak-filter').value='Holdings';$('#symbol-order-by').value='expy';renderSymbolList();const backdrop=$('#symbols-modal');openFullscreenModal(backdrop,backdrop.querySelector('.modal'))}
+function openSymbols(prefillTicker=''){state.editingSymbol=null;setSymbolError();$('#symbol-filter').value='';$('#symbol-peak-filter').value='Holdings';$('#symbol-order-by').value='expy';if(prefillTicker){clearNewSymbolForm();$('#new-symbol').value=prefillTicker}renderSymbolList();const backdrop=$('#symbols-modal');openFullscreenModal(backdrop,backdrop.querySelector('.modal'));if(prefillTicker)requestAnimationFrame(()=>$('#new-symbol').focus())}
 function drawPeakBars(){$('#screened-total').textContent=`${state.rows.length} SCREENED`;const counts={'AI/I':0,'EFM/I':0,'DS/I':0,'Other':0};state.rows.forEach(r=>counts[r.peak]=(counts[r.peak]||0)+1);const max=Math.max(...Object.values(counts));$('#peak-bars').innerHTML=Object.entries(counts).map(([p,n])=>{let m=peakMeta[p];return `<div class="peak-bar-row"><span class="peak-bar-label">${m.label}</span><div class="bar-track"><div class="bar-fill ${m.cls}" style="width:${Math.max(2,n/max*100)}%"></div></div><span class="bar-num">${n}</span></div>`}).join('')}
 function renderRows(){
   let rows=state.rows.filter(r=>(!state.selectedOnly||state.watchlist.some(item=>item.symbol===r.symbol&&hasPositiveQuantity(item)))&&(!state.costOnly||hasHoldingDetails(r))&&(state.mode==='history'||belongsToAccountGroup(r.symbol,state.accountFilter))&&matchesStockScoreFilter(r)&&matchesCallScoreFilter(r));
@@ -208,6 +208,7 @@ async function showOrphanedTickers(){
   modal.classList.add('open');
   status.textContent='Scanning saved ticker tables…';
   content.innerHTML='';
+  content.onclick=event=>{const button=event.target.closest('[data-orphan-symbol]');if(!button)return;const symbol=button.dataset.orphanSymbol;closeOrphanedTickers();openSymbols(symbol)};
   try{
     const response=await fetch('/options/api/watchlist/orphans',{credentials:'same-origin',cache:'no-store'});
     const data=await response.json();
@@ -221,7 +222,7 @@ async function showOrphanedTickers(){
     const labels={ticker_earnings:'Earnings',stock_analysis_reports:'Stock analysis reports',buffett_screen_reports:'Buffett reports',ceo_risk_reports:'CEO Risk reports'};
     content.innerHTML='<div class="earnings-report-table-wrap orphaned-tickers-table-wrap"><table class="earnings-report-table orphaned-tickers-table"><thead><tr><th>Ticker</th><th>Saved records by table</th><th>Total</th></tr></thead><tbody>'+orphans.map(orphan=>{
       const details=Object.entries(orphan.tables||{}).map(([table,count])=>'<span class="orphaned-ticker-record">'+safe(labels[table]||table.replace(/_/g,' '))+' <b>'+Number(count||0).toLocaleString()+'</b></span>').join('');
-      return '<tr><td><strong>'+safe(orphan.symbol)+'</strong></td><td class="orphaned-ticker-tables">'+details+'</td><td>'+Number(orphan.total_records||0).toLocaleString()+'</td></tr>';
+      return '<tr><td><button type="button" class="orphaned-ticker-button" data-orphan-symbol="'+safe(orphan.symbol)+'" aria-label="Add '+safe(orphan.symbol)+' to the watchlist" title="Open Watchlist Manager and prefill this ticker">'+safe(orphan.symbol)+'</button></td><td class="orphaned-ticker-tables">'+details+'</td><td>'+Number(orphan.total_records||0).toLocaleString()+'</td></tr>';
     }).join('')+'</tbody></table></div>';
   }catch(error){
     status.textContent=error.message||'Could not scan for orphaned tickers.';
