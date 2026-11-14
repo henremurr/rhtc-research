@@ -415,8 +415,22 @@ async function getOrCreateCeoRiskReport(symbol){
   }
   return data.report||{};
 }
+let tickerReportOriginalParent=null,tickerReportOriginalNext=null,tickerReportOldTitle='';
+function restoreTickerReportToPreview(){
+  const report=$('#ticker-print-report');
+  if(tickerReportOriginalParent&&report){
+    if(tickerReportOriginalNext&&tickerReportOriginalNext.parentNode===tickerReportOriginalParent)tickerReportOriginalParent.insertBefore(report,tickerReportOriginalNext);
+    else tickerReportOriginalParent.appendChild(report);
+  }
+  document.documentElement.classList.remove('ticker-report-detached');
+  if(tickerReportOldTitle)document.title=tickerReportOldTitle;
+  tickerReportOriginalParent=null;tickerReportOriginalNext=null;tickerReportOldTitle='';
+  const printButton=document.querySelector('.ticker-report-toolbar button[onclick="printPreparedTickerReport()"]');
+  if(printButton)printButton.disabled=false;
+}
 function closeTickerReportPreview(){
   const report=$('#ticker-print-report'),modal=$('#detail-modal'),button=$('#detail-print-btn');
+  restoreTickerReportToPreview();
   report.hidden=true;modal.querySelector('.detail-modal').classList.remove('report-preview-mode');
   button.hidden=false;button.disabled=false;button.textContent='Print report';
   $('#detail-print-status').textContent='';
@@ -424,16 +438,16 @@ function closeTickerReportPreview(){
 }
 function printPreparedTickerReport(){
   const report=$('#ticker-print-report'),symbol=String(window.stockQuoteContext?.symbol||'').toUpperCase();
-  if(!symbol||!report||report.hidden)return;
-  const oldTitle=document.title,originalParent=report.parentNode,originalNext=report.nextSibling;
+  if(!symbol||!report||report.hidden||tickerReportOriginalParent)return;
+  const printButton=document.querySelector('.ticker-report-toolbar button[onclick="printPreparedTickerReport()"]');
+  if(printButton)printButton.disabled=true;
+  tickerReportOriginalParent=report.parentNode;tickerReportOriginalNext=report.nextSibling;tickerReportOldTitle=document.title;
   document.title=symbol+' - RHTC Research Report';
+  report.classList.add('ticker-report-detached');
   document.body.appendChild(report);
-  try{window.print()}
-  finally{
-    if(originalNext&&originalNext.parentNode===originalParent)originalParent.insertBefore(report,originalNext);
-    else originalParent.appendChild(report);
-    document.title=oldTitle;
-  }
+  document.documentElement.classList.add('ticker-report-detached');
+  window.addEventListener('afterprint',restoreTickerReportToPreview,{once:true});
+  window.print();
 }
 async function printTickerReport(){
   const context=window.stockQuoteContext||{},symbol=String(context.symbol||'').toUpperCase(),button=$('#detail-print-btn'),report=$('#ticker-print-report'),modal=$('#detail-modal');
