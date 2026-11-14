@@ -450,7 +450,7 @@ async function printTickerReport(){
     const quoteSource=$('#detail-option-source').innerHTML;
     const earnings=$('#detail-stock-earnings').innerHTML;
     const stockReport=stock.data||{};
-    const stockText=stockReport.analysis||[stockReport.summary,stockReport.details].filter(Boolean).join('\\n\\n');
+    const stockText=stockReport.analysis||[stockReport.summary,stockReport.details].filter(Boolean).join('\n\n');
     const stockMarkup=stock.error
       ?'<p class="ticker-report-unavailable">Stock analysis unavailable: '+safe(stock.error.message)+'</p>'
       :'<div class="ticker-report-rating"><b>'+safe(stockReport.rating_label||'Unrated')+'</b>'+(stockReport.rating!==null&&stockReport.rating!==undefined?' · '+safe(String(stockReport.rating))+'/5':'')+'</div>'+(stockText?renderAnalysis(stockText):'<p>No saved analysis text was returned.</p>')+'<h3>Sources</h3>'+reportCitationsMarkup(stockReport.citations);
