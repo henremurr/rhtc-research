@@ -188,7 +188,7 @@ async function showEarningsReport(){
     if(!response.ok)throw Error(data.detail||'Could not load the earnings report.');
     const events=Array.isArray(data.events)?data.events:[];
     $('#earnings-report-meta').textContent='Future scheduled dates · as of '+(data.as_of||new Date().toISOString().slice(0,10));
-    content.onclick=event=>{const button=event.target.closest('[data-stock-symbol]');if(button)viewStockReports(button.dataset.stockSymbol)};
+    content.onclick=event=>{const button=event.target.closest('[data-stock-symbol]');if(button)viewChain(button.dataset.stockSymbol)};
   content.innerHTML=events.length?'<div class="earnings-report-table-wrap"><table class="earnings-report-table"><thead><tr><th>Next earnings</th><th>Ticker</th><th>EPS estimate</th></tr></thead><tbody>'+events.map(event=>{
       const eventDate=event.date?new Date(event.date+'T00:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',timeZone:'UTC'}):'—';
       const epsValue=Number(event.eps_estimate);
@@ -196,7 +196,7 @@ async function showEarningsReport(){
       const eps=epsAvailable?String.fromCharCode(36)+epsValue.toFixed(2):'Unavailable';
       const epsColor=epsAvailable?(epsValue>0?'#58d68d':'#ff6b6b'):'';
       const ticker=String(event.symbol||'');
-      const tickerButton='<button type="button" class="earnings-ticker-link" data-stock-symbol="'+safe(ticker)+'" aria-label="View stock analysis for '+safe(ticker)+'">'+safe(ticker)+'</button>';
+      const tickerButton='<button type="button" class="earnings-stock-quote-btn" data-stock-symbol="'+safe(ticker)+'" aria-label="Open stock quote for '+safe(ticker)+'" title="Open stock quote">'+safe(ticker)+'</button>';
       return '<tr><td>'+safe(eventDate)+'</td><td>'+tickerButton+'</td><td style="color:'+epsColor+'">'+safe(eps)+'</td></tr>';
     }).join('')+'</tbody></table></div>':'<p class="earnings-report-empty">No upcoming earnings have been saved yet. Run Analyze Stock on tickers to populate the report.</p>';
     status.textContent=events.length+' upcoming ticker'+(events.length===1?'':'s');
