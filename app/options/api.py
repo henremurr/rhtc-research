@@ -3380,7 +3380,12 @@ async def create_ticker_report_pdf(data: TickerReportPdfInput):
     field_labels = sorted(set(quote_fields + company_fields), key=len, reverse=True)
 
     def paragraph(text, style=body_style):
-        safe = text.encode("cp1252", "replace").decode("cp1252")
+        # ReportLab's built-in Helvetica font cannot encode the Unicode minus
+        # used by the dashboard, so it otherwise appears as "?" in the PDF.
+        safe = text.translate(str.maketrans({
+            "\u2212": "-", "\u2010": "-", "\u2011": "-",
+            "\u2012": "-", "\u2013": "-", "\u2014": "-",
+        })).encode("cp1252", "replace").decode("cp1252")
         return Paragraph(xml_escape(safe).replace("\n", "<br/>"), style)
 
     def add_table(rows, header=True):
