@@ -820,7 +820,7 @@ _FINNHUB_LAST_REQUEST_AT = 0.0
 _FINNHUB_MIN_REQUEST_INTERVAL = 1.05
 
 
-async def _finnhub_api_json(client: httpx.AsyncClient, path: str, params: dict[str, Any]) -> dict[str, Any]:
+async def _finnhub_api_json(client: httpx.AsyncClient, path: str, params: dict[str, Any]) -> dict[str, Any] | list[Any]:
     global _FINNHUB_LAST_REQUEST_AT
     async with _FINNHUB_REQUEST_LOCK:
         for attempt in range(3):
@@ -841,7 +841,7 @@ async def _finnhub_api_json(client: httpx.AsyncClient, path: str, params: dict[s
                 continue
             response.raise_for_status()
             payload = response.json()
-            return payload if isinstance(payload, dict) else {}
+            return payload if isinstance(payload, (dict, list)) else {}
     raise RuntimeError("Finnhub request did not return a response.")
 
 
@@ -991,6 +991,45 @@ def parse_finnhub_earnings_calendar(payload: dict[str, Any], today: date | None 
     }
 
 
+def parse_finnhub_company_earnings(payload: Any, today: date | None = None) -> dict[str, Any] | None:
+    """Return the latest actual EPS result from Finnhub's company earnings history."""
+    today = today or date.today()
+    if not isinstance(payload, list):
+        return None
+
+    results: list[tuple[date, dict[str, Any]]] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        try:
+            event_date = date.fromisoformat(str(item.get("period") or item.get("date") or "")[:10])
+        except ValueError:
+            continue
+        if event_date > today:
+            continue
+
+        def number(key: str) -> float | None:
+            value = item.get(key)
+            try:
+                parsed = float(value) if value is not None else None
+            except (TypeError, ValueError):
+                return None
+            return parsed if parsed is not None and math.isfinite(parsed) else None
+
+        actual, estimate = number("actual"), number("estimate")
+        if actual is None:
+            continue
+        results.append((event_date, {
+            "date": event_date.isoformat(),
+            "eps_actual": actual,
+            "eps_estimate": estimate,
+            "revenue_actual": None,
+            "revenue_estimate": None,
+            "hour": None,
+        }))
+    return max(results, key=lambda row: row[0])[1] if results else None
+
+
 class Tradier:
     DTE_WINDOWS = ((0, 7), (8, 14), (15, 22), (22, 28), (29, 35), (36, 42), (37, 49), (48, 56), (57, 63), (64, 70), (70, None))
 
@@ -1021,7 +1060,7 @@ class Tradier:
             headers={"X-Finnhub-Token": api_key},
             timeout=10,
         ) as client:
-            async def request(path: str, extra_params: dict[str, str] | None = None) -> dict[str, Any]:
+            async def request(path: str, extra_params: dict[str, str] | None = None) -> dict[str, Any] | list[Any]:
                 return await _finnhub_api_json(client, path, {"symbol": cache_key, **(extra_params or {})})
 
             sentiment_to = date.today()
@@ -1045,6 +1084,22 @@ class Tradier:
         result["insider_sentiment_mspr"], result["insider_sentiment_month"] = parse_finnhub_insider_sentiment(insider_sentiment)
         result["company_profile"] = parse_finnhub_company_overview(basic_profile, full_profile)
         result.update(parse_finnhub_earnings_calendar(earnings_calendar))
+        prior = result.get("prior_earnings")
+        if not isinstance(prior, dict) or prior.get("eps_actual") is None:
+            try:
+                history = await request("/stock/earnings", {"limit": "8"})
+                history_prior = parse_finnhub_company_earnings(history)
+                if history_prior:
+                    if not isinstance(prior, dict):
+                        result["prior_earnings"] = history_prior
+                    else:
+                        merged_prior = dict(prior)
+                        for field in ("eps_actual", "eps_estimate"):
+                            if merged_prior.get(field) is None and history_prior.get(field) is not None:
+                                merged_prior[field] = history_prior[field]
+                        result["prior_earnings"] = merged_prior
+            except Exception:
+                pass
         if any(value is not None for key, value in result.items() if key != "company_profile") or (result.get("company_profile") or {}).get("name"):
             _FINNHUB_METRICS_CACHE[cache_key] = (time.monotonic(), result.copy())
         return result
