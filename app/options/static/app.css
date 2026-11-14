@@ -1251,3 +1251,12 @@ body.news-mode .workspace-toolbar-heading{gap:8px}
 /* RHTC manager score mirrors the screener's combined stock and call score. */
 .symbol-rhtc-score{display:block;width:5ch;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#3b8b68;font:700 12px var(--mono);text-align:right}
 :root[data-theme="dark"] .symbol-rhtc-score{color:#78d2a7}
+
+
+.orphaned-tickers-table td{white-space:normal;vertical-align:top}
+.orphaned-tickers-table-wrap{max-height:65vh}
+.orphaned-ticker-tables{display:flex;flex-wrap:wrap;gap:6px;min-width:220px}
+.orphaned-ticker-record{display:inline-flex;align-items:center;gap:5px;padding:4px 7px;border:1px solid #465363;border-radius:999px;background:#1b2530;color:#bdc7d3;font:11px/1.35 var(--mono,monospace)}
+.orphaned-ticker-record b{color:#e7ecf2}
+.orphaned-tickers-empty{padding:14px;border:1px solid #3b4654;border-radius:8px;background:#1b2530;color:#aab5c2}
+@media(max-width:520px){.orphaned-tickers-table th,.orphaned-tickers-table td{padding:8px 6px}.orphaned-tickers-table th:nth-child(3),.orphaned-tickers-table td:nth-child(3){text-align:right}.orphaned-ticker-tables{min-width:180px}}
