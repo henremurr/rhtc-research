@@ -433,7 +433,14 @@ function reportHtmlToText(markup){
     if(node.nodeType!==Node.ELEMENT_NODE)return '';
     const tag=node.tagName;
     if(tag==='BR')return '\n';
-    let value=Array.from(node.childNodes).map(walk).join('');
+    if(tag==='TABLE'){
+      const rows=Array.from(node.querySelectorAll('tr')).map(tr=>Array.from(tr.children).map(cell=>(cell.innerText||cell.textContent||'').replace(/\s+/g,' ').trim()).join('\t')).filter(row=>row.replace(/\t/g,'').trim());
+      if(!rows.length)return '';
+      const firstRow=node.querySelector('tr');
+      const hasHeader=!!(firstRow&&firstRow.querySelector('th'));
+      return '\n@@RHTC_TABLE:'+(hasHeader?'1':'0')+'@@\n'+rows.join('\n')+'\n@@END_RHTC_TABLE@@\n';
+    }
+    let value=Array.from(node.childNodes).map(walk).join(' ');
     if(tag==='A'&&node.href)value+=' — '+node.href;
     if(tag==='LI')value='• '+value;
     return blockTags.has(tag)?'\n'+value+'\n':value;
