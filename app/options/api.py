@@ -3367,7 +3367,7 @@ async def create_ticker_report_pdf(data: TickerReportPdfInput):
             style = table_header_style if header and row_index == 0 else table_cell_style
             cell_data.append([paragraph(str(cell), style) for cell in row])
         table = Table(
-            cell_data, colWidths=[doc.width / width_count] * width_count,
+            cell_data, colWidths=[(letter[0] - left - right) / width_count] * width_count,
             repeatRows=1 if header else 0, hAlign="LEFT", splitByRow=1,
         )
         commands = [
@@ -3433,14 +3433,13 @@ async def create_ticker_report_pdf(data: TickerReportPdfInput):
                     continue
             pair = split_field(line)
             if pair:
-                flush_fields()
                 field_rows.append([pair[0], pair[1]])
             elif line.startswith("• "):
                 flush_fields()
                 if prose:
                     story.append(paragraph("\n".join(prose)))
                     prose.clear()
-                story.append(Paragraph(xml_escape(line[2:]), bullet_style, bulletText="•"))
+                story.append(Paragraph(xml_escape(line[2:].encode("cp1252", "replace").decode("cp1252")), bullet_style, bulletText="•"))
             else:
                 flush_fields()
                 prose.append(line)
@@ -3491,7 +3490,7 @@ async def create_ticker_report_pdf(data: TickerReportPdfInput):
         canvas.drawString(logo_x + logo_size + 8, logo_y + 0.13 * inch, "THREE PEAKS  |  RESEARCH")
         canvas.setFillColor(muted)
         canvas.setFont("Helvetica-Bold", 7)
-        canvas.drawRightString(page_width - document.rightMargin, logo_x + 0.13 * inch, symbol)
+        canvas.drawRightString(page_width - document.rightMargin, logo_y + 0.13 * inch, symbol)
         canvas.setStrokeColor(gold)
         canvas.setLineWidth(1.1)
         canvas.line(document.leftMargin, page_height - 0.61 * inch, page_width - document.rightMargin, page_height - 0.61 * inch)
