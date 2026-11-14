@@ -1525,3 +1525,18 @@ body > #ticker-print-report.ticker-report-detached .ticker-report-toolbar button
     overflow:visible !important;
   }
 }
+
+.ticker-report-pdf-link {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:42px;
+  padding:10px 15px;
+  border:1px solid #b9944a;
+  border-radius:8px;
+  background:#26364a;
+  color:#fff !important;
+  font-weight:700;
+  text-decoration:none !important;
+}
+.ticker-report-error { flex-basis:100%; color:#a33 !important; font-size:13px; }
