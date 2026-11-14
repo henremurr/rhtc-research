@@ -387,10 +387,13 @@ function reportObjectMarkup(value,depth=0){
   return '<p>'+safe(String(value))+'</p>';
 }
 async function reportJson(url,options={}){
-  const response=await fetch(url,{credentials:'same-origin',cache:'no-store',...options});
-  const data=await response.json().catch(()=>({}));
-  if(!response.ok)throw Error(data.detail||('Request failed ('+response.status+').'));
-  return data;
+  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),90000);
+  try{
+    const response=await fetch(url,{credentials:'same-origin',cache:'no-store',...options,signal:controller.signal});
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok)throw Error(data.detail||('Request failed ('+response.status+').'));
+    return data;
+  }finally{clearTimeout(timeout)}
 }
 async function getOrCreateStockReport(symbol,quote){
   let data;
@@ -412,12 +415,26 @@ async function getOrCreateCeoRiskReport(symbol){
   }
   return data.report||{};
 }
+function closeTickerReportPreview(){
+  const report=$('#ticker-print-report'),modal=$('#detail-modal'),button=$('#detail-print-btn');
+  report.hidden=true;modal.querySelector('.detail-modal').classList.remove('report-preview-mode');
+  button.hidden=false;button.disabled=false;button.textContent='Print report';
+  $('#detail-print-status').textContent='';
+  button.focus();
+}
+function printPreparedTickerReport(){
+  const symbol=String(window.stockQuoteContext?.symbol||'').toUpperCase(),oldTitle=document.title;
+  if(!symbol||$('#ticker-print-report').hidden)return;
+  document.title=symbol+' - RHTC Research Report';
+  window.print();
+  document.title=oldTitle;
+}
 async function printTickerReport(){
-  const context=window.stockQuoteContext||{},symbol=String(context.symbol||'').toUpperCase(),button=$('#detail-print-btn'),report=$('#ticker-print-report');
+  const context=window.stockQuoteContext||{},symbol=String(context.symbol||'').toUpperCase(),button=$('#detail-print-btn'),report=$('#ticker-print-report'),modal=$('#detail-modal');
   if(!symbol||!context.quote||!report){toast('Load a stock quote before creating the report.');return}
-  const originalLabel=button.textContent;
   button.disabled=true;button.textContent='Preparing report…';
-  $('#detail-print-status').textContent='Loading ticker data and current-source research. This can take a minute…';
+  $('#detail-print-status').textContent='Loading ticker data and current-source research. Slow requests time out after 90 seconds.';
+  let ready=false;
   try{
     const call=context.call&&hasAnalyzableCallData(context.call)?{...context.call,symbol,price:context.quote.price,change:context.quote.change,change_pct:context.quote.change_pct,source:context.call.source||state.chainSource||context.quote.source}:null;
     const requests=[
@@ -433,10 +450,10 @@ async function printTickerReport(){
     const quoteSource=$('#detail-option-source').innerHTML;
     const earnings=$('#detail-stock-earnings').innerHTML;
     const stockReport=stock.data||{};
-    const stockText=stockReport.analysis||[stockReport.summary,stockReport.details].filter(Boolean).join('\n\n');
+    const stockText=stockReport.analysis||[stockReport.summary,stockReport.details].filter(Boolean).join('\\n\\n');
     const stockMarkup=stock.error
       ?'<p class="ticker-report-unavailable">Stock analysis unavailable: '+safe(stock.error.message)+'</p>'
-      :'<div class="ticker-report-rating"><b>'+(safe(stockReport.rating_label||'Unrated'))+'</b>'+(stockReport.rating!==null&&stockReport.rating!==undefined?' · '+safe(String(stockReport.rating))+'/5':'')+'</div>'+(stockText?renderAnalysis(stockText):'<p>No saved analysis text was returned.</p>')+'<h3>Sources</h3>'+reportCitationsMarkup(stockReport.citations);
+      :'<div class="ticker-report-rating"><b>'+safe(stockReport.rating_label||'Unrated')+'</b>'+(stockReport.rating!==null&&stockReport.rating!==undefined?' · '+safe(String(stockReport.rating))+'/5':'')+'</div>'+(stockText?renderAnalysis(stockText):'<p>No saved analysis text was returned.</p>')+'<h3>Sources</h3>'+reportCitationsMarkup(stockReport.citations);
     const newsMarkup=news.error
       ?'<p class="ticker-report-unavailable">News unavailable: '+safe(news.error.message)+'</p>'
       :renderAnalysis(news.data.summary||'No current news summary was returned.')+'<h3>Sources</h3>'+reportCitationsMarkup(news.data.citations);
@@ -450,7 +467,8 @@ async function printTickerReport(){
       :'<div class="ticker-report-rating"><b>'+safe(ceoReport.risk_rating||'Unrated')+' CEO Risk · '+safe(String(ceoReport.risk_score??'—'))+'/100</b><span>Confidence '+safe(String(ceoReport.confidence??'—'))+'%</span></div>'+reportObjectMarkup(ceoReport)+'<h3>Sources</h3>'+reportCitationsMarkup(ceoReport.citations);
     const generated=new Date().toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'});
     const title=$('#detail-title').textContent.trim();
-    report.innerHTML='<header class="ticker-report-header"><div class="ticker-report-brand"><span class="ticker-report-mark">RHTC</span><span>THREE PEAKS · RESEARCH</span></div><p>COMPREHENSIVE TICKER REPORT</p><h1>'+safe(title)+'</h1><small>Prepared '+safe(generated)+' · Quote and research data may have different timestamps.</small></header>'+
+    report.innerHTML='<div class="ticker-report-toolbar"><button class="refresh-btn" type="button" onclick="printPreparedTickerReport()">Print / Save PDF</button><button class="refresh-btn secondary" type="button" onclick="closeTickerReportPreview()">Back to quote</button><span>Use the print dialog to print or save the PDF.</span></div>'+
+      '<header class="ticker-report-header"><div class="ticker-report-brand"><span class="ticker-report-mark">RHTC</span><span>THREE PEAKS · RESEARCH</span></div><p>COMPREHENSIVE TICKER REPORT</p><h1>'+safe(title)+'</h1><small>Prepared '+safe(generated)+' · Quote and research data may have different timestamps.</small></header>'+
       reportSection('Company overview',overview)+
       reportSection('Quote data',quoteData+quoteSource+callDetails)+
       reportSection('Earnings dates and EPS',earnings)+
@@ -459,17 +477,15 @@ async function printTickerReport(){
       reportSection('Covered-call analysis',callMarkup,call?'Analysis of the displayed contract.':'No analyzable contract was selected on the quote screen.')+
       reportSection('CEO Risk',ceoMarkup,ceo.error?'Saved CEO Risk report was not available.':'Latest saved assessment; created if missing.')+
       '<footer class="ticker-report-footer">RHTC · Three Peaks Research<br>Source and quote timestamps are shown where supplied. Research is informational and is not a trade instruction.</footer>';
-    report.hidden=false;
-    const oldTitle=document.title;
-    document.title=symbol+' - RHTC Research Report';
-    window.print();
-    document.title=oldTitle;
+    report.hidden=false;modal.querySelector('.detail-modal').classList.add('report-preview-mode');
+    button.hidden=true;button.disabled=false;$('#detail-print-status').textContent='';
+    modal.querySelector('.detail-modal').scrollTop=0;report.scrollIntoView({block:'start'});
+    ready=true;
   }catch(error){
+    $('#detail-print-status').textContent='Report preparation failed: '+error.message;
     toast('Could not prepare the report: '+error.message);
   }finally{
-    report.hidden=true;
-    button.disabled=false;button.textContent=originalLabel;
-    $('#detail-print-status').textContent='';
+    if(!ready){report.hidden=true;modal.querySelector('.detail-modal').classList.remove('report-preview-mode');button.disabled=false;button.textContent='Print report'}
   }
 }
 
