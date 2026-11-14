@@ -1358,6 +1358,51 @@ async def get_watchlist(peak: str | None = None, q: str | None = None):
     }
 
 
+@app.get("/api/watchlist/orphans")
+async def get_orphaned_tickers():
+    with closing(connect_watchlist_db()) as connection:
+        watchlist_symbols = {
+            str(row["symbol"]).strip().upper()
+            for row in connection.execute("SELECT DISTINCT symbol FROM symbols")
+            if str(row["symbol"] or "").strip()
+        }
+        tables = connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()
+        orphan_records: dict[str, dict[str, int]] = {}
+        for table_row in tables:
+            table_name = str(table_row["name"])
+            if table_name == "symbols":
+                continue
+            escaped_name = table_name.replace('"', '""')
+            columns = {
+                row["name"]
+                for row in connection.execute(f'PRAGMA table_info("{escaped_name}")')
+            }
+            if "symbol" not in columns:
+                continue
+            records = connection.execute(
+                f'SELECT UPPER(TRIM(CAST(symbol AS TEXT))) AS symbol, COUNT(*) AS record_count '
+                f'FROM "{escaped_name}" WHERE symbol IS NOT NULL AND TRIM(CAST(symbol AS TEXT)) <> "" '
+                f'GROUP BY UPPER(TRIM(CAST(symbol AS TEXT)))'
+            ).fetchall()
+            for record in records:
+                symbol = str(record["symbol"] or "").strip()
+                if not symbol or symbol in watchlist_symbols or not SYMBOL_PATTERN.fullmatch(symbol):
+                    continue
+                orphan_records.setdefault(symbol, {})[table_name] = int(record["record_count"] or 0)
+
+    orphans = [
+        {
+            "symbol": symbol,
+            "tables": tables,
+            "total_records": sum(tables.values()),
+        }
+        for symbol, tables in sorted(orphan_records.items())
+    ]
+    return {"orphans": orphans, "count": len(orphans)}
+
+
 @app.put("/api/watchlist")
 async def update_watchlist(data: WatchlistUpdate):
     require_watchlist_storage()
