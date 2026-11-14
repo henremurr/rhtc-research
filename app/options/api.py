@@ -3079,6 +3079,18 @@ class TickerNewsInput(BaseModel):
     symbol: str = Field(min_length=1, max_length=10)
 
 
+class TickerReportPdfSection(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    text: str = Field(default="", max_length=50000)
+
+
+class TickerReportPdfInput(BaseModel):
+    symbol: str = Field(min_length=1, max_length=10)
+    title: str = Field(min_length=1, max_length=300)
+    generated_at: str = Field(default="", max_length=100)
+    sections: list[TickerReportPdfSection] = Field(default_factory=list, max_length=12)
+
+
 class StockAnalysisInput(BaseModel):
     symbol: str = Field(min_length=1, max_length=10)
     quote: dict[str, Any] = Field(default_factory=dict)
@@ -3235,6 +3247,108 @@ def split_stock_analysis_sections(analysis: str) -> tuple[str, str]:
     if not details:
         details = text[summary_heading.end():].strip() if summary_heading else text
     return summary, details
+
+
+
+@app.post("/api/ticker-report/pdf")
+async def create_ticker_report_pdf(data: TickerReportPdfInput):
+    symbol = data.symbol.strip().upper()
+    if not SYMBOL_PATTERN.fullmatch(symbol):
+        raise HTTPException(400, "Enter a valid ticker symbol.")
+    from xml.sax.saxutils import escape as xml_escape
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_LEFT
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import inch
+    from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate, Spacer
+
+    output = BytesIO()
+    left = right = 0.68 * inch
+    top, bottom = 0.78 * inch, 0.62 * inch
+    doc = SimpleDocTemplate(
+        output,
+        pagesize=letter,
+        leftMargin=left,
+        rightMargin=right,
+        topMargin=top,
+        bottomMargin=bottom,
+        title=f"RHTC {symbol} Research Report",
+        author="RHTC Three Peaks Research",
+        subject=f"Comprehensive ticker report for {symbol}",
+    )
+    gold = colors.HexColor("#A98537")
+    ink = colors.HexColor("#17202A")
+    muted = colors.HexColor("#536170")
+    base = getSampleStyleSheet()
+    brand_style = ParagraphStyle(
+        "RHTCBrand", parent=base["Normal"], fontName="Helvetica-Bold",
+        fontSize=9, leading=12, textColor=gold, spaceAfter=8,
+    )
+    title_style = ParagraphStyle(
+        "RHTCTitle", parent=base["Title"], fontName="Helvetica-Bold",
+        fontSize=21, leading=25, textColor=ink, alignment=TA_LEFT,
+        spaceBefore=4, spaceAfter=7,
+    )
+    meta_style = ParagraphStyle(
+        "RHTCMeta", parent=base["Normal"], fontName="Helvetica",
+        fontSize=8.5, leading=12, textColor=muted, spaceAfter=12,
+    )
+    section_style = ParagraphStyle(
+        "RHTCSection", parent=base["Heading2"], fontName="Helvetica-Bold",
+        fontSize=13, leading=16, textColor=gold, spaceBefore=14, spaceAfter=5,
+        keepWithNext=True,
+    )
+    body_style = ParagraphStyle(
+        "RHTCBody", parent=base["BodyText"], fontName="Helvetica",
+        fontSize=9, leading=12.5, textColor=ink, spaceAfter=6,
+        wordWrap="CJK",
+    )
+    story = [
+        Paragraph("RHTC  |  THREE PEAKS RESEARCH", brand_style),
+        HRFlowable(width="100%", thickness=2, color=gold, spaceAfter=11),
+        Paragraph(xml_escape(data.title), title_style),
+        Paragraph("Prepared " + xml_escape(data.generated_at or datetime.now().astimezone().strftime("%b %d, %Y %I:%M %p %Z")), meta_style),
+    ]
+    for section in data.sections:
+        story.append(Paragraph(xml_escape(section.title), section_style))
+        body = section.text.strip()
+        if not body:
+            story.append(Paragraph("Unavailable.", body_style))
+            continue
+        blocks = re.split(r"\\n\\s*\\n", body)
+        for block in blocks:
+            block = block.strip()
+            if not block:
+                continue
+            safe_text = xml_escape(block).replace("\\n", "<br/>")
+            story.append(Paragraph(safe_text, body_style))
+
+    def draw_page(canvas, document):
+        canvas.saveState()
+        page_width, page_height = letter
+        canvas.setFillColor(gold)
+        canvas.setFont("Helvetica-Bold", 8)
+        canvas.drawString(document.leftMargin, page_height - 0.43 * inch, "RHTC  |  THREE PEAKS RESEARCH")
+        canvas.setStrokeColor(gold)
+        canvas.setLineWidth(1.2)
+        canvas.line(document.leftMargin, page_height - 0.52 * inch, page_width - document.rightMargin, page_height - 0.52 * inch)
+        canvas.setFillColor(muted)
+        canvas.setFont("Helvetica", 8)
+        canvas.drawString(document.leftMargin, 0.35 * inch, f"{symbol}  ·  Informational research")
+        canvas.drawRightString(page_width - document.rightMargin, 0.35 * inch, f"Page {document.page}")
+        canvas.restoreState()
+
+    try:
+        doc.build(story, onFirstPage=draw_page, onLaterPages=draw_page)
+    except Exception as exc:
+        raise HTTPException(500, f"Could not generate the ticker report PDF: {str(exc)[:240]}") from exc
+    filename = f"RHTC_{symbol}_Research_Report.pdf"
+    return Response(
+        content=output.getvalue(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/api/earnings-report")
