@@ -423,11 +423,17 @@ function closeTickerReportPreview(){
   button.focus();
 }
 function printPreparedTickerReport(){
-  const symbol=String(window.stockQuoteContext?.symbol||'').toUpperCase(),oldTitle=document.title;
-  if(!symbol||$('#ticker-print-report').hidden)return;
+  const report=$('#ticker-print-report'),symbol=String(window.stockQuoteContext?.symbol||'').toUpperCase();
+  if(!symbol||!report||report.hidden)return;
+  const oldTitle=document.title,originalParent=report.parentNode,originalNext=report.nextSibling;
   document.title=symbol+' - RHTC Research Report';
-  window.print();
-  document.title=oldTitle;
+  document.body.appendChild(report);
+  try{window.print()}
+  finally{
+    if(originalNext&&originalNext.parentNode===originalParent)originalParent.insertBefore(report,originalNext);
+    else originalParent.appendChild(report);
+    document.title=oldTitle;
+  }
 }
 async function printTickerReport(){
   const context=window.stockQuoteContext||{},symbol=String(context.symbol||'').toUpperCase(),button=$('#detail-print-btn'),report=$('#ticker-print-report'),modal=$('#detail-modal');
