@@ -133,6 +133,7 @@ Select a ticker to open its quote and option details.
 - **Print report** creates the comprehensive branded report and provides Open PDF, Download PDF, and Back to quote controls.
 - The dialog can show company profile, fundamentals, quote statistics, prior and next earnings, and EPS estimates when optional data is available.
 - The earnings section applies to every ticker. When valid inputs exist, it shows Cautious, Central, Optimistic, and Strong-beat next-quarter price scenarios. The Central case uses next-12-month EPS and a reasonable forward P/E; the Optimistic case holds the prior quarter's price/EPS multiple constant. Announced splits effective by the target date are shown with pre- and post-split targets.
+- Select any pre-split price target to open its **13-week covered-call path**. Week N uses `last + N/13 × (target − last)`. Each row shows the seven-day path date, projected path price, nearest listed call expiration and strike, current bid/ask, and bid premium per contract. The premium is a current option-chain snapshot, not a forecast of what the option will trade for in that future week.
 - Price scenarios are mechanical valuation cases, not predictions or personalized trade instructions. If current price, prior actual EPS, next-quarter EPS estimate, or usable next-12-month EPS is unavailable or unsuitable, the app does not invent a target.
 - The stock rating and saved reports are stored with the shared watchlist.
 
