@@ -389,6 +389,10 @@ function viewCurrentStockReports(){
   const symbol=window.stockQuoteContext?.symbol;
   if(symbol)viewStockReports(symbol);
 }
+function viewCurrentCeoRisk(){
+  const symbol=window.stockQuoteContext?.symbol;
+  if(symbol)viewCeoRiskReports(symbol);
+}
 async function searchTickerNews(){
   const symbol=window.stockQuoteContext?.symbol;
   const button=$('#ticker-news-btn'),results=$('#ticker-news-results'),content=$('#ticker-news-content'),sources=$('#ticker-news-sources');
@@ -663,6 +667,7 @@ async function viewChain(symbol){
   $('#detail-option-source').innerHTML='';
   window.stockQuoteContext=null;
   $('#stock-reports-btn').disabled=true;$('#stock-reports-btn').textContent='View reports';
+  $('#detail-ceo-risk-btn').disabled=true;
   $('#stock-analyze-btn').disabled=true;$('#stock-analysis-status').textContent='Uses current-source research and OpenAI API credits.';
     $('#stock-analysis-results').hidden=true;$('#stock-analysis-summary').innerHTML='';$('#stock-analysis-details').innerHTML='';$('#stock-analysis-sources').innerHTML='';
   $('#ticker-news-btn').disabled=true;$('#ticker-news-btn').textContent='⌕ Search ticker news';$('#ticker-news-results').hidden=true;$('#ticker-news-content').innerHTML='';$('#ticker-news-sources').innerHTML='';
@@ -682,6 +687,7 @@ async function viewChain(symbol){
     const stockReportCount=Number(((state.rows||[]).find(row=>row.symbol===symbol)||(state.watchlist||[]).find(row=>row.symbol===symbol))?.stock_report_count)||0;
     updateStockReportsButton(symbol,stockReportCount);
     $('#stock-analyze-btn').disabled=false;
+    $('#detail-ceo-risk-btn').disabled=false;
     $('#ticker-news-btn').disabled=false;
     const sourceLabel=quote.source==='demo'?'Illustrative demo values · Not live market data':quote.source==='tradier_sandbox'?'Tradier sandbox quote · May be delayed':'Tradier stock quote';
     $('#detail-title').textContent=quote.description?symbol+' · '+quote.description:symbol+' stock quote and covered-call screen';
