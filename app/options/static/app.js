@@ -247,27 +247,59 @@ async function openWeeklyTargetPath(button){
   }catch(error){content.innerHTML='<p class="target-path-error">'+safe(error.message)+'</p>';status.textContent='Could not build the weekly target path.'}
 }
 function closeWeeklyTargetPath(){$('#target-path-modal').classList.remove('open')}
+function ensureEarningsInvestmentFilter(){
+  let controls=$('#earnings-report-controls');
+  if(controls)return controls;
+  controls=document.createElement('div');
+  controls.id='earnings-report-controls';
+  controls.className='earnings-report-controls';
+  let saved='';
+  try{saved=localStorage.getItem('rhtc-earnings-investment')||''}catch(error){}
+  const mainSpend=$('#max-spend')?.value||'$10,000';
+  controls.innerHTML='<label class="max-last-control" for="earnings-max-spend"><span>Invest</span><input id="earnings-max-spend" type="text" inputmode="numeric" value="'+safe(saved||mainSpend)+'" aria-label="Maximum investment for a 100-share position"></label><button class="refresh-btn" type="button">Apply</button><small>Maximum cost for 100 shares</small>';
+  $('#earnings-report-meta').insertAdjacentElement('afterend',controls);
+  controls.querySelector('button').addEventListener('click',applyEarningsInvestmentFilter);
+  controls.querySelector('input').addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();applyEarningsInvestmentFilter()}});
+  return controls;
+}
+function applyEarningsInvestmentFilter(){
+  const input=$('#earnings-max-spend'),investment=parseMaxSpend(input?.value);
+  if(!Number.isFinite(investment)||investment<=0){toast('Enter an investment amount greater than $0.');input?.focus();return}
+  input.value=formatMaxSpend(investment);
+  try{localStorage.setItem('rhtc-earnings-investment',input.value)}catch(error){}
+  void showEarningsReport();
+}
 async function showEarningsReport(){
   const modal=$('#earnings-report-modal'),status=$('#earnings-report-status'),content=$('#earnings-report-content');
-  modal.classList.add('open');status.textContent='Loading saved upcoming earnings…';content.innerHTML='';
+  modal.classList.add('open');
+  ensureEarningsInvestmentFilter();
+  const investment=parseMaxSpend($('#earnings-max-spend')?.value);
+  const params=new URLSearchParams();
+  if(Number.isFinite(investment)&&investment>0)params.set('max_investment',String(investment));
+  status.textContent='Loading saved upcoming earnings and current prices…';content.innerHTML='';
   try{
-    const response=await fetch('/options/api/earnings-report',{credentials:'same-origin',cache:'no-store'});
+    const response=await fetch('/options/api/earnings-report?'+params.toString(),{credentials:'same-origin',cache:'no-store'});
     const data=await response.json();
     if(!response.ok)throw Error(data.detail||'Could not load the earnings report.');
     const events=Array.isArray(data.events)?data.events:[];
     $('#earnings-report-meta').textContent='Future scheduled dates · as of '+(data.as_of||new Date().toISOString().slice(0,10));
     content.onclick=event=>{const button=event.target.closest('[data-stock-symbol]');if(button)viewChain(button.dataset.stockSymbol)};
-  content.innerHTML=events.length?'<div class="earnings-report-table-wrap"><table class="earnings-report-table"><thead><tr><th>Next earnings</th><th>Ticker</th><th>EPS estimate</th></tr></thead><tbody>'+events.map(event=>{
+  content.innerHTML=events.length?'<div class="earnings-report-table-wrap"><table class="earnings-report-table"><thead><tr><th>Next earnings</th><th>Ticker</th><th>EPS estimate</th><th>Last</th><th>100 shares</th></tr></thead><tbody>'+events.map(event=>{
       const eventDate=event.date?new Date(event.date+'T00:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',timeZone:'UTC'}):'—';
       const epsValue=Number(event.eps_estimate);
       const epsAvailable=event.eps_estimate!==null&&event.eps_estimate!==undefined&&Number.isFinite(epsValue);
       const eps=epsAvailable?String.fromCharCode(36)+epsValue.toFixed(2):'Unavailable';
       const epsColor=epsAvailable?(epsValue>0?'#58d68d':'#ff6b6b'):'';
+      const last=Number(event.last_price),lastAvailable=Number.isFinite(last)&&last>0;
+      const lastText=lastAvailable?'$'+last.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'Unavailable';
+      const positionCost=lastAvailable?'$'+(last*100).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}):'Unavailable';
       const ticker=String(event.symbol||'');
       const tickerButton='<button type="button" class="earnings-stock-quote-btn" data-stock-symbol="'+safe(ticker)+'" aria-label="Open stock quote for '+safe(ticker)+'" title="Open stock quote">'+safe(ticker)+'</button>';
-      return '<tr><td>'+safe(eventDate)+'</td><td>'+tickerButton+'</td><td style="color:'+epsColor+'">'+safe(eps)+'</td></tr>';
+      return '<tr><td>'+safe(eventDate)+'</td><td data-label="Ticker">'+tickerButton+'</td><td data-label="EPS estimate" style="color:'+epsColor+'">'+safe(eps)+'</td><td data-label="Last">'+safe(lastText)+'</td><td data-label="100 shares">'+safe(positionCost)+'</td></tr>';
     }).join('')+'</tbody></table></div>':'<p class="earnings-report-empty">No upcoming earnings have been saved yet. Run Analyze Stock on tickers to populate the report.</p>';
-    status.textContent=events.length+' upcoming ticker'+(events.length===1?'':'s');
+    const total=Number(data.total_before_filter)||events.length;
+    const filterText=Number.isFinite(investment)&&investment>0?' fitting '+formatMaxSpend(investment)+' for 100 shares':'';
+    status.textContent=events.length+' of '+total+' upcoming ticker'+(total===1?'':'s')+filterText;
   }catch(error){status.textContent=error.message}
 }
 function closeEarningsReport(){$('#earnings-report-modal').classList.remove('open')}
