@@ -176,9 +176,46 @@ function renderEarningsEvents(quote={}){
   const prior=quote.prior_earnings&&typeof quote.prior_earnings==='object'?quote.prior_earnings:null;
   const next=quote.next_earnings&&typeof quote.next_earnings==='object'?quote.next_earnings:null;
   const dateLabel=value=>value?new Date(value+'T00:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',timeZone:'UTC'}):'Unavailable';
-  const amount=(value,unit='$')=>value===null||value===undefined||value===''||!Number.isFinite(Number(value))?'Unavailable':unit+Number(value).toFixed(2);
+  const amount=(value,unit='$')=>{
+    if(value===null||value===undefined||value===''||!Number.isFinite(Number(value)))return 'Unavailable';
+    const number=Number(value);
+    return (number<0?'−':'')+unit+Math.abs(number).toFixed(2);
+  };
   const row=(label,event,actual)=>'<div class="earnings-event"><b>'+label+'</b><span>'+dateLabel(event?.date)+'</span><span>EPS '+(actual?'actual ':'estimate ')+amount(actual?event?.eps_actual:event?.eps_estimate)+'</span>'+(actual&&event?.eps_estimate!==null&&event?.eps_estimate!==undefined?'<span>Estimate '+amount(event.eps_estimate)+'</span>':'')+'</div>';
-  return '<section class="earnings-events"><h3>Earnings dates and EPS</h3><div class="earnings-events-grid">'+row('Prior reported',prior,true)+row('Next scheduled',next,false)+'</div><small>EPS amounts are per share; next date and estimates depend on company/Finnhub reporting.</small></section>';
+  const price=Number(quote.price),priorActual=Number(prior?.eps_actual),nextEstimate=Number(next?.eps_estimate);
+  const history=Array.isArray(quote.earnings_history)?quote.earnings_history:[];
+  const suppliedNtm=quote.next_twelve_month_eps;
+  let ntm=suppliedNtm===null||suppliedNtm===undefined||suppliedNtm===''?Number.NaN:Number(suppliedNtm),ntmMethod=quote.next_twelve_month_eps_method||'four quarterly consensus estimates';
+  if(!Number.isFinite(ntm)&&history.length>=4&&Number.isFinite(Number(quote.earnings_per_share))&&Number.isFinite(Number(history[history.length-1]?.eps_actual))&&Number.isFinite(nextEstimate)){
+    ntm=Number(quote.earnings_per_share)-Number(history[history.length-1].eps_actual)+nextEstimate;
+    ntmMethod='TTM EPS less the oldest quarter plus the next-quarter estimate';
+  }
+  if(!Number.isFinite(ntm)&&Number.isFinite(nextEstimate)){
+    ntm=nextEstimate*4;
+    ntmMethod='next-quarter estimate annualized; lower-confidence fallback';
+  }
+  let cases='';
+  if(price>0&&priorActual>0&&nextEstimate>0&&ntm>0){
+    const currentForwardPe=price/ntm,trailingPe=Number(quote.price_earnings_ratio);
+    const reasonableForwardPe=Number.isFinite(trailingPe)&&trailingPe>0?Math.max(currentForwardPe*.85,Math.min(trailingPe,currentForwardPe*1.10)):currentForwardPe*1.10;
+    const constantMultiple=price*(nextEstimate/priorActual);
+    const central=ntm*reasonableForwardPe;
+    const targets=[
+      ['Cautious',central*.92,'Central value less 8%'],
+      ['Central',central,'NTM EPS '+amount(ntm)+' × '+reasonableForwardPe.toFixed(2)+'x forward P/E'],
+      ['Optimistic',constantMultiple,'Current price × next EPS / prior actual EPS'],
+      ['Strong beat',Math.max(constantMultiple*1.06,central*1.12),'Higher of optimistic +6% or central +12%'],
+    ];
+    const split=quote.upcoming_split&&typeof quote.upcoming_split==='object'?quote.upcoming_split:null;
+    const splitFactor=Number(split?.factor);
+    const splitApplies=Number.isFinite(splitFactor)&&splitFactor>0&&splitFactor!==1&&split?.date&&(!next?.date||split.date<=next.date);
+    const ratio=value=>Number(value).toLocaleString('en-US',{maximumFractionDigits:3});
+    const splitHeading=splitApplies?'<th>After split</th>':'';
+    const splitCells=target=>splitApplies?'<td>'+amount(target/splitFactor)+'</td>':'';
+    const splitNote=splitApplies?'<div class="earnings-split-note"><b>Split adjustment:</b> '+ratio(split.to_factor)+'-for-'+ratio(split.from_factor)+' on '+dateLabel(split.date)+'. Targets after that date are divided by '+ratio(splitFactor)+'.</div>':'';
+    cases='<div class="earnings-cases"><h4>Next-quarter price scenarios</h4><div class="earnings-case-inputs">NTM EPS '+amount(ntm)+' · '+safe(ntmMethod)+' · reasonable forward P/E '+reasonableForwardPe.toFixed(2)+'x</div>'+splitNote+'<div class="earnings-cases-wrap"><table><thead><tr><th>Case</th><th>Method</th><th>'+(splitApplies?'Before split':'Price target')+'</th>'+splitHeading+'</tr></thead><tbody>'+targets.map(item=>'<tr><th>'+item[0]+'</th><td>'+item[2]+'</td><td>'+amount(item[1])+'</td>'+splitCells(item[1])+'</tr>').join('')+'</tbody></table></div><small>Mechanical valuation scenarios, not predictions or personalized trade instructions. EPS estimates and valuation multiples can change.</small></div>';
+  }
+  return '<section class="earnings-events"><h3>Earnings dates and EPS</h3><div class="earnings-events-grid">'+row('Prior reported',prior,true)+row('Next scheduled',next,false)+'</div><small>EPS amounts are per share; next date and estimates depend on company/Finnhub reporting.</small>'+cases+'</section>';
 }
 async function showEarningsReport(){
   const modal=$('#earnings-report-modal'),status=$('#earnings-report-status'),content=$('#earnings-report-content');
