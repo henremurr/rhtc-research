@@ -1541,3 +1541,37 @@ body > #ticker-print-report.ticker-report-detached .ticker-report-toolbar button
   text-decoration:none !important;
 }
 .ticker-report-error { flex-basis:100%; color:#a33 !important; font-size:13px; }
+
+/* Keep earnings valuation content compact on phones and opt it out of the
+   dashboard's generic mobile table-to-card transformation. */
+@media(max-width:600px) {
+  .earnings-events {
+    padding:10px 11px;
+    -webkit-text-size-adjust:100%;
+    text-size-adjust:100%;
+  }
+  .earnings-events h3 { font:600 14px/1.3 var(--sans) !important; }
+  .earnings-event { gap:3px 9px; }
+  .earnings-event b { font:600 12px/1.35 var(--sans) !important; }
+  .earnings-event span,
+  .earnings-events>small { font:10px/1.45 var(--sans) !important; }
+  .earnings-cases { margin-top:10px; padding-top:9px; }
+  .earnings-cases h4 { font:600 14px/1.3 var(--sans) !important; }
+  .earnings-case-inputs,
+  .earnings-split-note { font:10px/1.4 var(--sans) !important; }
+  .earnings-cases-wrap { overflow:visible; }
+  .earnings-cases table { display:table; width:100%; min-width:0; table-layout:fixed; font:9px/1.3 var(--sans) !important; }
+  .earnings-cases thead { display:table-header-group; position:static; }
+  .earnings-cases tbody { display:table-row-group; width:auto; }
+  .earnings-cases tr,
+  .earnings-cases tbody tr { display:table-row; margin:0; border:0; border-radius:0; background:transparent; }
+  .earnings-cases th,
+  .earnings-cases td,
+  .earnings-cases tbody td,
+  .earnings-cases tbody th { display:table-cell; width:auto; min-width:0; min-height:0; height:auto; padding:5px 4px; white-space:normal; overflow-wrap:anywhere; font-size:9px !important; line-height:1.3; }
+  .earnings-cases th:first-child { width:18%; }
+  .earnings-cases th:nth-child(2) { width:46%; }
+  .earnings-cases tbody td:before { display:none; content:none; }
+  .earnings-cases tbody td:nth-last-child(-n+2) { white-space:nowrap; }
+  .earnings-cases small { font:9px/1.4 var(--sans) !important; }
+}
