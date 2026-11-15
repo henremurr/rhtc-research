@@ -3795,7 +3795,7 @@ async def create_ticker_report_pdf(data: TickerReportPdfInput):
 
 
 @app.get("/api/earnings-report")
-async def get_earnings_report():
+async def get_earnings_report(max_investment: float | None = Query(default=None, gt=0)):
     today = date.today()
     with closing(connect_watchlist_db()) as connection:
         records = connection.execute(
@@ -3811,8 +3811,52 @@ async def get_earnings_report():
         if event_date < today:
             continue
         events.append({"symbol": record["symbol"], **event, "updated_at": record["updated_at"]})
+    total_before_filter = len(events)
+    if max_investment is not None and events:
+        symbols = sorted({str(event.get("symbol") or "").upper() for event in events if event.get("symbol")})
+        prices: dict[str, float] = {}
+        token = os.getenv("TRADIER_API_TOKEN", "").strip()
+        if token:
+            provider = Tradier(token)
+            try:
+                async def quote_batch(batch: list[str]) -> list[dict[str, Any]]:
+                    payload = await provider.get("/markets/quotes", {"symbols": ",".join(batch)})
+                    quote_data = payload.get("quotes", {}).get("quote", [])
+                    if isinstance(quote_data, dict):
+                        quote_data = [quote_data]
+                    return quote_data if isinstance(quote_data, list) else []
+
+                batches = [symbols[index:index + 50] for index in range(0, len(symbols), 50)]
+                results = await asyncio.gather(*(quote_batch(batch) for batch in batches), return_exceptions=True)
+                for result in results:
+                    if isinstance(result, BaseException):
+                        continue
+                    for quote_row in result:
+                        if not isinstance(quote_row, dict) or quote_row.get("type") == "error":
+                            continue
+                        symbol = str(quote_row.get("symbol") or "").upper()
+                        price = parse_number(quote_row.get("last")) or parse_number(quote_row.get("close"))
+                        if symbol and price > 0 and math.isfinite(price):
+                            prices[symbol] = price
+            finally:
+                await provider.close()
+        else:
+            peaks = {row["symbol"]: row.get("peak", "Other") for row in read_watchlist()}
+            for index, symbol in enumerate(symbols):
+                prices[symbol] = parse_number(demo_row(symbol, peaks.get(symbol, "Other"), seed_offset=index).get("price"))
+        for event in events:
+            event["last_price"] = prices.get(str(event.get("symbol") or "").upper())
+        events = [
+            event for event in events
+            if isinstance(event.get("last_price"), (int, float))
+            and math.isfinite(float(event["last_price"]))
+            and float(event["last_price"]) * 100 <= max_investment
+        ]
     events.sort(key=lambda event: (event["date"], event["symbol"]))
-    return {"as_of": today.isoformat(), "events": events, "count": len(events)}
+    return {
+        "as_of": today.isoformat(), "events": events, "count": len(events),
+        "total_before_filter": total_before_filter, "max_investment": max_investment,
+    }
 
 @app.get("/api/stock-analysis/reports/{symbol}")
 async def get_stock_analysis_report(symbol: str, offset: int = Query(default=0, ge=0)):
