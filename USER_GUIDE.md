@@ -1,21 +1,23 @@
 # RHTC Three Peaks Research Platform — User Guide
 
-**For:** RHTC internal research users  
-**Last checked:** October 10, 2026  
+**For:** RHTC internal research users<br>
+**Stable release:** v2026.11.15<br>
+**Last checked:** November 15, 2026<br>
 **Application:** Covered Call Screener / Income Engine and RHTC News Feed
 
 ## Table of contents
 
 1. [Overview](#overview)
-2. [Sign in and navigate](#sign-in-and-navigate)
-3. [Manage watchlist data](#manage-watchlist-data)
-4. [Use the Income Engine](#use-the-income-engine)
-5. [Analyze stocks and calls](#analyze-stocks-and-calls)
-6. [Use the news feed](#use-the-news-feed)
-7. [Create transcripts and publish to YouTube](#create-transcripts-and-publish-to-youtube)
-8. [Project inventory](#project-inventory)
-9. [Other controls and settings](#other-controls-and-settings)
-10. [Troubleshooting and data limitations](#troubleshooting-and-data-limitations)
+2. [Stable release baseline](#stable-release-baseline)
+3. [Sign in and navigate](#sign-in-and-navigate)
+4. [Manage watchlist data](#manage-watchlist-data)
+5. [Use the Income Engine](#use-the-income-engine)
+6. [Analyze stocks and calls](#analyze-stocks-and-calls)
+7. [Use the news feed](#use-the-news-feed)
+8. [Create transcripts and publish to YouTube](#create-transcripts-and-publish-to-youtube)
+9. [Project inventory](#project-inventory)
+10. [Other controls and settings](#other-controls-and-settings)
+11. [Troubleshooting and data limitations](#troubleshooting-and-data-limitations)
 
 ## Overview
 
@@ -32,6 +34,12 @@ The three research peaks are:
 **Other** is available for symbols and news outside those themes. **Cross-Peak** is a news classification for stories spanning multiple themes.
 
 The header shows the watchlist universe size, calls to review, median bid yield, and the time of the most recent quote refresh. A theme button switches between dark and light appearance. Use **Log out** to end the session.
+
+## Stable release baseline
+
+**v2026.11.15** is the approved stable production baseline. It covers the deployed Income Engine, shared watchlist and saved reports, stock and call scoring, Buffett and CEO-risk reports, earnings and split-aware price scenarios, news analysis, YouTube/X publishing controls, mobile layouts, comprehensive HTML/PDF reports, and the Infrastructure Audit.
+
+The Git tag `v2026.11.15` identifies the exact source baseline. Later changes should be compared with that tag before they are promoted as a new stable release. Application data remains in the configured persistent Railway volume and is not stored inside the release tag.
 
 ## Sign in and navigate
 
@@ -95,7 +103,7 @@ The screener estimates covered-call candidates for symbols in the watchlist.
 | **Peak / watchlist filter** | Shows all watchlist symbols, holdings, one of the three peaks, or Outside the Peaks. |
 | **Stock / 5** and **Call / 5** | Choose **Missing** to focus on rows without a stock or call rating; **All** includes rated and unrated rows. |
 | **Rows** | Limits the number of rows rendered: 10, 30, 60, 90, or All. |
-| **Max Spend** | Sets the approximate maximum dollars allocated per 100-share call position. The suggested quantity is the whole-number count of 100-share units under Max Spend divided by the stock price. |
+| **Invest** | Sets the approximate maximum dollars allocated per 100-share call position. The suggested quantity is the whole-number count of 100-share units under Invest divided by the stock price. |
 | **Order by** | Sorts by estimated income, combined RHTC score, stock score, call score, bid yield, expiration timing, open interest, implied volatility, or ticker. |
 
 The **Previous / Next** controls page through expiration windows (such as 0–7 DTE). The screener chooses the nearest listed expiration on or after today and the closest out-of-the-money call above the share price for each symbol in the selected window.
@@ -121,8 +129,16 @@ Select a ticker to open its quote and option details.
 ### Stock quote dialog
 
 - **Analyze stock** requests a current-source company analysis, including a concise summary, detailed analysis, and available citations.
-- The dialog can show company profile and fundamentals when that optional data is available.
-- The stock rating is stored with the shared watchlist.
+- **View reports** opens saved stock analyses with Previous/Next navigation and report deletion controls.
+- **Print report** creates the comprehensive branded report and provides Open PDF, Download PDF, and Back to quote controls.
+- The dialog can show company profile, fundamentals, quote statistics, prior and next earnings, and EPS estimates when optional data is available.
+- The earnings section applies to every ticker. When valid inputs exist, it shows Cautious, Central, Optimistic, and Strong-beat next-quarter price scenarios. The Central case uses next-12-month EPS and a reasonable forward P/E; the Optimistic case holds the prior quarter's price/EPS multiple constant. Announced splits effective by the target date are shown with pre- and post-split targets.
+- Price scenarios are mechanical valuation cases, not predictions or personalized trade instructions. If current price, prior actual EPS, next-quarter EPS estimate, or usable next-12-month EPS is unavailable or unsuitable, the app does not invent a target.
+- The stock rating and saved reports are stored with the shared watchlist.
+
+### Buffett and CEO-risk reports
+
+The Watchlist Manager includes saved Buffett-quality and CEO-risk scores and report actions. A score opens its latest report; a missing report can be generated from the ticker action. Report screens include navigation and deletion controls, and the manager provides filters for missing Buffett or CEO-risk work. These assessments are research aids and should be reviewed alongside the underlying filings and cited sources.
 
 ### Covered-call detail dialog
 
@@ -195,9 +211,9 @@ Transcript and audio generation use OpenAI API credits; news analysis uses curre
 
 ## Project inventory
 
-Select **Infrastructure audit** in the Income Engine toolbar to open **Development & deployment inventory**. The inventory summarizes the live runtime and integrations used by the app, including hosting/deployment, Python packages, persistent SQLite storage, Tradier, optional Finnhub data, OpenAI, Perplexity, YouTube, and browser-loaded fonts.
+Select **Infrastructure Audit** in the guide menu to open **Development & deployment inventory**. The inventory summarizes the approved release, live runtime, and integrations used by the app, including hosting/deployment, Python packages, persistent SQLite storage, Tradier, Finnhub company/earnings/split data, OpenAI, Perplexity, YouTube, X, and browser-loaded fonts.
 
-- The top cards report the number of inventoried products, presence of core credentials, runtime version/source, last check time, and storage location when the service reports it.
+- The top cards report the stable release, deployed commit when Railway supplies it, number of inventoried products, presence of core credentials, runtime version/source, last check time, and storage location.
 - Each service card describes its role, API/version, whether required secret names are present, the responsible account owner, plan/cost notes, lifecycle risks, and reference links.
 - **Recheck deployment** requests a fresh runtime/inventory check.
 
