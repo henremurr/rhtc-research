@@ -991,11 +991,11 @@ def parse_finnhub_earnings_calendar(payload: dict[str, Any], today: date | None 
     }
 
 
-def parse_finnhub_company_earnings(payload: Any, today: date | None = None) -> dict[str, Any] | None:
-    """Return the latest actual EPS result from Finnhub's company earnings history."""
+def parse_finnhub_company_earnings_history(payload: Any, today: date | None = None) -> list[dict[str, Any]]:
+    """Return up to four recent actual EPS results from Finnhub."""
     today = today or date.today()
     if not isinstance(payload, list):
-        return None
+        return []
 
     results: list[tuple[date, dict[str, Any]]] = []
     for item in payload:
@@ -1027,7 +1027,87 @@ def parse_finnhub_company_earnings(payload: Any, today: date | None = None) -> d
             "revenue_estimate": None,
             "hour": None,
         }))
-    return max(results, key=lambda row: row[0])[1] if results else None
+    results.sort(key=lambda row: row[0], reverse=True)
+    return [record for _, record in results[:4]]
+
+
+def parse_finnhub_company_earnings(payload: Any, today: date | None = None) -> dict[str, Any] | None:
+    history = parse_finnhub_company_earnings_history(payload, today)
+    return history[0] if history else None
+
+
+def parse_finnhub_eps_estimates(payload: Any, today: date | None = None) -> dict[str, Any]:
+    """Return future quarterly EPS estimates and their next-12-month sum."""
+    today = today or date.today()
+    rows = payload.get("data", []) if isinstance(payload, dict) else []
+    if not isinstance(rows, list):
+        rows = []
+    estimates: list[tuple[date, dict[str, Any]]] = []
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        try:
+            period = date.fromisoformat(str(item.get("period") or item.get("date") or "")[:10])
+        except ValueError:
+            continue
+        if period < today:
+            continue
+
+        def number(*keys: str) -> float | None:
+            for key in keys:
+                value = item.get(key)
+                try:
+                    parsed = float(value) if value is not None else None
+                except (TypeError, ValueError):
+                    continue
+                if parsed is not None and math.isfinite(parsed):
+                    return parsed
+            return None
+
+        average = number("epsAvg", "epsEstimate", "estimate", "avg")
+        if average is None:
+            continue
+        estimates.append((period, {
+            "date": period.isoformat(), "eps_estimate": average,
+            "eps_high": number("epsHigh", "high"), "eps_low": number("epsLow", "low"),
+            "analysts": number("numberAnalysts", "analysts"),
+        }))
+    estimates.sort(key=lambda row: row[0])
+    quarterly = [record for _, record in estimates[:4]]
+    return {
+        "quarterly_eps_estimates": quarterly,
+        "next_twelve_month_eps": sum(record["eps_estimate"] for record in quarterly) if len(quarterly) == 4 else None,
+        "next_twelve_month_eps_method": "four quarterly consensus estimates" if len(quarterly) == 4 else None,
+    }
+
+
+def parse_finnhub_splits(payload: Any, today: date | None = None) -> dict[str, Any] | None:
+    """Return the next announced future stock split, if Finnhub supplies one."""
+    today = today or date.today()
+    rows = payload.get("data", []) if isinstance(payload, dict) else payload
+    if not isinstance(rows, list):
+        return None
+    splits: list[tuple[date, dict[str, Any]]] = []
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        try:
+            split_date = date.fromisoformat(str(item.get("date") or "")[:10])
+            from_factor = float(item.get("fromFactor"))
+            to_factor = float(item.get("toFactor"))
+        except (TypeError, ValueError):
+            continue
+        if split_date < today or from_factor <= 0 or to_factor <= 0:
+            continue
+        factor = to_factor / from_factor
+        if not math.isfinite(factor) or abs(factor - 1) < 0.000001:
+            continue
+        splits.append((split_date, {
+            "date": split_date.isoformat(), "from_factor": from_factor,
+            "to_factor": to_factor, "factor": factor,
+        }))
+    splits.sort(key=lambda row: row[0])
+    return splits[0][1] if splits else None
 
 
 class Tradier:
@@ -1067,12 +1147,15 @@ class Tradier:
             sentiment_from = sentiment_to - timedelta(days=365)
             earnings_from = sentiment_to - timedelta(days=365)
             earnings_to = sentiment_to + timedelta(days=365)
-            basic_profile, financials, full_profile, insider_sentiment, earnings_calendar = await asyncio.gather(
+            basic_profile, financials, full_profile, insider_sentiment, earnings_calendar, earnings_history, eps_estimates, stock_splits = await asyncio.gather(
                 request("/stock/profile2"),
                 request("/stock/metric", {"metric": "all"}),
                 request("/stock/profile"),
                 request("/stock/insider-sentiment", {"from": sentiment_from.isoformat(), "to": sentiment_to.isoformat()}),
                 request("/calendar/earnings", {"from": earnings_from.isoformat(), "to": earnings_to.isoformat()}),
+                request("/stock/earnings", {"limit": "8"}),
+                request("/stock/eps-estimate", {"freq": "quarterly"}),
+                request("/stock/split", {"from": sentiment_to.isoformat(), "to": earnings_to.isoformat()}),
                 return_exceptions=True,
             )
         basic_profile = {} if isinstance(basic_profile, BaseException) else basic_profile
@@ -1080,26 +1163,37 @@ class Tradier:
         full_profile = {} if isinstance(full_profile, BaseException) else full_profile
         insider_sentiment = {} if isinstance(insider_sentiment, BaseException) else insider_sentiment
         earnings_calendar = {} if isinstance(earnings_calendar, BaseException) else earnings_calendar
+        earnings_history = [] if isinstance(earnings_history, BaseException) else earnings_history
+        eps_estimates = {} if isinstance(eps_estimates, BaseException) else eps_estimates
+        stock_splits = [] if isinstance(stock_splits, BaseException) else stock_splits
         result: dict[str, Any] = parse_finnhub_metrics(basic_profile, financials)
         result["insider_sentiment_mspr"], result["insider_sentiment_month"] = parse_finnhub_insider_sentiment(insider_sentiment)
         result["company_profile"] = parse_finnhub_company_overview(basic_profile, full_profile)
         result.update(parse_finnhub_earnings_calendar(earnings_calendar))
+        result["earnings_history"] = parse_finnhub_company_earnings_history(earnings_history)
+        result.update(parse_finnhub_eps_estimates(eps_estimates))
+        result["upcoming_split"] = parse_finnhub_splits(stock_splits)
         prior = result.get("prior_earnings")
         if not isinstance(prior, dict) or prior.get("eps_actual") is None:
-            try:
-                history = await request("/stock/earnings", {"limit": "8"})
-                history_prior = parse_finnhub_company_earnings(history)
-                if history_prior:
-                    if not isinstance(prior, dict):
-                        result["prior_earnings"] = history_prior
-                    else:
-                        merged_prior = dict(prior)
-                        for field in ("eps_actual", "eps_estimate"):
-                            if merged_prior.get(field) is None and history_prior.get(field) is not None:
-                                merged_prior[field] = history_prior[field]
-                        result["prior_earnings"] = merged_prior
-            except Exception:
-                pass
+            history_prior = result["earnings_history"][0] if result["earnings_history"] else None
+            if history_prior:
+                if not isinstance(prior, dict):
+                    result["prior_earnings"] = history_prior
+                else:
+                    merged_prior = dict(prior)
+                    for field in ("eps_actual", "eps_estimate"):
+                        if merged_prior.get(field) is None and history_prior.get(field) is not None:
+                            merged_prior[field] = history_prior[field]
+                    result["prior_earnings"] = merged_prior
+
+        if result.get("next_twelve_month_eps") is None:
+            trailing_eps = result.get("earnings_per_share")
+            next_event = result.get("next_earnings")
+            oldest_actual = result["earnings_history"][-1].get("eps_actual") if len(result["earnings_history"]) == 4 else None
+            next_estimate = next_event.get("eps_estimate") if isinstance(next_event, dict) else None
+            if all(isinstance(value, (int, float)) and math.isfinite(value) for value in (trailing_eps, oldest_actual, next_estimate)):
+                result["next_twelve_month_eps"] = trailing_eps - oldest_actual + next_estimate
+                result["next_twelve_month_eps_method"] = "TTM EPS less oldest quarter plus next-quarter estimate"
         if any(value is not None for key, value in result.items() if key != "company_profile") or (result.get("company_profile") or {}).get("name"):
             _FINNHUB_METRICS_CACHE[cache_key] = (time.monotonic(), result.copy())
         return result
@@ -3669,7 +3763,8 @@ async def analyze_stock(data: StockAnalysisInput):
         "previous_close", "market_cap", "price_earnings_ratio", "earnings_per_share",
         "profit_margin", "revenue", "shares_outstanding", "total_debt_to_capital",
         "insider_sentiment_mspr", "insider_sentiment_month", "company_profile",
-        "prior_earnings", "next_earnings",
+        "prior_earnings", "next_earnings", "earnings_history", "quarterly_eps_estimates",
+        "next_twelve_month_eps", "next_twelve_month_eps_method", "upcoming_split",
     )
     quote = {field: data.quote.get(field) for field in quote_fields if field in data.quote}
     quote_json = json.dumps(quote, allow_nan=False, separators=(",", ":"))
