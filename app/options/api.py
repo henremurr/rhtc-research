@@ -1975,6 +1975,25 @@ def _company_description_is_useful(value: str | None) -> bool:
     )
 
 
+def _clean_company_description(value: str | None) -> str:
+    text = unescape(str(value or "")).replace("\r", "\n").strip()
+    text = re.sub(
+        r"(?i)^\s*#{0,6}\s*investor relations\s*#{0,6}\s*(?:(?:corporate|company)\s+overview\s*)?",
+        "",
+        text,
+    )
+    text = re.sub(
+        r"(?i)^\s*#{0,6}\s*(?:(?:corporate|company)\s+overview|about(?:\s+us|\s+the\s+company)?)\s*",
+        "",
+        text,
+    )
+    text = re.sub(r"(?m)^\s*#{1,6}\s*", "", text)
+    text = re.sub(r"\s+#{1,6}\s+", " ", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n[ \t]+", "\n", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip(" \n|-\u00b7")
+
+
 def _company_business_paragraphs(document: str) -> list[str]:
     parser = _SourceTextParser()
     parser.feed(document)
@@ -2091,12 +2110,14 @@ async def discover_company_website_description(
 
 
 async def enrich_company_profile_description(symbol: str, profile: dict[str, Any]) -> dict[str, Any]:
-    current = str(profile.get("description") or "").strip()
+    current = _clean_company_description(profile.get("description"))
     current_is_useful = _company_description_is_useful(current)
     if current_is_useful and len(current) >= 1800:
+        profile["description"] = current
         return profile
     website = str(profile.get("website") or "").strip() or None
     direct_text = await fetch_company_website_description(website) if website else None
+    direct_text = _clean_company_description(direct_text)
     if direct_text and _company_description_is_useful(direct_text):
         profile["description"] = direct_text
         profile["description_source"] = "company website"
@@ -2105,6 +2126,7 @@ async def enrich_company_profile_description(symbol: str, profile: dict[str, Any
     discovered_website, detailed_text, sources = await discover_company_website_description(
         symbol, str(profile.get("name") or "") or None, str(profile.get("industry") or "") or None, website
     )
+    detailed_text = _clean_company_description(detailed_text)
     if detailed_text and _company_description_is_useful(detailed_text) and len(detailed_text) > len(current):
         profile["description"] = detailed_text
         profile["description_source"] = "company website"
