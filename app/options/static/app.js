@@ -212,11 +212,41 @@ function renderEarningsEvents(quote={}){
     const ratio=value=>Number(value).toLocaleString('en-US',{maximumFractionDigits:3});
     const splitHeading=splitApplies?'<th>After split</th>':'';
     const splitCells=target=>splitApplies?'<td>'+amount(target/splitFactor)+'</td>':'';
+    const symbol=String(quote.symbol||'').trim().toUpperCase();
+    const targetCell=(target,label)=>symbol?'<button type="button" class="earnings-target-button" data-symbol="'+safe(symbol)+'" data-target="'+Number(target).toFixed(4)+'" data-case="'+safe(label)+'" onclick="openWeeklyTargetPath(this)" aria-label="Open 13-week '+safe(label)+' target path for '+safe(symbol)+'">'+amount(target)+'</button>':amount(target);
     const splitNote=splitApplies?'<div class="earnings-split-note"><b>Split adjustment:</b> '+ratio(split.to_factor)+'-for-'+ratio(split.from_factor)+' on '+dateLabel(split.date)+'. Targets after that date are divided by '+ratio(splitFactor)+'.</div>':'';
-    cases='<div class="earnings-cases"><h4>Next-quarter price scenarios</h4><div class="earnings-case-inputs">NTM EPS '+amount(ntm)+' · '+safe(ntmMethod)+' · reasonable forward P/E '+reasonableForwardPe.toFixed(2)+'x</div>'+splitNote+'<div class="earnings-cases-wrap"><table><thead><tr><th>Case</th><th>Method</th><th>'+(splitApplies?'Before split':'Price target')+'</th>'+splitHeading+'</tr></thead><tbody>'+targets.map(item=>'<tr><th>'+item[0]+'</th><td>'+item[2]+'</td><td>'+amount(item[1])+'</td>'+splitCells(item[1])+'</tr>').join('')+'</tbody></table></div><small>Mechanical valuation scenarios, not predictions or personalized trade instructions. EPS estimates and valuation multiples can change.</small></div>';
+    cases='<div class="earnings-cases"><h4>Next-quarter price scenarios</h4><div class="earnings-case-inputs">NTM EPS '+amount(ntm)+' · '+safe(ntmMethod)+' · reasonable forward P/E '+reasonableForwardPe.toFixed(2)+'x</div>'+splitNote+'<div class="earnings-cases-wrap"><table><thead><tr><th>Case</th><th>Method</th><th>'+(splitApplies?'Before split':'Price target')+'</th>'+splitHeading+'</tr></thead><tbody>'+targets.map(item=>'<tr><th>'+item[0]+'</th><td>'+item[2]+'</td><td>'+targetCell(item[1],item[0])+'</td>'+splitCells(item[1])+'</tr>').join('')+'</tbody></table></div><small>Select a price target to open its 13-week covered-call path. Mechanical valuation scenarios are not predictions or personalized trade instructions. EPS estimates, option premiums, and valuation multiples can change.</small></div>';
   }
   return '<section class="earnings-events"><h3>Earnings dates and EPS</h3><div class="earnings-events-grid">'+row('Prior reported',prior,true)+row('Next scheduled',next,false)+'</div><small><b>Applies to every ticker.</b> EPS amounts are per share. Price scenarios appear when current price, prior actual EPS, next-quarter EPS estimate, and usable NTM EPS are available; otherwise no target is inferred. Dates and estimates depend on company/Finnhub reporting.</small>'+cases+'</section>';
 }
+async function openWeeklyTargetPath(button){
+  const symbol=String(button?.dataset?.symbol||'').trim().toUpperCase(),target=Number(button?.dataset?.target),caseLabel=String(button?.dataset?.case||'Price target');
+  if(!symbol||!Number.isFinite(target)||target<=0)return;
+  const modal=$('#target-path-modal'),status=$('#target-path-status'),content=$('#target-path-content');
+  $('#target-path-title').textContent=symbol+' · '+caseLabel+' 13-week path';
+  $('#target-path-subtitle').textContent='Loading weekly call premiums for a $'+target.toFixed(2)+' target…';
+  status.textContent='Retrieving listed expirations and call quotes…';
+  content.innerHTML='<div class="loading">Building 13 weekly rows…</div>';
+  modal.classList.add('open');
+  try{
+    const response=await fetch('/options/api/target-path/'+encodeURIComponent(symbol)+'?target='+encodeURIComponent(target),{credentials:'same-origin',cache:'no-store'});
+    const data=await response.json();
+    if(!response.ok)throw Error(data.detail||'Weekly target path is unavailable.');
+    const rows=Array.isArray(data.rows)?data.rows:[],last=Number(data.last),returnedTarget=Number(data.target);
+    const money=value=>Number.isFinite(Number(value))?'$'+Number(value).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—';
+    const dateText=value=>value?new Date(value+'T00:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'}):'—';
+    const source=data.source==='tradier_sandbox'?'Tradier sandbox · delayed':data.source==='tradier'?'Tradier quote':'Illustrative demo data';
+    $('#target-path-subtitle').textContent='Last '+money(last)+' → target '+money(returnedTarget)+' · '+source;
+    content.innerHTML='<div class="target-path-formula">Week N path price = last + N/13 × (target − last). Premium is the current bid for the nearest strike at the listed expiration closest to each 7-day interval.</div><div class="target-path-table-wrap"><table class="target-path-table"><thead><tr><th>Week</th><th>Path price</th><th>Nearest listed call</th><th>Call premium</th></tr></thead><tbody>'+rows.map(row=>{
+      const error=row.error?'<small>'+safe(row.error)+'</small>':'';
+      const call=row.strike!==null&&row.strike!==undefined?money(row.strike)+' C<br><small>'+dateText(row.expiry)+' · '+Number(row.dte||0)+' DTE</small>':error||'Unavailable';
+      const premium=row.premium_per_contract!==null&&row.premium_per_contract!==undefined?'<b>'+money(row.premium_per_contract)+'</b><small>'+money(row.bid)+' bid/share · '+money(row.ask)+' ask</small>':error||'Unavailable';
+      return '<tr><th><b>'+Number(row.week)+'</b><small>'+dateText(row.path_date)+'</small></th><td><b>'+money(row.projected_price)+'</b></td><td>'+call+'</td><td>'+premium+'</td></tr>';
+    }).join('')+'</tbody></table></div><p class="target-path-warning">Premiums are present quote snapshots—not forecasts of future option value. Verify the contract, split adjustments, bid/ask spread, liquidity, earnings date, and assignment risk before acting.</p>';
+    status.textContent=rows.length+' weekly rows · quotes retrieved '+new Date(data.as_of).toLocaleString('en-US',{timeZone:'America/Los_Angeles',dateStyle:'medium',timeStyle:'short'})+' PT';
+  }catch(error){content.innerHTML='<p class="target-path-error">'+safe(error.message)+'</p>';status.textContent='Could not build the weekly target path.'}
+}
+function closeWeeklyTargetPath(){$('#target-path-modal').classList.remove('open')}
 async function showEarningsReport(){
   const modal=$('#earnings-report-modal'),status=$('#earnings-report-status'),content=$('#earnings-report-content');
   modal.classList.add('open');status.textContent='Loading saved upcoming earnings…';content.innerHTML='';
@@ -872,7 +902,7 @@ async function viewStockReports(symbol,offset=0){
     $('#stock-report-summary').innerHTML=renderAnalysis(report.summary||'Summary was not saved.');
     $('#stock-report-details').innerHTML=renderAnalysis(report.details||'Detailed analysis was not saved.');
     $('#stock-report-citations').innerHTML=(report.citations||[]).map(citation=>'<li><a href="'+safe(citation.url)+'" target="_blank" rel="noopener noreferrer">'+safe(citation.title||citation.url)+'</a></li>').join('');
-    const quote=report.quote||{};
+    const quote={...(report.quote||{}),symbol};
     $('#stock-report-earnings').innerHTML=renderEarningsEvents(quote);
     const price=Number(quote.price);
     $('#stock-report-quote').textContent='Quote snapshot: '+(quote.price!==null&&quote.price!==undefined&&Number.isFinite(price)?'$'+price.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'price unavailable')+' · '+(quote.quote_time||'timestamp unavailable')+' · '+(quote.source||'source unavailable');
