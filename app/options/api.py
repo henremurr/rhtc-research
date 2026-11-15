@@ -37,7 +37,10 @@ from app.options.x_publish import router as x_router
 from app.options.user_guide import router as user_guide_router
 
 BASE = Path(__file__).parent
-app = FastAPI(title="RHTC Options Dashboard", version="0.1.0")
+OPTIONS_RELEASE_VERSION = "v2026.11.15"
+OPTIONS_RELEASE_DATE = "2026-11-15"
+
+app = FastAPI(title="RHTC Options Dashboard", version=OPTIONS_RELEASE_VERSION)
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 app.include_router(news_router)
 app.include_router(youtube_router)
@@ -1396,6 +1399,10 @@ async def infrastructure_inventory(include_sources: bool = Query(default=False))
         "YOUTUBE_CLIENT_ID",
         "YOUTUBE_CLIENT_SECRET",
         "YOUTUBE_REFRESH_TOKEN",
+        "X_API_KEY",
+        "X_API_SECRET",
+        "X_ACCESS_TOKEN",
+        "X_ACCESS_TOKEN_SECRET",
         "RHTC_DASHBOARD_PASSWORD",
         "RHTC_WATCHLIST_ADMIN_TOKEN",
     )
@@ -1466,6 +1473,12 @@ async def infrastructure_inventory(include_sources: bool = Query(default=False))
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "release": {
+            "version": OPTIONS_RELEASE_VERSION,
+            "status": "stable",
+            "released_on": OPTIONS_RELEASE_DATE,
+            "commit": os.getenv("RAILWAY_GIT_COMMIT_SHA", "").strip(),
+        },
         "python_version": platform.python_version(),
         "packages": packages,
         "credential_status": credential_status,
