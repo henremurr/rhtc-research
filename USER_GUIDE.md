@@ -130,6 +130,7 @@ Select a ticker to open its quote and option details.
 
 - **Analyze stock** requests a current-source company analysis, including a concise summary, detailed analysis, and available citations.
 - **View reports** opens saved stock analyses with Previous/Next navigation and report deletion controls.
+- **CEO Risk** opens the ticker's latest CEO-dependency and succession-risk assessment, or creates one when no saved assessment exists.
 - **Print report** creates the comprehensive branded report and provides Open PDF, Download PDF, and Back to quote controls.
 - The dialog can show company profile, fundamentals, quote statistics, prior and next earnings, and EPS estimates when optional data is available.
 - The earnings section applies to every ticker. When valid inputs exist, it shows Cautious, Central, Optimistic, and Strong-beat next-quarter price scenarios. The Central case uses next-12-month EPS and a reasonable forward P/E; the Optimistic case holds the prior quarter's price/EPS multiple constant. Announced splits effective by the target date are shown with pre- and post-split targets.
