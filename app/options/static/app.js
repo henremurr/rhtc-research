@@ -220,10 +220,10 @@ function renderEarningsEvents(quote={}){
   return '<section class="earnings-events"><h3>Earnings dates and EPS</h3><div class="earnings-events-grid">'+row('Prior reported',prior,true)+row('Next scheduled',next,false)+'</div><small><b>Applies to every ticker.</b> EPS amounts are per share. Price scenarios appear when current price, prior actual EPS, next-quarter EPS estimate, and usable NTM EPS are available; otherwise no target is inferred. Dates and estimates depend on company/Finnhub reporting.</small>'+cases+'</section>';
 }
 async function openWeeklyTargetPath(button){
-  const symbol=String(button?.dataset?.symbol||'').trim().toUpperCase(),target=Number(button?.dataset?.target),caseLabel=String(button?.dataset?.case||'Price target');
+  const symbol=String(button?.dataset?.symbol||'').trim().toUpperCase(),target=Number(button?.dataset?.target);
   if(!symbol||!Number.isFinite(target)||target<=0)return;
   const modal=$('#target-path-modal'),status=$('#target-path-status'),content=$('#target-path-content');
-  $('#target-path-title').textContent=symbol+' · '+caseLabel+' 13-week path';
+  $('#target-path-title').textContent=symbol+' - 13-WEEK COVERED-CALL PATH';
   $('#target-path-subtitle').textContent='Loading weekly call premiums for a $'+target.toFixed(2)+' target…';
   status.textContent='Retrieving listed expirations and call quotes…';
   content.innerHTML='<div class="loading">Building 13 weekly rows…</div>';
