@@ -308,6 +308,35 @@ function companyPublicHistory(ipo){
   const since=date.toLocaleDateString('en-US',{month:'short',year:'numeric',timeZone:'UTC'});
   return years>0?'Public since '+since+' · '+years+' '+(years===1?'year':'years')+' listed':'Public since '+since;
 }
+function cleanCompanyDescription(value){
+  let text=String(value||'').replace(/\r/g,'\n').trim();
+  text=text
+    .replace(/^\s*#{0,6}\s*investor relations\s*#{0,6}\s*(?:(?:corporate|company)\s+overview\s*)?/i,'')
+    .replace(/^\s*#{0,6}\s*(?:(?:corporate|company)\s+overview|about(?:\s+us|\s+the\s+company)?)\s*/i,'')
+    .replace(/(^|\n)\s*#{1,6}\s*/g,'$1')
+    .replace(/\s+#{1,6}\s+/g,' ')
+    .replace(/[ \t]+/g,' ')
+    .replace(/\n[ \t]+/g,'\n')
+    .replace(/\n{3,}/g,'\n\n')
+    .trim();
+  return text;
+}
+function companyDescriptionParagraphs(value){
+  const text=cleanCompanyDescription(value);
+  if(!text)return [];
+  const explicit=text.split(/\n{2,}/).map(item=>item.trim()).filter(Boolean);
+  if(explicit.length>1)return explicit;
+  const sentences=(text.match(/[^.!?]+[.!?]+|[^.!?]+$/g)||[text]).map(item=>item.trim()).filter(Boolean);
+  if(sentences.length<2||text.length<300)return [text];
+  const paragraphs=[];
+  let paragraph='';
+  sentences.forEach(sentence=>{
+    if(paragraph&&paragraph.length+sentence.length+1>330){paragraphs.push(paragraph);paragraph=sentence}
+    else paragraph+=(paragraph?' ':'')+sentence;
+  });
+  if(paragraph)paragraphs.push(paragraph);
+  return paragraphs;
+}
 function renderCompanyOverview(profile,symbol,quoteName){
   const info=profile&&typeof profile==='object'?profile:{};
   const name=info.name||quoteName||symbol;
@@ -318,14 +347,14 @@ function renderCompanyOverview(profile,symbol,quoteName){
       ? 'Finnhub classifies this company in the '+info.industry+' industry. A fuller business description is unavailable in the profile returned for this ticker.'
       : 'Finnhub did not return a business description for this ticker.'
   );
-  const descriptionAttribution=info.description_source==='company website'?'<small class="company-overview-note">Business description retrieved from the company website.</small>':'';
-  const descriptionMarkup=String(summary).split(/\n{2,}/).map(paragraph=>paragraph.trim()).filter(Boolean).map(paragraph=>'<p>'+safe(paragraph)+'</p>').join('');
+  const descriptionMarkup=companyDescriptionParagraphs(summary).map((paragraph,index)=>'<p'+(index===0?' class="company-overview-lead"':'')+'>'+safe(paragraph)+'</p>').join('');
   const sourceLinks=(Array.isArray(info.business_sources)?info.business_sources:[]).filter(source=>source&&typeof source.url==='string'&&/^https?:\/\//i.test(source.url)).map(source=>'<a href="'+safe(source.url)+'" target="_blank" rel="noopener noreferrer">'+safe(source.title||'Company source')+' ↗</a>').join('');
   const countryNames={US:'United States',GB:'United Kingdom',CA:'Canada',DE:'Germany',FR:'France',JP:'Japan',CN:'China',AU:'Australia',IL:'Israel',IN:'India',IE:'Ireland',NL:'Netherlands',CH:'Switzerland',KR:'South Korea',TW:'Taiwan'};
   const country=info.country?(countryNames[info.country.toUpperCase()]||info.country):'';
   const headquarters=[info.city,info.state,country].filter(Boolean).join(', ')||'Not available in Finnhub profile';
-  const website=typeof info.website==='string'&&(info.website.startsWith('https://')||info.website.startsWith('http://'))?'<a href="'+safe(info.website)+'" target="_blank" rel="noopener noreferrer">Company website ↗</a>':'';
-  return '<section class="company-overview"><div class="company-overview-heading"><h3>About '+safe(name)+'</h3>'+website+'</div><div class="company-overview-description">'+descriptionMarkup+'</div>'+descriptionAttribution+(sourceLinks?'<div class="company-overview-sources"><small>Business sources</small>'+sourceLinks+'</div>':'')+'<div class="company-overview-facts"><div><small>Industry</small><b>'+safe(info.industry||'Not available')+'</b></div><div><small>Headquarters</small><b>'+safe(headquarters)+'</b></div><div><small>Public-market history</small><b>'+safe(companyPublicHistory(info.ipo))+'</b></div></div><small class="company-overview-note">IPO date shows time as a public company; the business may be older.</small></section>';
+  const website=typeof info.website==='string'&&(info.website.startsWith('https://')||info.website.startsWith('http://'))?'<a class="company-overview-website" href="'+safe(info.website)+'" target="_blank" rel="noopener noreferrer">Official website ↗</a>':'';
+  const sourceRow=sourceLinks?'<div class="company-overview-sources"><small>Official business sources</small>'+sourceLinks+'</div>':'';
+  return '<section class="company-overview"><div class="company-overview-heading"><div><small class="company-overview-kicker">Company profile</small><h3>About '+safe(name)+'</h3></div>'+website+'</div><div class="company-overview-description">'+descriptionMarkup+'</div>'+sourceRow+'<div class="company-overview-facts"><div><small>Industry</small><b>'+safe(info.industry||'Not available')+'</b></div><div><small>Headquarters</small><b>'+safe(headquarters)+'</b></div><div><small>Public-market history</small><b>'+safe(companyPublicHistory(info.ipo))+'</b></div></div><small class="company-overview-note">Listing history reflects the IPO date, not the age of the underlying business.</small></section>';
 }
 async function loadCompanyWebsiteProfile(symbol,quoteName){
   try{
