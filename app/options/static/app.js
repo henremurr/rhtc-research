@@ -253,20 +253,23 @@ function ensureEarningsInvestmentFilter(){
   controls=document.createElement('div');
   controls.id='earnings-report-controls';
   controls.className='earnings-report-controls';
-  let saved='';
-  try{saved=localStorage.getItem('rhtc-earnings-investment')||''}catch(error){}
+  let saved='',savedEps='all';
+  try{saved=localStorage.getItem('rhtc-earnings-investment')||'';savedEps=localStorage.getItem('rhtc-earnings-eps-filter')||'all'}catch(error){}
   const mainSpend=$('#max-spend')?.value||'$10,000';
-  controls.innerHTML='<label class="max-last-control" for="earnings-max-spend"><span>Invest</span><input id="earnings-max-spend" type="text" inputmode="numeric" value="'+safe(saved||mainSpend)+'" aria-label="Maximum investment for a 100-share position"></label><button class="refresh-btn" type="button">Apply</button><small>Maximum cost for 100 shares</small>';
+  controls.innerHTML='<label class="max-last-control" for="earnings-max-spend"><span>Invest</span><input id="earnings-max-spend" type="text" inputmode="numeric" value="'+safe(saved||mainSpend)+'" aria-label="Maximum investment for a 100-share position"></label><label class="earnings-eps-filter" for="earnings-eps-sign"><span>EPS</span><select id="earnings-eps-sign" aria-label="Filter by estimated EPS sign"><option value="all">All EPS</option><option value="negative">Negative</option><option value="nonnegative">Not negative</option></select></label><button class="refresh-btn" type="button">Apply</button><small>Maximum cost for 100 shares</small>';
   $('#earnings-report-meta').insertAdjacentElement('afterend',controls);
+  const epsSelect=controls.querySelector('#earnings-eps-sign');
+  epsSelect.value=['all','negative','nonnegative'].includes(savedEps)?savedEps:'all';
   controls.querySelector('button').addEventListener('click',applyEarningsInvestmentFilter);
   controls.querySelector('input').addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();applyEarningsInvestmentFilter()}});
+  epsSelect.addEventListener('change',applyEarningsInvestmentFilter);
   return controls;
 }
 function applyEarningsInvestmentFilter(){
-  const input=$('#earnings-max-spend'),investment=parseMaxSpend(input?.value);
+  const input=$('#earnings-max-spend'),investment=parseMaxSpend(input?.value),epsSign=$('#earnings-eps-sign')?.value||'all';
   if(!Number.isFinite(investment)||investment<=0){toast('Enter an investment amount greater than $0.');input?.focus();return}
   input.value=formatMaxSpend(investment);
-  try{localStorage.setItem('rhtc-earnings-investment',input.value)}catch(error){}
+  try{localStorage.setItem('rhtc-earnings-investment',input.value);localStorage.setItem('rhtc-earnings-eps-filter',epsSign)}catch(error){}
   void showEarningsReport();
 }
 async function showEarningsReport(){
@@ -274,8 +277,10 @@ async function showEarningsReport(){
   modal.classList.add('open');
   ensureEarningsInvestmentFilter();
   const investment=parseMaxSpend($('#earnings-max-spend')?.value);
+  const epsSign=$('#earnings-eps-sign')?.value||'all';
   const params=new URLSearchParams();
   if(Number.isFinite(investment)&&investment>0)params.set('max_investment',String(investment));
+  params.set('eps_sign',epsSign);
   status.textContent='Loading saved upcoming earnings and current prices…';content.innerHTML='';
   try{
     const response=await fetch('/options/api/earnings-report?'+params.toString(),{credentials:'same-origin',cache:'no-store'});
@@ -298,8 +303,9 @@ async function showEarningsReport(){
       return '<tr><td>'+safe(eventDate)+'</td><td data-label="Ticker">'+tickerButton+'</td><td data-label="EPS estimate" style="color:'+epsColor+'">'+safe(eps)+'</td><td data-label="Last">'+safe(lastText)+'</td><td data-label="100 shares">'+safe(positionCost)+'</td></tr>';
     }).join('')+'</tbody></table></div>':'<p class="earnings-report-empty">No upcoming earnings have been saved yet. Run Analyze Stock on tickers to populate the report.</p>';
     const total=Number(data.total_before_filter)||events.length;
-    const filterText=Number.isFinite(investment)&&investment>0?' fitting '+formatMaxSpend(investment)+' for 100 shares':'';
-    status.textContent=events.length+' of '+total+' upcoming ticker'+(total===1?'':'s')+filterText;
+    const investmentText=Number.isFinite(investment)&&investment>0?' fitting '+formatMaxSpend(investment)+' for 100 shares':'';
+    const epsText=epsSign==='negative'?' · negative EPS':epsSign==='nonnegative'?' · EPS not negative':'';
+    status.textContent=events.length+' of '+total+' upcoming ticker'+(total===1?'':'s')+investmentText+epsText;
   }catch(error){status.textContent=error.message}
 }
 function closeEarningsReport(){$('#earnings-report-modal').classList.remove('open')}
