@@ -1288,6 +1288,82 @@ class Tradier:
         rows = await self.option_sets(symbol, peak, only_set=expiration_set)
         return rows[0]
 
+    async def target_path(self, symbol: str, target: float, weeks: int = 13) -> dict[str, Any]:
+        """Build a weekly price path and pair it with currently listed call quotes."""
+        qdata = await self.get("/markets/quotes", {"symbols": symbol})
+        quote = qdata.get("quotes", {}).get("quote", {})
+        if isinstance(quote, list):
+            quote = quote[0] if quote else {}
+        last = parse_number(quote.get("last")) or parse_number(quote.get("close"))
+        if last <= 0:
+            raise ValueError("No underlying price returned")
+
+        edata = await self.get("/markets/options/expirations", {"symbol": symbol, "includeAllRoots": "false"})
+        expiration_data = edata.get("expirations", {})
+        dates = expiration_data.get("date", []) if isinstance(expiration_data, dict) else expiration_data
+        if isinstance(dates, str):
+            dates = [dates]
+        today = date.today()
+        future: list[tuple[str, int]] = []
+        for expiry in dates if isinstance(dates, list) else []:
+            try:
+                dte = (date.fromisoformat(str(expiry)) - today).days
+            except (TypeError, ValueError):
+                continue
+            if dte >= 0:
+                future.append((str(expiry), dte))
+        future.sort(key=lambda item: item[1])
+
+        semaphore = asyncio.Semaphore(3)
+
+        async def weekly_row(week: int) -> dict[str, Any]:
+            path_date = today + timedelta(days=week * 7)
+            projected = last + (week / weeks) * (target - last)
+            base = {
+                "week": week, "path_date": path_date.isoformat(),
+                "projected_price": round(projected, 4),
+            }
+            if not future:
+                return {**base, "error": "No listed call expiration"}
+            expiry, dte = min(
+                future,
+                key=lambda item: (abs(item[1] - week * 7), 0 if item[1] >= week * 7 else 1),
+            )
+            try:
+                async with semaphore:
+                    cdata = await self.get("/markets/options/chains", {"symbol": symbol, "expiration": expiry, "greeks": "false"})
+                contracts = cdata.get("options", {}).get("option", [])
+                if isinstance(contracts, dict):
+                    contracts = [contracts]
+                calls = [
+                    contract for contract in contracts
+                    if contract.get("option_type") == "call" and parse_number(contract.get("strike")) > 0
+                ]
+                if not calls:
+                    return {**base, "expiry": expiry, "dte": dte, "error": "No call contract returned"}
+                selected = min(calls, key=lambda contract: abs(parse_number(contract.get("strike")) - projected))
+                bid = parse_number(selected.get("bid"))
+                ask = parse_number(selected.get("ask"))
+                return {
+                    **base, "expiry": expiry, "dte": dte,
+                    "strike": parse_number(selected.get("strike")),
+                    "bid": bid, "ask": ask,
+                    "mid": round((bid + ask) / 2, 2),
+                    "premium_per_contract": round(bid * 100, 2),
+                    "contract": format_option_contract(expiry, selected.get("strike")),
+                    "open_interest": int(parse_number(selected.get("open_interest"))),
+                    "volume": int(parse_number(selected.get("volume"))),
+                }
+            except Exception as exc:
+                return {**base, "expiry": expiry, "dte": dte, "error": str(exc)}
+
+        rows = await asyncio.gather(*(weekly_row(week) for week in range(1, weeks + 1)))
+        return {
+            "symbol": symbol, "description": quote.get("description"),
+            "last": last, "target": target, "weeks": weeks,
+            "source": data_source(), "as_of": utc_now().isoformat(), "rows": rows,
+        }
+
     async def close(self) -> None:
         await self.client.aclose()
 
@@ -3177,6 +3253,40 @@ async def chain(symbol: str):
         await provider.close()
 
 
+@app.get("/api/target-path/{symbol}")
+async def target_path(symbol: str, target: float = Query(gt=0, lt=10_000_000)):
+    symbol = symbol.strip().upper()
+    if not SYMBOL_PATTERN.fullmatch(symbol):
+        raise HTTPException(404, "Invalid ticker symbol")
+    token = os.getenv("TRADIER_API_TOKEN")
+    if not token:
+        today = date.today()
+        item = next((row for row in read_watchlist() if row["symbol"] == symbol), {"peak": "Other"})
+        last = demo_row(symbol, item["peak"])["price"]
+        rows = []
+        for week in range(1, 14):
+            projected = last + (week / 13) * (target - last)
+            strike_step = 5 if projected >= 100 else 1
+            strike = round(projected / strike_step) * strike_step
+            bid = round(max(0.05, last * (0.006 + week * 0.0007)), 2)
+            expiry = today + timedelta(days=week * 7)
+            rows.append({
+                "week": week, "path_date": expiry.isoformat(), "projected_price": round(projected, 4),
+                "expiry": expiry.isoformat(), "dte": week * 7, "strike": strike,
+                "bid": bid, "ask": round(bid * 1.12, 2), "mid": round(bid * 1.06, 2),
+                "premium_per_contract": round(bid * 100, 2), "contract": format_option_contract(expiry, strike),
+                "open_interest": 0, "volume": 0,
+            })
+        return {"symbol": symbol, "description": None, "last": last, "target": target, "weeks": 13, "source": "demo", "as_of": utc_now().isoformat(), "rows": rows}
+    provider = Tradier(token)
+    try:
+        return await provider.target_path(symbol, target)
+    except Exception as exc:
+        raise HTTPException(502, f"Weekly target path request failed: {exc}") from exc
+    finally:
+        await provider.close()
+
+
 class SummaryInput(BaseModel):
     source: str = "demo"
     rows: list[dict[str, Any]] = Field(default_factory=list, max_length=300)
@@ -3771,7 +3881,7 @@ async def analyze_stock(data: StockAnalysisInput):
         raise HTTPException(503, "Stock analysis is unavailable. Configure OPENAI_API_KEY in the server settings.")
 
     quote_fields = (
-        "description", "source", "quote_time", "price", "change", "change_pct", "bid", "ask",
+        "symbol", "description", "source", "quote_time", "price", "change", "change_pct", "bid", "ask",
         "open", "high", "low", "volume", "week_52_high", "week_52_low", "average_volume",
         "previous_close", "market_cap", "price_earnings_ratio", "earnings_per_share",
         "profit_margin", "revenue", "shares_outstanding", "total_debt_to_capital",
