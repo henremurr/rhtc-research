@@ -3795,7 +3795,10 @@ async def create_ticker_report_pdf(data: TickerReportPdfInput):
 
 
 @app.get("/api/earnings-report")
-async def get_earnings_report(max_investment: float | None = Query(default=None, gt=0)):
+async def get_earnings_report(
+    max_investment: float | None = Query(default=None, gt=0),
+    eps_sign: str = Query(default="all", pattern="^(all|negative|nonnegative)$"),
+):
     today = date.today()
     with closing(connect_watchlist_db()) as connection:
         records = connection.execute(
@@ -3812,6 +3815,17 @@ async def get_earnings_report(max_investment: float | None = Query(default=None,
             continue
         events.append({"symbol": record["symbol"], **event, "updated_at": record["updated_at"]})
     total_before_filter = len(events)
+    if eps_sign != "all":
+        filtered_events = []
+        for event in events:
+            estimate = event.get("eps_estimate")
+            if not isinstance(estimate, (int, float)) or not math.isfinite(float(estimate)):
+                continue
+            if eps_sign == "negative" and float(estimate) < 0:
+                filtered_events.append(event)
+            elif eps_sign == "nonnegative" and float(estimate) >= 0:
+                filtered_events.append(event)
+        events = filtered_events
     if max_investment is not None and events:
         symbols = sorted({str(event.get("symbol") or "").upper() for event in events if event.get("symbol")})
         prices: dict[str, float] = {}
@@ -3856,6 +3870,7 @@ async def get_earnings_report(max_investment: float | None = Query(default=None,
     return {
         "as_of": today.isoformat(), "events": events, "count": len(events),
         "total_before_filter": total_before_filter, "max_investment": max_investment,
+        "eps_sign": eps_sign,
     }
 
 @app.get("/api/stock-analysis/reports/{symbol}")
