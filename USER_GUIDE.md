@@ -39,7 +39,7 @@ The header shows the watchlist universe size, calls to review, median bid yield,
 
 **v2026.11.15** is the approved stable production baseline. It covers the deployed Income Engine, shared watchlist and saved reports, stock and call scoring, Buffett and CEO-risk reports, earnings and split-aware price scenarios, news analysis, YouTube/X publishing controls, mobile layouts, comprehensive HTML/PDF reports, and the Infrastructure Audit.
 
-The Git tag `v2026.11.15` identifies the exact source baseline. Later changes should be compared with that tag before they are promoted as a new stable release. Application data remains in the configured persistent Railway volume and is not stored inside the release tag.
+The Git reference `stable/v2026.11.15` identifies the exact source baseline. Later changes should be compared with that stable branch before they are promoted as a new stable release. Application data remains in the configured persistent Railway volume and is not stored inside the source baseline.
 
 ## Sign in and navigate
 
