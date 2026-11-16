@@ -99,6 +99,42 @@ NEWS_TOPIC_ACRONYMS = {"ai": "AI", "doe": "DOE", "fda": "FDA", "haleu": "HALEU",
 MAX_NEWS_TOPICS = 24
 
 
+def _canonical_topic_tokens(value: str) -> list[str]:
+    raw = re.findall(r"[\w]+", unicodedata.normalize("NFKC", html.unescape(value)).casefold())
+    tokens: list[str] = []
+    index = 0
+    while index < len(raw):
+        token = raw[index]
+        if token == "artificial" and index + 1 < len(raw) and raw[index + 1] == "intelligence":
+            tokens.append("ai")
+            index += 2
+            continue
+        if token in {"datacenter", "datacenters", "datacentre", "datacentres"}:
+            tokens.extend(("data", "center"))
+            index += 1
+            continue
+        if token in {"centre", "centres"}:
+            token = "center"
+        elif token == "defence":
+            token = "defense"
+        elif token == "electricity":
+            token = "power"
+        elif token.endswith("ies") and len(token) > 5:
+            token = token[:-3] + "y"
+        elif token.endswith("s") and len(token) > 4 and not token.endswith(("ss", "us", "is")):
+            token = token[:-1]
+        tokens.append(token)
+        index += 1
+    return tokens
+
+
+def _canonical_topic_label(value: str) -> str:
+    tokens = _canonical_topic_tokens(value)
+    if tokens == ["other", "topic"]:
+        return "Other topics"
+    return " ".join(NEWS_TOPIC_ACRONYMS.get(token, token.capitalize()) for token in tokens)
+
+
 def detect_news_language(title: str, snippet: str) -> str:
     text = f"{title} {snippet}".strip()
     if len(text) < 20:
@@ -249,6 +285,16 @@ def connect_db() -> sqlite3.Connection:
             list(merged.values()),
         )
         connection.execute("INSERT OR REPLACE INTO news_meta(key,value) VALUES('url_normalization_version','1')")
+    topic_version = connection.execute("SELECT value FROM news_meta WHERE key='topic_normalization_version'").fetchone()
+    if not topic_version or topic_version["value"] != "2":
+        topics = [row["topic"] for row in connection.execute(
+            "SELECT DISTINCT topic FROM news_items WHERE topic!=''"
+        )]
+        for topic in topics:
+            canonical = _canonical_topic_label(topic)
+            if canonical and canonical != topic:
+                connection.execute("UPDATE news_items SET topic=? WHERE topic=?", (canonical, topic))
+        connection.execute("INSERT OR REPLACE INTO news_meta(key,value) VALUES('topic_normalization_version','2')")
     connection.commit()
     return connection
 
@@ -266,10 +312,10 @@ def classify_peak(title: str, snippet: str) -> str:
 
 
 def _topic_tokens(value: str) -> list[str]:
-    normalized = unicodedata.normalize("NFKC", html.unescape(value)).casefold()
+    normalized = _canonical_topic_tokens(value)
     return [
-        token for token in re.findall(r"[\w]+", normalized)
-        if len(token) > 2 and token not in NEWS_TOPIC_STOP_WORDS and not token.isdigit()
+        token for token in normalized
+        if (len(token) > 2 or token == "ai") and token not in NEWS_TOPIC_STOP_WORDS and not token.isdigit()
     ]
 
 
@@ -282,7 +328,7 @@ def _topic_phrases(tokens: list[str]) -> set[str]:
 
 
 def _topic_label(phrase: str) -> str:
-    return " ".join(NEWS_TOPIC_ACRONYMS.get(word, word.capitalize()) for word in phrase.split())
+    return _canonical_topic_label(phrase)
 
 
 def build_news_topics(rows: list[dict[str, Any]]) -> dict[str, str]:
