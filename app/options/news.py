@@ -811,36 +811,89 @@ async def mark_news_x_published(data: NewsXPublishedInput) -> dict[str, Any]:
 
 @router.post("/deduplicate")
 async def deduplicate_news() -> dict[str, Any]:
-    """Remove exact headline/date duplicates while retaining the most complete copy."""
+    """Remove duplicate reports by comparing their article text, not just their headlines."""
+    stop_words = {
+        "about", "after", "also", "amid", "and", "are", "been", "before", "being", "between",
+        "but", "by", "can", "could", "during", "for", "from", "has", "have", "into", "its",
+        "more", "most", "not", "onto", "our", "said", "says", "than", "that", "the", "their",
+        "them", "there", "these", "they", "this", "through", "under", "was", "were", "what",
+        "when", "where", "which", "while", "will", "with", "would", "you", "your",
+    }
+
+    def content_words(row: dict[str, Any]) -> list[str]:
+        content = str(row.get("story_content") or row.get("snippet") or "")
+        normalized = unicodedata.normalize("NFKC", html.unescape(content)).casefold()
+        return [word for word in re.findall(r"[\w]+", normalized) if len(word) > 1 and word not in stop_words]
+
+    def story_day(row: dict[str, Any]):
+        value = (row.get("published_at") or row.get("first_seen_at") or "").strip()
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+        except ValueError:
+            match = re.match(r"^(\d{4}-\d{2}-\d{2})", value)
+            if match:
+                try:
+                    return datetime.strptime(match.group(1), "%Y-%m-%d").date()
+                except ValueError:
+                    pass
+        return None
+
+    def same_story(left: dict[str, Any], right: dict[str, Any]) -> bool:
+        a, b = content_words(left), content_words(right)
+        if min(len(a), len(b)) < 6:
+            return False
+        day_a, day_b = story_day(left), story_day(right)
+        if day_a and day_b and abs((day_a - day_b).days) > 3:
+            return False
+        set_a, set_b = set(a), set(b)
+        common = len(set_a & set_b)
+        # Compare the body or excerpt. Overlap must be high in the shorter text,
+        # which catches a concise summary repeated inside a longer report.
+        overlap = common / min(len(set_a), len(set_b))
+        if common >= 5 and overlap >= 0.70:
+            return True
+        grams_a = set(zip(a, a[1:], a[2:]))
+        grams_b = set(zip(b, b[1:], b[2:]))
+        if not grams_a or not grams_b:
+            return False
+        trigram_overlap = len(grams_a & grams_b) / min(len(grams_a), len(grams_b))
+        return common >= 7 and trigram_overlap >= 0.55
+
+    def same_headline(left: dict[str, Any], right: dict[str, Any]) -> bool:
+        title_a = " ".join(re.findall(r"[\w]+", unicodedata.normalize("NFKC", html.unescape(left.get("title") or "")).casefold()))
+        title_b = " ".join(re.findall(r"[\w]+", unicodedata.normalize("NFKC", html.unescape(right.get("title") or "")).casefold()))
+        day_a, day_b = story_day(left), story_day(right)
+        return len(title_a) >= 8 and title_a == title_b and day_a == day_b
+
     with closing(connect_db()) as connection:
         rows = [dict(row) for row in connection.execute(
-            "SELECT url,title,published_at,snippet,first_seen_at,last_seen_at,youtube_published,youtube_video_id,youtube_url,youtube_published_at,youtube_privacy_status,x_published,x_post_id,x_post_url,x_published_at FROM news_items"
+            "SELECT url,title,published_at,snippet,story_content,first_seen_at,last_seen_at,youtube_published,youtube_video_id,youtube_url,youtube_published_at,youtube_privacy_status,x_published,x_post_id,x_post_url,x_published_at FROM news_items ORDER BY first_seen_at,url"
         )]
-        groups: dict[tuple[str, str], list[dict[str, str]]] = {}
+        groups: list[list[dict[str, Any]]] = []
         for row in rows:
-            title = unicodedata.normalize("NFKC", html.unescape(row["title"] or "")).casefold()
-            title_key = " ".join(re.sub(r"[^\w\s]", " ", title).split())
-            if len(title_key) < 8:
-                continue
-            published = (row.get("published_at") or "").strip()
-            published_day = ""
-            if published:
-                try:
-                    published_day = datetime.fromisoformat(published.replace("Z", "+00:00")).date().isoformat()
-                except ValueError:
-                    match = re.match(r"^(\d{4}-\d{2}-\d{2})", published)
-                    published_day = match.group(1) if match else published
-            groups.setdefault((title_key, published_day), []).append(row)
+            for group in groups:
+                # Complete-link matching prevents a chain of related but distinct
+                # stories from being collapsed into one duplicate group.
+                if all(same_story(row, member) or same_headline(row, member) for member in group):
+                    group.append(row)
+                    break
+            else:
+                groups.append([row])
 
         removed = 0
         duplicate_groups = 0
-        for group in groups.values():
+        for group in groups:
             if len(group) < 2:
                 continue
             duplicate_groups += 1
-            keep = max(group, key=lambda item: (len(item.get("snippet") or ""), item["last_seen_at"]))
+            keep = max(group, key=lambda item: (
+                len(item.get("story_content") or ""), len(item.get("snippet") or ""), item["last_seen_at"]
+            ))
             first_seen = min(item["first_seen_at"] for item in group)
             last_seen = max(item["last_seen_at"] for item in group)
+            best_content = max((item.get("story_content") or "" for item in group), key=len)
+            best_snippet = max((item.get("snippet") or "" for item in group), key=len)
+            best_published_at = max((item.get("published_at") or "" for item in group), key=len)
             published_copy = max(
                 (item for item in group if item.get("youtube_published")),
                 key=lambda item: item.get("youtube_published_at", ""),
@@ -852,9 +905,9 @@ async def deduplicate_news() -> dict[str, Any]:
                 default=keep,
             )
             connection.execute(
-                "UPDATE news_items SET first_seen_at=?, last_seen_at=?, youtube_published=?, youtube_video_id=?, youtube_url=?, youtube_published_at=?, youtube_privacy_status=?, x_published=?, x_post_id=?, x_post_url=?, x_published_at=? WHERE url=?",
+                "UPDATE news_items SET first_seen_at=?, last_seen_at=?, snippet=?, story_content=?, published_at=?, youtube_published=?, youtube_video_id=?, youtube_url=?, youtube_published_at=?, youtube_privacy_status=?, x_published=?, x_post_id=?, x_post_url=?, x_published_at=? WHERE url=?",
                 (
-                    first_seen, last_seen,
+                    first_seen, last_seen, best_snippet, best_content, best_published_at,
                     int(bool(published_copy.get("youtube_published"))),
                     published_copy.get("youtube_video_id", ""),
                     published_copy.get("youtube_url", ""),
@@ -879,7 +932,7 @@ async def deduplicate_news() -> dict[str, Any]:
         "removed": removed,
         "duplicate_groups": duplicate_groups,
         "remaining": remaining,
-        "matching": "normalized headline and publication date",
+        "matching": "high article-text similarity within three days, or matching headline and date",
     }
 
 
