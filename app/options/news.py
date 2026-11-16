@@ -424,6 +424,41 @@ def rank_news_relevance(title: str, content: str, symbols: set[str]) -> int:
     return 0
 
 
+def news_watchlist_symbols() -> set[str]:
+    from app.options.api import read_watchlist
+
+    return {
+        str(item.get("symbol") or "").strip().upper()
+        for item in read_watchlist()
+        if str(item.get("symbol") or "").strip()
+    }
+
+
+def assign_news_relevance(
+    connection: sqlite3.Connection,
+    rows: list[dict[str, Any]] | None = None,
+    symbols: set[str] | None = None,
+) -> dict[str, Any]:
+    """Persist scores for every supplied story, or every saved story when omitted."""
+    symbols = symbols if symbols is not None else news_watchlist_symbols()
+    if rows is None:
+        rows = [dict(row) for row in connection.execute(
+            "SELECT url,title,snippet,story_content FROM news_items ORDER BY last_seen_at DESC"
+        )]
+    scores = [
+        (rank_news_relevance(str(row.get("title") or ""), str(row.get("story_content") or row.get("snippet") or ""), symbols), row["url"])
+        for row in rows
+    ]
+    if scores:
+        connection.executemany("UPDATE news_items SET relevance_score=? WHERE url=?", scores)
+    counts = {
+        "high": sum(score >= 4 for score, _ in scores),
+        "medium": sum(2 <= score <= 3 for score, _ in scores),
+        "low": sum(score <= 1 for score, _ in scores),
+    }
+    return {"ranked": len(scores), "counts": counts}
+
+
 def build_news_topics(rows: list[dict[str, Any]]) -> dict[str, str]:
     """Find recurring key phrases across headlines and excerpts and assign one topic per story."""
     prepared: list[tuple[str, list[str], set[str]]] = []
@@ -828,6 +863,7 @@ async def scan_news(*, scheduled: bool = False, query: str | None = None) -> dic
                 if cleaned:
                     clean_items[cleaned["url"]] = cleaned
 
+        symbols = news_watchlist_symbols()
         with closing(connect_db()) as connection:
             existing_urls: set[str] = set()
             if clean_items:
@@ -843,6 +879,7 @@ async def scan_news(*, scheduled: bool = False, query: str | None = None) -> dic
                      last_seen_at=excluded.last_seen_at""",
                 list(clean_items.values()),
             )
+            assign_news_relevance(connection, symbols=symbols)
             connection.execute("INSERT OR REPLACE INTO news_meta(key,value) VALUES('last_scan_at',?)", (seen_at,))
             connection.execute("INSERT OR REPLACE INTO news_meta(key,value) VALUES('last_scan_count',?)", (str(len(clean_items)),))
             connection.commit()
@@ -894,7 +931,19 @@ async def get_news(
         term = f"%{q.strip()}%"
         params.extend([term, term, term])
     query += " ORDER BY last_seen_at DESC, COALESCE(NULLIF(published_at,''), first_seen_at) DESC"
+    symbols = news_watchlist_symbols() if relevance in {"High", "Medium", "Low"} else None
     with closing(connect_db()) as connection:
+        if relevance in {"High", "Medium", "Low"}:
+            unranked_rows = [dict(row) for row in connection.execute(
+                "SELECT url,title,snippet,story_content FROM news_items WHERE relevance_score IS NULL"
+            )]
+            if unranked_rows:
+                assign_news_relevance(connection, unranked_rows, symbols)
+                connection.execute(
+                    "INSERT OR REPLACE INTO news_meta(key,value) VALUES('relevance_scan_at',?)",
+                    (now_pacific().isoformat(),),
+                )
+                connection.commit()
         rows = [dict(row) for row in connection.execute(query, params)]
         meta = {row["key"]: row["value"] for row in connection.execute("SELECT key,value FROM news_meta")}
         topics = [dict(row) for row in connection.execute(
@@ -947,33 +996,14 @@ async def scan_news_topics() -> dict[str, Any]:
 @router.post("/relevance/scan")
 async def scan_news_relevance() -> dict[str, Any]:
     """Rank all saved stories for direct relevance to RHTC's Three Peaks and watchlist."""
-    from app.options.api import read_watchlist
-
-    symbols = {
-        str(item.get("symbol") or "").strip().upper()
-        for item in read_watchlist()
-        if str(item.get("symbol") or "").strip()
-    }
+    symbols = news_watchlist_symbols()
     with closing(connect_db()) as connection:
-        rows = [dict(row) for row in connection.execute(
-            "SELECT url,title,snippet,story_content FROM news_items ORDER BY last_seen_at DESC"
-        )]
-        if not rows:
-            return {"status": "complete", "ranked": 0, "counts": {"high": 0, "medium": 0, "low": 0}}
-        ranked = []
-        for row in rows:
-            content = str(row.get("story_content") or row.get("snippet") or "")
-            score = rank_news_relevance(str(row.get("title") or ""), content, symbols)
-            ranked.append((score, row["url"]))
-        connection.executemany(
-            "UPDATE news_items SET relevance_score=? WHERE url=?",
-            ranked,
-        )
-        counts = {
-            "high": sum(score >= 4 for score, _ in ranked),
-            "medium": sum(2 <= score <= 3 for score, _ in ranked),
-            "low": sum(score <= 1 for score, _ in ranked),
-        }
+        result = assign_news_relevance(connection, symbols=symbols)
+        unranked = connection.execute(
+            "SELECT COUNT(*) AS n FROM news_items WHERE relevance_score IS NULL"
+        ).fetchone()["n"]
+        if unranked:
+            raise HTTPException(500, f"Relevance ranking left {unranked} stories without a saved score.")
         scanned_at = now_pacific().isoformat()
         connection.execute(
             "INSERT OR REPLACE INTO news_meta(key,value) VALUES('relevance_scan_at',?)",
@@ -982,8 +1012,8 @@ async def scan_news_relevance() -> dict[str, Any]:
         connection.commit()
     return {
         "status": "complete",
-        "ranked": len(ranked),
-        "counts": counts,
+        **result,
+        "unranked": unranked,
         "scanned_at": scanned_at,
     }
 
@@ -1028,6 +1058,7 @@ async def add_news_content(data: NewsContentInput) -> dict[str, Any]:
     """Add a pasted news story to the feed while retaining the complete supplied text."""
     seen_at = now_pacific().isoformat()
     item = pasted_story_record(data, seen_at)
+    symbols = news_watchlist_symbols()
     with closing(connect_db()) as connection:
         existing = connection.execute(
             "SELECT url FROM news_items WHERE url=?",
@@ -1049,6 +1080,10 @@ async def add_news_content(data: NewsContentInput) -> dict[str, Any]:
                  last_seen_at=excluded.last_seen_at""",
             item,
         )
+        stored_item = dict(connection.execute(
+            "SELECT url,title,snippet,story_content FROM news_items WHERE url=?", (item["url"],)
+        ).fetchone())
+        assign_news_relevance(connection, [stored_item], symbols)
         connection.commit()
         total = connection.execute("SELECT COUNT(*) AS n FROM news_items").fetchone()["n"]
     return {
@@ -1074,6 +1109,7 @@ async def add_news_url(data: NewsUrlInput) -> dict[str, Any]:
     metadata = await fetch_news_url_metadata(data.url)
     seen_at = now_pacific().isoformat()
     peak = classify_peak(metadata["title"], metadata["snippet"])
+    symbols = news_watchlist_symbols()
     with closing(connect_db()) as connection:
         existing = connection.execute(
             "SELECT url FROM news_items WHERE url=?",
@@ -1100,6 +1136,10 @@ async def add_news_url(data: NewsUrlInput) -> dict[str, Any]:
                 seen_at,
             ),
         )
+        stored_item = dict(connection.execute(
+            "SELECT url,title,snippet,story_content FROM news_items WHERE url=?", (metadata["url"],)
+        ).fetchone())
+        assign_news_relevance(connection, [stored_item], symbols)
         connection.commit()
         total = connection.execute("SELECT COUNT(*) AS n FROM news_items").fetchone()["n"]
     return {
