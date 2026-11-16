@@ -1631,7 +1631,7 @@ async function addNewsUrl(){
 }
 async function deduplicateNews(){
   const button=$('#dedupe-news');
-  if(!window.confirm('Remove duplicate stories from all saved news? Stories are duplicates only when their normalized headlines and publication dates match. The copy with the most complete excerpt will be kept.'))return;
+  if(!window.confirm('Compare the article text and excerpts across all saved news. Remove stories with strongly overlapping content even when their headlines differ; exact headline and date matches are also removed. The most complete copy is kept, along with its publication records.'))return;
   button.disabled=true;
   const label=button.textContent;
   button.textContent='Removing…';
