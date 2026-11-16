@@ -97,6 +97,25 @@ NEWS_TOPIC_STOP_WORDS = {
 }
 NEWS_TOPIC_ACRONYMS = {"ai": "AI", "doe": "DOE", "fda": "FDA", "haleu": "HALEU", "nasa": "NASA", "nrc": "NRC", "us": "US"}
 MAX_NEWS_TOPICS = 24
+NEWS_RELEVANCE_TERMS = {
+    "AI/I": (
+        "artificial intelligence", "ai", "semiconductor", "chip", "gpu", "accelerator", "data center",
+        "datacenter", "hyperscaler", "compute", "hbm", "inference", "cloud", "server", "networking",
+    ),
+    "EFM/I": (
+        "power", "grid", "nuclear", "uranium", "haleu", "fuel", "energy", "electricity", "natural gas",
+        "lng", "critical mineral", "copper", "rare earth", "mining", "enrichment", "battery",
+        "transmission", "generation", "utility", "oil", "gas pipeline", "lithium",
+    ),
+    "DS/I": (
+        "defense", "military", "pentagon", "missile", "munitions", "drone", "satellite", "space force",
+        "launch vehicle", "shipbuilding", "national security", "electronic warfare", "air force", "navy",
+    ),
+}
+NEWS_RELEVANCE_WEAK_TERMS = (
+    "supply chain", "industrial capacity", "infrastructure", "geopolitics", "export control", "procurement",
+)
+NEWS_TICKER_MENTION_RE = re.compile(r"(?:\$|\bNYSE\s*:\s*)([A-Z][A-Z0-9.-]{0,9})\b", re.IGNORECASE)
 
 
 def _canonical_topic_tokens(value: str) -> list[str]:
@@ -244,6 +263,7 @@ def connect_db() -> sqlite3.Connection:
         ("x_published_at", "TEXT NOT NULL DEFAULT ''"),
         ("story_content", "TEXT NOT NULL DEFAULT ''"),
         ("topic", "TEXT NOT NULL DEFAULT ''"),
+        ("relevance_score", "INTEGER"),
     ):
         if column not in existing_columns:
             connection.execute(f"ALTER TABLE news_items ADD COLUMN {column} {declaration}")
@@ -329,6 +349,51 @@ def _topic_phrases(tokens: list[str]) -> set[str]:
 
 def _topic_label(phrase: str) -> str:
     return _canonical_topic_label(phrase)
+
+
+def _relevance_text(value: str) -> str:
+    return " ".join(_canonical_topic_tokens(value))
+
+
+def _has_relevance_term(text: str, term: str) -> bool:
+    canonical_term = _relevance_text(term)
+    return bool(canonical_term and re.search(rf"(?<!\w){re.escape(canonical_term)}(?!\w)", text))
+
+
+def rank_news_relevance(title: str, content: str, symbols: set[str]) -> int:
+    """Score direct RHTC relevance from headline, article text, and explicit ticker references."""
+    title_text = _relevance_text(title)
+    body_text = _relevance_text(content[:5000])
+    title_peaks = {
+        peak for peak, terms in NEWS_RELEVANCE_TERMS.items()
+        if any(_has_relevance_term(title_text, term) for term in terms)
+    }
+    body_peaks = {
+        peak for peak, terms in NEWS_RELEVANCE_TERMS.items()
+        if any(_has_relevance_term(body_text, term) for term in terms)
+    }
+
+    def ticker_mentioned(text: str) -> bool:
+        mentioned = {match.group(1).upper() for match in NEWS_TICKER_MENTION_RE.finditer(text)}
+        return bool(mentioned & symbols)
+
+    title_ticker = ticker_mentioned(title)
+    body_ticker = ticker_mentioned(content[:5000])
+    weak_match = any(_has_relevance_term(title_text + " " + body_text, term) for term in NEWS_RELEVANCE_WEAK_TERMS)
+
+    if title_ticker:
+        return 5
+    if len(title_peaks) >= 2:
+        return 5
+    if title_peaks:
+        return 4
+    if body_ticker or len(body_peaks) >= 2:
+        return 3
+    if body_peaks:
+        return 2
+    if weak_match:
+        return 1
+    return 0
 
 
 def build_news_topics(rows: list[dict[str, Any]]) -> dict[str, str]:
@@ -680,8 +745,9 @@ async def get_news(
     q: str | None = Query(default=None, max_length=120),
     publication: str | None = None,
     topic: str | None = Query(default=None, max_length=120),
+    relevance: str | None = Query(default=None, max_length=20),
 ):
-    query = """SELECT url,title,source,published_at,snippet,peak,topic,youtube_series,first_seen_at,last_seen_at,youtube_published,youtube_video_id,youtube_url,youtube_published_at,youtube_privacy_status,x_published,x_post_id,x_post_url,x_published_at FROM news_items WHERE 1=1"""
+    query = """SELECT url,title,source,published_at,snippet,peak,topic,relevance_score,youtube_series,first_seen_at,last_seen_at,youtube_published,youtube_video_id,youtube_url,youtube_published_at,youtube_privacy_status,x_published,x_post_id,x_post_url,x_published_at FROM news_items WHERE 1=1"""
     params: list[Any] = []
     if peak and peak not in {"All", "All Peaks"}:
         query += " AND peak = ?"
@@ -695,6 +761,16 @@ async def get_news(
     if topic and topic not in {"All", "All topics"}:
         query += " AND topic = ?"
         params.append(topic)
+    if relevance == "High":
+        query += " AND relevance_score >= 4"
+    elif relevance == "Medium":
+        query += " AND relevance_score BETWEEN 2 AND 3"
+    elif relevance == "Low":
+        query += " AND relevance_score BETWEEN 0 AND 1"
+    elif relevance == "Not ranked":
+        query += " AND relevance_score IS NULL"
+    elif relevance not in {None, "All relevance"}:
+        raise HTTPException(400, "Choose a valid relevance filter.")
     if q and q.strip():
         query += " AND (title LIKE ? OR snippet LIKE ? OR source LIKE ?)"
         term = f"%{q.strip()}%"
@@ -715,6 +791,7 @@ async def get_news(
         "last_scan_count": int(meta.get("last_scan_count", "0")),
         "configured": bool(os.getenv("PERPLEXITY_API_KEY")),
         "topics": topics,
+        "relevance_scan_at": meta.get("relevance_scan_at"),
     }
 
 
@@ -746,6 +823,50 @@ async def scan_news_topics() -> dict[str, Any]:
         "scanned": len(rows),
         "topic_count": len(topics),
         "topics": topics,
+    }
+
+
+@router.post("/relevance/scan")
+async def scan_news_relevance() -> dict[str, Any]:
+    """Rank all saved stories for direct relevance to RHTC's Three Peaks and watchlist."""
+    from app.options.api import read_watchlist
+
+    symbols = {
+        str(item.get("symbol") or "").strip().upper()
+        for item in read_watchlist()
+        if str(item.get("symbol") or "").strip()
+    }
+    with closing(connect_db()) as connection:
+        rows = [dict(row) for row in connection.execute(
+            "SELECT url,title,snippet,story_content FROM news_items ORDER BY last_seen_at DESC"
+        )]
+        if not rows:
+            return {"status": "complete", "ranked": 0, "counts": {"high": 0, "medium": 0, "low": 0}}
+        ranked = []
+        for row in rows:
+            content = str(row.get("story_content") or row.get("snippet") or "")
+            score = rank_news_relevance(str(row.get("title") or ""), content, symbols)
+            ranked.append((score, row["url"]))
+        connection.executemany(
+            "UPDATE news_items SET relevance_score=? WHERE url=?",
+            ranked,
+        )
+        counts = {
+            "high": sum(score >= 4 for score, _ in ranked),
+            "medium": sum(2 <= score <= 3 for score, _ in ranked),
+            "low": sum(score <= 1 for score, _ in ranked),
+        }
+        scanned_at = now_pacific().isoformat()
+        connection.execute(
+            "INSERT OR REPLACE INTO news_meta(key,value) VALUES('relevance_scan_at',?)",
+            (scanned_at,),
+        )
+        connection.commit()
+    return {
+        "status": "complete",
+        "ranked": len(ranked),
+        "counts": counts,
+        "scanned_at": scanned_at,
     }
 
 
