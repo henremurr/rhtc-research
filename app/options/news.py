@@ -196,7 +196,7 @@ CURATED_NEWS_DOMAINS = [
     "reuters.com", "bloomberg.com", "cnbc.com", "ft.com", "wsj.com",
     "semianalysis.com", "datacenterdynamics.com", "utilitydive.com", "ogj.com",
     "spglobal.com", "defenseone.com", "defensenews.com", "breakingdefense.com", "spacenews.com",
-    "energy.gov", "eia.gov", "defense.gov", "federalreserve.gov", "nasa.gov",
+    "energy.gov", "eia.gov", "war.gov", "federalreserve.gov", "nasa.gov",
     "businesswire.com",
 ]
 
@@ -204,7 +204,7 @@ CURATED_NEWS_FEEDS = [
     "https://www.energy.gov/rss/energygov/2193718",
     "https://www.eia.gov/rss/todayinenergy.xml",
     "https://www.federalreserve.gov/feeds/press_all.xml",
-    "https://www.defense.gov/news/rss/",
+    "https://www.war.gov/news/rss_releases2.xml",
     "https://www.defensenews.com/arc/outboundfeeds/rss/?outputType=xml",
     "https://spacenews.com/feed/",
     "https://www.nasa.gov/news-release/feed/",
