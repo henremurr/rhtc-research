@@ -99,6 +99,33 @@ NEWS_TOPIC_STOP_WORDS = {
 }
 NEWS_TOPIC_ACRONYMS = {"ai": "AI", "doe": "DOE", "fda": "FDA", "haleu": "HALEU", "nasa": "NASA", "nrc": "NRC", "us": "US"}
 MAX_NEWS_TOPICS = 24
+NEWS_TOPIC_CATEGORIES = (
+    ("Data Center Power", ("data center power", "data center electricity", "data center grid", "powering data centers")),
+    ("AI Infrastructure", ("AI infrastructure", "AI compute", "AI data center", "GPU", "hyperscaler", "compute capacity")),
+    ("Artificial Intelligence", ("artificial intelligence", "generative AI", "AI model", "AI models", "superintelligence")),
+    ("Data Centers", ("data center", "datacenter", "data centre", "server farm")),
+    ("Semiconductors & Memory", ("semiconductor", "semiconductors", "chipmaker", "chip makers", "HBM", "memory chip", "wafer")),
+    ("Networking & Communications", ("networking", "communications", "fiber optic", "telecom", "wireless network")),
+    ("Autonomous Systems", ("autonomous", "autonomous system", "robotics", "uncrewed", "self driving")),
+    ("Grid & Transmission", ("grid connection", "grid connections", "power grid", "electric grid", "transmission line", "electricity transmission", "substation", "interconnection")),
+    ("Electricity Demand", ("electricity demand", "power demand", "electricity consumption", "load growth", "peak demand")),
+    ("Power Generation", ("power generation", "electricity generation", "coal fired", "coal-fired", "gas fired", "gas-fired", "power plant", "power plants", "generating capacity", "electricity generation")),
+    ("Energy Policy & Utilities", ("energy policy", "energy secretary", "energy department", "energy costs", "electricity", "utility", "utilities", "clean energy")),
+    ("Nuclear Fuel & Uranium", ("nuclear fuel", "uranium", "HALEU", "enrichment", "fuel fabrication", "centrifuge")),
+    ("Fusion Energy", ("fusion", "tokamak", "stellarator", "fusion energy")),
+    ("Nuclear Energy", ("nuclear reactor", "nuclear reactors", "nuclear power", "fission", "reactor developer", "reactor developers")),
+    ("Oil & Gas", ("oil and gas", "natural gas", "gas liquids", "crude oil", "petroleum", "hydrocarbon", "LNG", "oil pipeline", "gas pipeline")),
+    ("Critical Minerals", ("critical mineral", "critical minerals", "rare earth", "lithium", "copper", "graphite", "cobalt", "mining")),
+    ("Chemicals & Plastics", ("chemical", "chemicals", "petrochemical", "plastics", "polymer", "fertilizer")),
+    ("Pentagon & Defense Contracts", ("Pentagon", "defense contract", "military contract", "Department of Defense", "Department of War")),
+    ("Defense & Weapons", ("defense", "defence", "military", "weapon", "weapons", "missile", "munitions", "drone")),
+    ("Cybersecurity", ("cybersecurity", "cyber attack", "cyberattack", "ransomware", "data breach")),
+    ("Space", ("space force", "spacecraft", "satellite", "launch vehicle", "orbital", "space launch")),
+    ("Manufacturing & 3D Printing", ("3D printing", "additive manufacturing", "manufacturing", "factory", "industrial production")),
+    ("Economics & Markets", ("stock market", "financial markets", "interest rates", "inflation", "Federal Reserve", "economic growth", "earnings")),
+    ("Geopolitics & Trade", ("geopolitical", "geopolitics", "trade war", "trade policy", "tariff", "sanctions", "export controls", "Middle East")),
+    ("Business & Finance", ("financial results", "quarterly results", "stock market", "share price", "business update", "investment", "financing", "acquisition", "merger")),
+)
 NEWS_RELEVANCE_TERMS = {
     "AI/I": (
         "artificial intelligence", "superintelligence", "artificial superintelligence", "agi", "ai",
@@ -363,7 +390,7 @@ def _topic_tokens(value: str) -> list[str]:
     normalized = _canonical_topic_tokens(value)
     return [
         token for token in normalized
-        if (len(token) > 2 or token == "ai") and token not in NEWS_TOPIC_STOP_WORDS and not token.isdigit()
+        if (len(token) > 2 or token in {"ai", "3d"}) and token not in NEWS_TOPIC_STOP_WORDS and not token.isdigit()
     ]
 
 
@@ -460,8 +487,8 @@ def assign_news_relevance(
 
 
 def build_news_topics(rows: list[dict[str, Any]]) -> dict[str, str]:
-    """Find recurring key phrases across headlines and excerpts and assign one topic per story."""
-    prepared: list[tuple[str, list[str], set[str]]] = []
+    """Assign a useful subject topic, then use recurring phrases as a fallback."""
+    prepared: list[tuple[str, list[str], list[str], set[str]]] = []
     document_frequency: dict[str, int] = {}
     for row in rows:
         title_tokens = _topic_tokens(str(row.get("title") or ""))
@@ -471,7 +498,7 @@ def build_news_topics(rows: list[dict[str, Any]]) -> dict[str, str]:
         phrases = title_phrases | _topic_phrases(body_tokens)
         for phrase in phrases:
             document_frequency[phrase] = document_frequency.get(phrase, 0) + 1
-        prepared.append((str(row["url"]), title_tokens, phrases))
+        prepared.append((str(row["url"]), title_tokens, body_tokens, phrases))
 
     count = len(rows)
     candidates = [
@@ -496,7 +523,24 @@ def build_news_topics(rows: list[dict[str, Any]]) -> dict[str, str]:
     }
 
     assignments: dict[str, str] = {}
-    for url, title_tokens, phrases in prepared:
+    category_patterns = [
+        (label, tuple(" ".join(_topic_tokens(pattern)) for pattern in patterns if _topic_tokens(pattern)))
+        for label, patterns in NEWS_TOPIC_CATEGORIES
+    ]
+    for url, title_tokens, body_tokens, phrases in prepared:
+        title_text = " " + " ".join(title_tokens) + " "
+        body_text = " " + " ".join(body_tokens) + " "
+        category_matches: list[tuple[int, int, int, str]] = []
+        for category_index, (label, patterns) in enumerate(category_patterns):
+            for pattern in patterns:
+                padded = " " + pattern + " "
+                if padded in title_text:
+                    category_matches.append((2, len(pattern.split()), -category_index, label))
+                elif padded in body_text:
+                    category_matches.append((1, len(pattern.split()), -category_index, label))
+        if category_matches:
+            assignments[url] = max(category_matches)[3]
+            continue
         title_phrase_set = _topic_phrases(title_tokens)
         matches = [phrase for phrase in selected if phrase in phrases]
         if not matches:
