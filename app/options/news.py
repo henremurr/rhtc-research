@@ -1258,17 +1258,20 @@ async def mark_news_x_published(data: NewsXPublishedInput) -> dict[str, Any]:
 
 @router.post("/deduplicate")
 async def deduplicate_news() -> dict[str, Any]:
-    """Remove duplicate reports by comparing their article text, not just their headlines."""
+    """Remove reports about the same event using weighted article-content similarity."""
     stop_words = {
         "about", "after", "also", "amid", "and", "are", "been", "before", "being", "between",
         "but", "by", "can", "could", "during", "for", "from", "has", "have", "into", "its",
         "more", "most", "not", "onto", "our", "said", "says", "than", "that", "the", "their",
         "them", "there", "these", "they", "this", "through", "under", "was", "were", "what",
         "when", "where", "which", "while", "will", "with", "would", "you", "your",
+        # Common news language and broad sector words do not identify one event.
+        "according", "announced", "company", "energy", "industry", "million", "news", "nuclear",
+        "report", "reported", "reports", "story", "today", "update", "world",
     }
 
     def content_words(row: dict[str, Any]) -> list[str]:
-        content = str(row.get("story_content") or row.get("snippet") or "")
+        content = " ".join((str(row.get("title") or ""), str(row.get("story_content") or row.get("snippet") or "")))
         normalized = unicodedata.normalize("NFKC", html.unescape(content)).casefold()
         return [word for word in re.findall(r"[\w]+", normalized) if len(word) > 1 and word not in stop_words]
 
@@ -1286,25 +1289,26 @@ async def deduplicate_news() -> dict[str, Any]:
         return None
 
     def same_story(left: dict[str, Any], right: dict[str, Any]) -> bool:
-        a, b = content_words(left), content_words(right)
+        a, b = set(words_by_url.get(left["url"], ())), set(words_by_url.get(right["url"], ()))
         if min(len(a), len(b)) < 6:
             return False
         day_a, day_b = story_day(left), story_day(right)
-        if day_a and day_b and abs((day_a - day_b).days) > 3:
+        # Syndicated and rewritten coverage often appears several days after the
+        # original. Keep a finite window so recurring coverage is not collapsed.
+        if day_a and day_b and abs((day_a - day_b).days) > 14:
             return False
-        set_a, set_b = set(a), set(b)
-        common = len(set_a & set_b)
-        # Compare the body or excerpt. Overlap must be high in the shorter text,
-        # which catches a concise summary repeated inside a longer report.
-        overlap = common / min(len(set_a), len(set_b))
-        if common >= 5 and overlap >= 0.70:
-            return True
-        grams_a = set(zip(a, a[1:], a[2:]))
-        grams_b = set(zip(b, b[1:], b[2:]))
-        if not grams_a or not grams_b:
+        common = a & b
+        if len(common) < 5:
             return False
-        trigram_overlap = len(grams_a & grams_b) / min(len(grams_a), len(grams_b))
-        return common >= 7 and trigram_overlap >= 0.55
+        # Rare names and event details carry more weight than generic words like
+        # "uranium" or "reactor". This recognizes paraphrases without merging
+        # every story that happens to cover the same company or sector.
+        weights_a = sum(token_weights.get(word, 1.0) for word in a)
+        weights_b = sum(token_weights.get(word, 1.0) for word in b)
+        shared_weight = sum(token_weights.get(word, 1.0) for word in common)
+        weighted_overlap = shared_weight / min(weights_a, weights_b)
+        distinctive = sum(token_weights.get(word, 1.0) >= 1.5 for word in common)
+        return distinctive >= 2 and weighted_overlap >= 0.50
 
     def same_headline(left: dict[str, Any], right: dict[str, Any]) -> bool:
         title_a = " ".join(re.findall(r"[\w]+", unicodedata.normalize("NFKC", html.unescape(left.get("title") or "")).casefold()))
@@ -1316,6 +1320,16 @@ async def deduplicate_news() -> dict[str, Any]:
         rows = [dict(row) for row in connection.execute(
             "SELECT url,title,published_at,snippet,story_content,first_seen_at,last_seen_at,youtube_published,youtube_video_id,youtube_url,youtube_published_at,youtube_privacy_status,x_published,x_post_id,x_post_url,x_published_at FROM news_items ORDER BY first_seen_at,url"
         )]
+        words_by_url = {row["url"]: set(content_words(row)) for row in rows}
+        document_frequency: dict[str, int] = {}
+        for words in words_by_url.values():
+            for word in words:
+                document_frequency[word] = document_frequency.get(word, 0) + 1
+        document_count = max(len(rows), 1)
+        token_weights = {
+            word: 1.0 + math.log((document_count + 1) / (frequency + 1))
+            for word, frequency in document_frequency.items()
+        }
         groups: list[list[dict[str, Any]]] = []
         for row in rows:
             for group in groups:
@@ -1379,7 +1393,7 @@ async def deduplicate_news() -> dict[str, Any]:
         "removed": removed,
         "duplicate_groups": duplicate_groups,
         "remaining": remaining,
-        "matching": "high article-text similarity within three days, or matching headline and date",
+        "matching": "weighted article-content similarity within 14 days, with rare shared event details; matching headline and date",
     }
 
 
