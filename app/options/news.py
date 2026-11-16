@@ -9,8 +9,10 @@ import logging
 import math
 import os
 import sqlite3
+import xml.etree.ElementTree as ET
 from contextlib import closing
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
@@ -99,21 +101,27 @@ NEWS_TOPIC_ACRONYMS = {"ai": "AI", "doe": "DOE", "fda": "FDA", "haleu": "HALEU",
 MAX_NEWS_TOPICS = 24
 NEWS_RELEVANCE_TERMS = {
     "AI/I": (
-        "artificial intelligence", "ai", "semiconductor", "chip", "gpu", "accelerator", "data center",
-        "datacenter", "hyperscaler", "compute", "hbm", "inference", "cloud", "server", "networking",
+        "artificial intelligence", "superintelligence", "artificial superintelligence", "agi", "ai",
+        "semiconductor", "chip", "gpu", "accelerator", "data center", "datacenter", "hyperscaler",
+        "compute", "hbm", "memory", "inference", "cloud", "server", "networking", "communications",
+        "autonomous", "3d printing", "additive manufacturing",
     ),
     "EFM/I": (
-        "power", "grid", "nuclear", "uranium", "haleu", "fuel", "energy", "electricity", "natural gas",
-        "lng", "critical mineral", "copper", "rare earth", "mining", "enrichment", "battery",
-        "transmission", "generation", "utility", "oil", "gas pipeline", "lithium",
+        "power", "power generation", "transmission", "grid", "nuclear", "fission", "fusion", "uranium",
+        "haleu", "fuel", "energy", "electricity", "natural gas", "natural gas liquids", "gas liquids",
+        "hydrocarbon", "lng", "critical mineral", "copper", "rare earth", "mining", "enrichment",
+        "battery", "generation", "utility", "oil", "gas pipeline", "lithium", "chemical", "petrochemical", "plastics",
     ),
     "DS/I": (
-        "defense", "military", "pentagon", "missile", "munitions", "drone", "satellite", "space force",
-        "launch vehicle", "shipbuilding", "national security", "electronic warfare", "air force", "navy",
+        "defense", "military", "weapon", "pentagon", "missile", "munitions", "drone", "autonomous",
+        "satellite", "space force", "launch vehicle", "shipbuilding", "national security", "cybersecurity",
+        "cyber", "communications", "electronic warfare", "air force", "navy",
     ),
 }
 NEWS_RELEVANCE_WEAK_TERMS = (
     "supply chain", "industrial capacity", "infrastructure", "geopolitics", "export control", "procurement",
+    "business", "financial market", "stock market", "economics", "economic outlook", "trade", "earnings",
+    "manufacturing", "technology",
 )
 NEWS_TICKER_MENTION_RE = re.compile(r"(?:\$|\bNYSE\s*:\s*)([A-Z][A-Z0-9.-]{0,9})\b", re.IGNORECASE)
 
@@ -172,22 +180,42 @@ class NewsAnalysisInput(BaseModel):
     published_at: str = Field(default="", max_length=40)
 
 SEARCH_QUERIES = [
-    "RHTC AI/I chain: semiconductor inputs and manufacturing, GPUs and accelerators, HBM and memory, networking, servers, hyperscalers, AI compute, and data-center construction",
-    "RHTC AI-to-power chain: data-center and AI electricity demand, generation capacity, grid interconnection, transmission, substations, transformers, storage, power contracts, and shortages",
-    "RHTC energy and fuel chain: electricity generation, nuclear fission and fusion, tritium and fusion fuel supply, advanced reactors, uranium, HALEU, enrichment, natural gas, LNG, oil, and other fuels",
-    "RHTC minerals-to-infrastructure chain: critical minerals, copper, rare earths, mining, refining, processing, batteries, grid equipment, pipelines, and energy infrastructure supply chains",
-    "RHTC infrastructure-to-defense chain: power-grid and data-center resilience, cyber and physical threats, military energy needs, defense industrial base, shipbuilding, aircraft, missiles, munitions, drones, and military technology",
-    "RHTC space chain: semiconductors and AI for satellites, launch vehicles, satellite constellations, space communications, positioning and navigation, sensing and intelligence, Space Force procurement, and launch infrastructure",
-    "Three Peaks cross-chain developments linking AI compute, electricity, fuels and minerals, critical infrastructure, defense and security, and space; include upstream causes and downstream effects",
-    "Recent US policy, legislation, regulation, and public investment affecting AI infrastructure, electricity and grids, nuclear and fusion, critical minerals, defense procurement, cybersecurity, and space",
-    "Recent geopolitical and economic developments affecting Three Peaks supply chains: export controls, sanctions, conflict, shipping chokepoints, trade, industrial capacity, commodities, and strategic competition",
-    "Recent CSIS, Hudson, FDD, Heritage, and other think-tank analysis connecting AI infrastructure, energy security, fuels and minerals, defense, geopolitics, and space",
+    "Business, financial, stock-market, and technology news affecting the Three Peaks: public companies, earnings, capital spending, financing, mergers, supply chains, valuations, AI, artificial intelligence and superintelligence, semiconductors, GPUs, memory, HBM, networking, communications, cloud, and autonomous systems",
+    "Electricity and AI infrastructure: power generation, transmission, distribution, grid connections, utilities, data centers, AI compute, electricity demand, substations, transformers, storage, power contracts, and capacity shortages",
+    "Energy, oil, and gas markets: nuclear and other power generation, oil and gas, natural gas, natural gas liquids, LNG, hydrocarbons, pipelines, refining, chemicals, petrochemicals, plastics, and industrial energy demand",
+    "Nuclear fission and fusion developments: reactors, advanced and small modular reactors, fuel cycles, uranium, HALEU, enrichment, tritium, fusion materials, construction, licensing, financing, and power purchase agreements",
+    "Critical minerals and advanced manufacturing: copper, rare earths, lithium, graphite, mining, refining, processing, trade restrictions, chemicals, batteries, 3D printing, additive manufacturing, and industrial capacity",
+    "Military, weapons, and Pentagon developments: defense contracts, missiles, munitions, drones, autonomous systems, military communications, cybersecurity, electronic warfare, shipbuilding, aircraft, and defense industrial production",
+    "Space and communications: satellites, launch vehicles, constellations, satellite communications, navigation, intelligence, Space Force procurement, commercial space, ground systems, and resilient networks",
+    "Business and economic reporting on strategic industries: stock markets, company earnings, investment, financing, manufacturing, trade, inflation, interest rates, commodities, supply chains, and economic effects across AI, energy, materials, defense, and space",
+    "Geopolitical, trade, and government developments affecting technology and industrial supply chains: export controls, tariffs, sanctions, conflict, energy security, minerals, semiconductors, communications, cybersecurity, and strategic competition",
+    "Recent reporting and analysis from curated news outlets, government and company newsrooms, and research organizations on AI, power, energy, oil and gas, nuclear fission and fusion, chemicals, critical minerals, manufacturing, defense, cyber, and space",
+]
+
+CURATED_NEWS_DOMAINS = [
+    "reuters.com", "bloomberg.com", "cnbc.com", "ft.com", "wsj.com",
+    "semianalysis.com", "datacenterdynamics.com", "utilitydive.com", "ogj.com",
+    "spglobal.com", "defenseone.com", "defensenews.com", "breakingdefense.com", "spacenews.com",
+    "energy.gov", "eia.gov", "defense.gov", "federalreserve.gov", "nasa.gov",
+    "businesswire.com",
+]
+
+CURATED_NEWS_FEEDS = [
+    "https://www.energy.gov/rss/energygov/2193718",
+    "https://www.eia.gov/rss/todayinenergy.xml",
+    "https://www.federalreserve.gov/feeds/press_all.xml",
+    "https://www.defense.gov/news/rss/",
+    "https://www.defensenews.com/arc/outboundfeeds/rss/?outputType=xml",
+    "https://spacenews.com/feed/",
+    "https://www.nasa.gov/news-release/feed/",
+    "https://www.cnbc.com/id/19854910/device/rss/rss.html",
+    "https://www.utilitydive.com/feeds/news/",
 ]
 
 PEAK_TERMS = {
-    "AI/I": ("artificial intelligence", " ai ", "semiconductor", "chip", "gpu", "compute", "hyperscaler", "data center", "datacenter", "memory", "cloud", "networking"),
-    "EFM/I": ("electricity", "power", "grid", "nuclear", "uranium", "natural gas", "lng", "fuel", "critical mineral", "mining", "pipeline", "energy", "oil", "electric utility"),
-    "DS/I": ("defense", "military", "pentagon", "missile", "munitions", "drone", "electronic warfare", "air force", "navy", "army", "satellite", "space force", "spacecraft", "launch", "orbital", "national security", "rocket"),
+    "AI/I": ("artificial intelligence", "superintelligence", "artificial superintelligence", " ai ", "semiconductor", "chip", "gpu", "compute", "hyperscaler", "data center", "datacenter", "memory", "cloud", "networking", "communications", "autonomous", "3d printing", "additive manufacturing"),
+    "EFM/I": ("electricity", "power", "generation", "transmission", "grid", "nuclear", "fission", "fusion", "uranium", "natural gas", "gas liquids", "hydrocarbon", "lng", "fuel", "critical mineral", "mining", "pipeline", "energy", "oil", "chemical", "plastic", "electric utility"),
+    "DS/I": ("defense", "military", "weapon", "pentagon", "missile", "munitions", "drone", "autonomous", "cybersecurity", "cyber", "electronic warfare", "air force", "navy", "army", "satellite", "space force", "spacecraft", "launch", "orbital", "national security", "rocket", "communications"),
 }
 
 
@@ -474,6 +502,86 @@ def clean_result(item: dict[str, Any], seen_at: str) -> dict[str, str] | None:
     }
 
 
+def _feed_child_text(element: ET.Element, *names: str) -> str:
+    wanted = set(names)
+    for child in element.iter():
+        if child is element:
+            continue
+        if child.tag.rsplit("}", 1)[-1].lower() in wanted:
+            text = " ".join(part.strip() for part in child.itertext() if part.strip())
+            if text:
+                return html.unescape(text)
+    return ""
+
+
+def _feed_item_date(value: str) -> str:
+    if not value:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            parsed = parsedate_to_datetime(value)
+        except (TypeError, ValueError, OverflowError):
+            return ""
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat(timespec="seconds")
+
+
+def parse_curated_feed(content: bytes, feed_url: str, seen_at: str) -> list[dict[str, str]]:
+    """Convert RSS or Atom items into the same records used by web search."""
+    try:
+        root = ET.fromstring(content)
+    except ET.ParseError:
+        logger.warning("RHTC curated feed returned invalid XML: %s", urlparse(feed_url).hostname)
+        return []
+    entries = [element for element in root.iter() if element.tag.rsplit("}", 1)[-1].lower() in {"item", "entry"}]
+    results: list[dict[str, str]] = []
+    cutoff = datetime.now(timezone.utc) - timedelta(days=3)
+    for entry in entries[:30]:
+        title = _feed_child_text(entry, "title")
+        link = ""
+        for child in entry.iter():
+            if child is entry or child.tag.rsplit("}", 1)[-1].lower() != "link":
+                continue
+            link = child.attrib.get("href", "").strip() or (child.text or "").strip()
+            if link:
+                break
+        date = _feed_child_text(entry, "pubdate", "published", "updated", "date")
+        normalized_date = _feed_item_date(date)
+        if normalized_date:
+            try:
+                if datetime.fromisoformat(normalized_date) < cutoff:
+                    continue
+            except ValueError:
+                pass
+        snippet = _feed_child_text(entry, "description", "summary", "encoded", "content")
+        snippet = re.sub(r"<[^>]+>", " ", snippet)
+        snippet = " ".join(html.unescape(snippet).split())[:3000]
+        searchable = _relevance_text(f"{title} {snippet}")
+        relevant_terms = (*NEWS_RELEVANCE_WEAK_TERMS, *(term for terms in NEWS_RELEVANCE_TERMS.values() for term in terms))
+        if not any(_has_relevance_term(searchable, term) for term in relevant_terms):
+            continue
+        result = clean_result({"title": title, "url": urljoin(feed_url, link), "date": normalized_date, "snippet": snippet}, seen_at)
+        if result:
+            results.append(result)
+    return results
+
+
+async def fetch_curated_feed(client: httpx.AsyncClient, feed_url: str, seen_at: str) -> list[dict[str, str]]:
+    try:
+        response = await client.get(feed_url, headers={"User-Agent": "RHTC-News-Scanner/1.0"})
+        response.raise_for_status()
+        if len(response.content) > 2_000_000:
+            logger.warning("RHTC curated feed exceeded size limit: %s", urlparse(feed_url).hostname)
+            return []
+        return parse_curated_feed(response.content, feed_url, seen_at)
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.info("RHTC curated feed unavailable (%s): %s", urlparse(feed_url).hostname, exc)
+        return []
+
+
 
 def _page_meta_content(page: str, keys: tuple[str, ...]) -> str:
     for key in keys:
@@ -664,7 +772,8 @@ async def scan_news(*, scheduled: bool = False, query: str | None = None) -> dic
             topic = " ".join(query.split())[:200]
             queries_to_run.append(
                 f"Current news about {topic}; prioritize credible reporting "
-                "and include direct relevance to AI, energy, defense, security, space, or the economy where applicable"
+                "and include direct relevance to business, financial markets, technology, AI, power, energy, "
+                "oil and gas, nuclear, chemicals, minerals, trade, manufacturing, defense, cyber, communications, or space where applicable"
             )
         per_query_limit = MAX_RESULTS_PER_QUERY
         query_batches = [
@@ -674,17 +783,22 @@ async def scan_news(*, scheduled: bool = False, query: str | None = None) -> dic
         raw_results: list[Any] = []
         try:
             async with httpx.AsyncClient(timeout=45.0) as client:
-                for queries in query_batches:
+                for batch_index, queries in enumerate(query_batches):
+                    payload = {
+                        "query": queries,
+                        "max_results": per_query_limit,
+                        "search_type": "fast",
+                        "search_recency_filter": "day",
+                        "search_context_size": "low",
+                    }
+                    # Keep one batch open to broad discovery and one constrained
+                    # to curated publications, public agencies, and research sites.
+                    if batch_index == 1:
+                        payload["search_domain_filter"] = CURATED_NEWS_DOMAINS
                     response = await client.post(
                         SEARCH_URL,
                         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                        json={
-                            "query": queries,
-                            "max_results": per_query_limit,
-                            "search_type": "fast",
-                            "search_recency_filter": "day",
-                            "search_context_size": "low",
-                        },
+                        json=payload,
                     )
                     response.raise_for_status()
                     data = response.json()
@@ -692,6 +806,10 @@ async def scan_news(*, scheduled: bool = False, query: str | None = None) -> dic
                         logger.warning("RHTC news provider returned an unexpected response shape")
                         raise HTTPException(502, "The news provider returned an unexpected response. Try again later.")
                     raw_results.extend(data.get("results") or [])
+                feed_batches = await asyncio.gather(
+                    *(fetch_curated_feed(client, feed_url, now_pacific().isoformat()) for feed_url in CURATED_NEWS_FEEDS)
+                )
+                raw_results.extend(item for feed_items in feed_batches for item in feed_items)
         except httpx.TimeoutException as exc:
             logger.warning("RHTC news search timed out: %s", exc)
             raise HTTPException(502, "News search timed out. Try again later.") from exc
