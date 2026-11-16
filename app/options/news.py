@@ -6,6 +6,7 @@ import hashlib
 import re
 import unicodedata
 import logging
+import math
 import os
 import sqlite3
 from contextlib import closing
@@ -83,6 +84,19 @@ NEWS_ARTWORK_THEMES = {
     "ai_infrastructure", "energy_fuels_infrastructure", "defense_space_infrastructure",
     "policy_power_news", "think_tank_watch", "three_peaks_audio_brief", "pentagon_contract_watch",
 }
+NEWS_TOPIC_STOP_WORDS = {
+    "about", "above", "after", "against", "also", "among", "and", "announced", "announces", "are",
+    "been", "before", "being", "below", "between", "billion", "but", "business", "company", "corp",
+    "corporation", "could", "during", "each", "first", "for", "from", "has", "have", "into", "is", "it", "its",
+    "million", "more", "most", "new", "news", "next", "not", "our", "over", "quarter", "report",
+    "reports", "result", "results", "said", "same", "says", "second", "shares", "sign", "signed",
+    "signs", "since", "stock", "such", "than", "that", "the", "their", "them", "then", "there",
+    "these", "they", "third", "this", "those", "through", "today", "under", "update", "upon", "was",
+    "were", "what", "when", "where", "which", "while", "who", "will", "with", "would", "year", "years",
+    "2024", "2025", "2026", "2027", "2028", "2029", "2030", "be", "in", "on", "to", "of", "at", "as",
+}
+NEWS_TOPIC_ACRONYMS = {"ai": "AI", "doe": "DOE", "fda": "FDA", "haleu": "HALEU", "nasa": "NASA", "nrc": "NRC", "us": "US"}
+MAX_NEWS_TOPICS = 24
 
 
 def detect_news_language(title: str, snippet: str) -> str:
@@ -193,6 +207,7 @@ def connect_db() -> sqlite3.Connection:
         ("x_post_url", "TEXT NOT NULL DEFAULT ''"),
         ("x_published_at", "TEXT NOT NULL DEFAULT ''"),
         ("story_content", "TEXT NOT NULL DEFAULT ''"),
+        ("topic", "TEXT NOT NULL DEFAULT ''"),
     ):
         if column not in existing_columns:
             connection.execute(f"ALTER TABLE news_items ADD COLUMN {column} {declaration}")
@@ -248,6 +263,74 @@ def classify_peak(title: str, snippet: str) -> str:
     if len(matches) > 1:
         return "Cross-Peak"
     return matches[0] if matches else "Other"
+
+
+def _topic_tokens(value: str) -> list[str]:
+    normalized = unicodedata.normalize("NFKC", html.unescape(value)).casefold()
+    return [
+        token for token in re.findall(r"[\w]+", normalized)
+        if len(token) > 2 and token not in NEWS_TOPIC_STOP_WORDS and not token.isdigit()
+    ]
+
+
+def _topic_phrases(tokens: list[str]) -> set[str]:
+    return {
+        " ".join(tokens[index:index + size])
+        for size in (2, 3)
+        for index in range(max(0, len(tokens) - size + 1))
+    }
+
+
+def _topic_label(phrase: str) -> str:
+    return " ".join(NEWS_TOPIC_ACRONYMS.get(word, word.capitalize()) for word in phrase.split())
+
+
+def build_news_topics(rows: list[dict[str, Any]]) -> dict[str, str]:
+    """Find recurring key phrases across headlines and excerpts and assign one topic per story."""
+    prepared: list[tuple[str, list[str], set[str]]] = []
+    document_frequency: dict[str, int] = {}
+    for row in rows:
+        title_tokens = _topic_tokens(str(row.get("title") or ""))
+        body = str(row.get("story_content") or row.get("snippet") or "")[:2500]
+        body_tokens = _topic_tokens(body)[:260]
+        title_phrases = _topic_phrases(title_tokens)
+        phrases = title_phrases | _topic_phrases(body_tokens)
+        for phrase in phrases:
+            document_frequency[phrase] = document_frequency.get(phrase, 0) + 1
+        prepared.append((str(row["url"]), title_tokens, phrases))
+
+    count = len(rows)
+    candidates = [
+        phrase for phrase, frequency in document_frequency.items()
+        if frequency >= 2 and len(phrase) >= 7
+    ]
+    candidates.sort(
+        key=lambda phrase: (
+            math.sqrt(document_frequency[phrase])
+            * (1 + 0.2 * (len(phrase.split()) - 2))
+            * math.log1p(count / document_frequency[phrase]),
+            phrase,
+        ),
+        reverse=True,
+    )
+    selected = candidates[:MAX_NEWS_TOPICS]
+    scores = {
+        phrase: math.sqrt(document_frequency[phrase])
+        * (1 + 0.2 * (len(phrase.split()) - 2))
+        * math.log1p(count / document_frequency[phrase])
+        for phrase in selected
+    }
+
+    assignments: dict[str, str] = {}
+    for url, title_tokens, phrases in prepared:
+        title_phrase_set = _topic_phrases(title_tokens)
+        matches = [phrase for phrase in selected if phrase in phrases]
+        if not matches:
+            assignments[url] = "Other topics"
+            continue
+        best = max(matches, key=lambda phrase: scores[phrase] * (1.5 if phrase in title_phrase_set else 1.0))
+        assignments[url] = _topic_label(best)
+    return assignments
 
 
 def clean_result(item: dict[str, Any], seen_at: str) -> dict[str, str] | None:
@@ -550,8 +633,9 @@ async def get_news(
     peak: str | None = Query(default=None, max_length=20),
     q: str | None = Query(default=None, max_length=120),
     publication: str | None = None,
+    topic: str | None = Query(default=None, max_length=120),
 ):
-    query = """SELECT url,title,source,published_at,snippet,peak,youtube_series,first_seen_at,last_seen_at,youtube_published,youtube_video_id,youtube_url,youtube_published_at,youtube_privacy_status,x_published,x_post_id,x_post_url,x_published_at FROM news_items WHERE 1=1"""
+    query = """SELECT url,title,source,published_at,snippet,peak,topic,youtube_series,first_seen_at,last_seen_at,youtube_published,youtube_video_id,youtube_url,youtube_published_at,youtube_privacy_status,x_published,x_post_id,x_post_url,x_published_at FROM news_items WHERE 1=1"""
     params: list[Any] = []
     if peak and peak not in {"All", "All Peaks"}:
         query += " AND peak = ?"
@@ -562,6 +646,9 @@ async def get_news(
         query += " AND NOT (youtube_published = 1 AND x_published = 1)"
     elif publication not in {None, "All"}:
         raise HTTPException(400, "Choose a valid publication filter.")
+    if topic and topic not in {"All", "All topics"}:
+        query += " AND topic = ?"
+        params.append(topic)
     if q and q.strip():
         query += " AND (title LIKE ? OR snippet LIKE ? OR source LIKE ?)"
         term = f"%{q.strip()}%"
@@ -570,6 +657,9 @@ async def get_news(
     with closing(connect_db()) as connection:
         rows = [dict(row) for row in connection.execute(query, params)]
         meta = {row["key"]: row["value"] for row in connection.execute("SELECT key,value FROM news_meta")}
+        topics = [dict(row) for row in connection.execute(
+            "SELECT topic,COUNT(*) AS count FROM news_items WHERE topic!='' GROUP BY topic ORDER BY topic COLLATE NOCASE"
+        )]
     for row in rows:
         row["language"] = detect_news_language(row.get("title", ""), row.get("snippet", ""))
     return {
@@ -578,6 +668,38 @@ async def get_news(
         "last_scan_at": meta.get("last_scan_at"),
         "last_scan_count": int(meta.get("last_scan_count", "0")),
         "configured": bool(os.getenv("PERPLEXITY_API_KEY")),
+        "topics": topics,
+    }
+
+
+@router.post("/topics/scan")
+async def scan_news_topics() -> dict[str, Any]:
+    """Scan stored headlines and excerpts, assign recurring topics, and save them for filtering."""
+    with closing(connect_db()) as connection:
+        rows = [dict(row) for row in connection.execute(
+            "SELECT url,title,snippet,story_content FROM news_items ORDER BY last_seen_at DESC"
+        )]
+        if not rows:
+            return {"status": "complete", "scanned": 0, "topic_count": 0, "topics": []}
+        assignments = build_news_topics(rows)
+        connection.executemany(
+            "UPDATE news_items SET topic=? WHERE url=?",
+            [(topic, url) for url, topic in assignments.items()],
+        )
+        counts: dict[str, int] = {}
+        for topic in assignments.values():
+            counts[topic] = counts.get(topic, 0) + 1
+        connection.execute(
+            "INSERT OR REPLACE INTO news_meta(key,value) VALUES('topic_scan_at',?)",
+            (now_pacific().isoformat(),),
+        )
+        connection.commit()
+    topics = [{"topic": topic, "count": count} for topic, count in sorted(counts.items(), key=lambda item: item[0].casefold())]
+    return {
+        "status": "complete",
+        "scanned": len(rows),
+        "topic_count": len(topics),
+        "topics": topics,
     }
 
 
