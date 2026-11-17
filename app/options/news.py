@@ -56,6 +56,11 @@ class NewsPeakInput(BaseModel):
     peak: str = Field(min_length=1, max_length=20)
 
 
+class NewsTopicInput(BaseModel):
+    url: str = Field(min_length=8, max_length=2000)
+    topic: str = Field(min_length=1, max_length=120)
+
+
 class NewsArtworkInput(BaseModel):
     url: str = Field(min_length=8, max_length=2000)
     artwork_theme: str = Field(min_length=1, max_length=50)
@@ -1096,6 +1101,23 @@ async def update_news_peak(data: NewsPeakInput) -> dict[str, Any]:
             raise HTTPException(404, "The story is no longer in the stored news feed.")
         connection.commit()
     return {"status": "updated", "url": url, "peak": data.peak}
+
+
+@router.patch("/topic")
+async def update_news_topic(data: NewsTopicInput) -> dict[str, Any]:
+    """Change the assigned topic for one stored story."""
+    topic = _canonical_topic_label(data.topic.strip())
+    if not topic or len(topic) > 120:
+        raise HTTPException(400, "Choose a valid news topic.")
+    url = canonical_news_url(data.url)
+    if not url:
+        raise HTTPException(400, "A valid story URL is required.")
+    with closing(connect_db()) as connection:
+        result = connection.execute("UPDATE news_items SET topic=? WHERE url=?", (topic, url))
+        if result.rowcount == 0:
+            raise HTTPException(404, "The story is no longer in the stored news feed.")
+        connection.commit()
+    return {"status": "updated", "url": url, "topic": topic}
 
 
 @router.patch("/artwork")
