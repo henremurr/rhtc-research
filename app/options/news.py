@@ -1891,7 +1891,7 @@ async def _build_news_summary(data: NewsSummaryInput, job_id: str | None = None)
     in_ticker_impact_section = False
     for line_number, line in enumerate(analysis.splitlines()):
         if line_number == 0:
-            read_heading = re.match(r"^\s*60[- ]second read\s*[:—–-]?\s*(.*)$", line, re.IGNORECASE)
+            read_heading = re.match(r"^\s*(?:#{1,2}\s*)?60[- ]second read\b\s*(?:[:—–-]\s*)?(.*)$", line, re.IGNORECASE)
             if read_heading:
                 normalized_lines.append("## 60-second read")
                 if read_heading.group(1).strip():
