@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from langdetect import DetectorFactory, LangDetectException, detect_langs
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,22 @@ class NewsDeleteInput(BaseModel):
 
 class NewsSummaryInput(BaseModel):
     urls: list[str] = Field(min_length=1, max_length=2500)
+
+
+class NewsSummaryPdfReference(BaseModel):
+    ref: str = Field(min_length=1, max_length=10)
+    title: str = Field(default="", max_length=500)
+    source: str = Field(default="", max_length=200)
+    published_at: str = Field(default="", max_length=80)
+    url: str = Field(default="", max_length=2000)
+
+
+class NewsSummaryPdfInput(BaseModel):
+    analysis: str = Field(min_length=1, max_length=30000)
+    story_count: int = Field(ge=1, le=2500)
+    generated_at: str = Field(default="", max_length=80)
+    scope: str = Field(default="", max_length=1200)
+    references: list[NewsSummaryPdfReference] = Field(default_factory=list, max_length=2500)
 
 
 class NewsUrlInput(BaseModel):
@@ -1707,6 +1724,7 @@ async def summarize_filtered_news(data: NewsSummaryInput) -> dict[str, Any]:
     )
     analysis_instructions = common_instructions + (
         "\nWrite an analytical synthesis, not a collection of article recaps. Do not make one bullet per story or paraphrase headlines and snippets. First cluster coverage about the same event, company, policy, or causal chain; distinguish separate developments that only share a broad topic. Compare what the sources collectively establish, identify corroboration, meaningful differences, gaps, and uncertainty, and explain why those patterns matter. Do not claim a development is new versus prior history unless the supplied stories establish that. Use concrete facts and numbers from the source set, with citations, to support each inference. Keep facts, interpretation, and forward-looking assessment clearly distinct.\n"
+        "## 60-second read\nStart with a brief, decision-useful opening (about 100–140 words) that tells a reader what the filtered coverage means overall: the central development or pattern, why it matters now to RHTC, the strongest likely implication, and the key uncertainty or condition that could change the view. Synthesize across stories; do not repeat headlines or write a story-by-story preview. Cite the evidence and label inference.\n"
         "Return a concise printable report using these exact headings:\n"
         "## What happened\nExplain the main developments as a small number of event-level findings. Combine duplicate coverage and show how related events connect; preserve material differences in status, scale, participants, and terms. Avoid source-by-source retelling.\n"
         "## When did it happen\nBuild a short chronology of event dates, announcements, decisions, and future milestones. Separate event dates from publication dates, flag conflicting dates, and say when timing is unknown.\n"
@@ -1783,6 +1801,133 @@ async def summarize_filtered_news(data: NewsSummaryInput) -> dict[str, Any]:
         "generated_at": now_pacific().isoformat(),
         "mode": "openai",
     }
+
+
+@router.post("/summarize/pdf")
+async def create_news_summary_pdf(data: NewsSummaryPdfInput) -> Response:
+    """Render a branded PDF that mobile browsers can open, share, and save."""
+    import io
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import inch
+    from reportlab.platypus import ListFlowable, ListItem, Paragraph, SimpleDocTemplate, Spacer
+
+    gold = colors.HexColor("#b2934a")
+    ink = colors.HexColor("#17202b")
+    muted = colors.HexColor("#566273")
+    styles = getSampleStyleSheet()
+    body_style = ParagraphStyle("RHTCBody", parent=styles["BodyText"], fontName="Helvetica", fontSize=10.5, leading=15, textColor=ink, spaceAfter=8)
+    heading_style = ParagraphStyle("RHTCSection", parent=styles["Heading2"], fontName="Helvetica-Bold", fontSize=15, leading=19, textColor=ink, spaceBefore=17, spaceAfter=7, keepWithNext=True)
+    meta_style = ParagraphStyle("RHTCMeta", parent=body_style, fontSize=9, leading=12, textColor=muted, spaceAfter=4)
+    source_style = ParagraphStyle("RHTCSource", parent=body_style, fontSize=8.5, leading=11, spaceAfter=5)
+    output = io.BytesIO()
+    doc = SimpleDocTemplate(output, pagesize=letter, rightMargin=0.68 * inch, leftMargin=0.68 * inch, topMargin=0.98 * inch, bottomMargin=0.62 * inch, title="RHTC News Summary", author="RHTC Research")
+    logo_path = Path(__file__).resolve().parent / "static" / "rhtc-news-summary-logo.png"
+
+    def draw_page(canvas, document):
+        canvas.saveState()
+        page_width, page_height = letter
+        if logo_path.exists():
+            canvas.drawImage(str(logo_path), document.leftMargin, page_height - 0.78 * inch, width=0.52 * inch, height=0.52 * inch, preserveAspectRatio=True, mask="auto")
+        canvas.setFillColor(ink)
+        canvas.setFont("Helvetica-Bold", 15)
+        canvas.drawString(document.leftMargin + 0.62 * inch, page_height - 0.46 * inch, "RHTC NEWS SUMMARY")
+        canvas.setFillColor(gold)
+        canvas.setFont("Helvetica", 8)
+        canvas.drawString(document.leftMargin + 0.62 * inch, page_height - 0.63 * inch, "THREE PEAKS · RESEARCH BRIEF")
+        canvas.setStrokeColor(gold)
+        canvas.setLineWidth(1.5)
+        canvas.line(document.leftMargin, page_height - 0.88 * inch, page_width - document.rightMargin, page_height - 0.88 * inch)
+        canvas.setStrokeColor(colors.HexColor("#d7dce2"))
+        canvas.setLineWidth(0.5)
+        canvas.line(document.leftMargin, 0.43 * inch, page_width - document.rightMargin, 0.43 * inch)
+        canvas.setFillColor(muted)
+        canvas.setFont("Helvetica", 8)
+        canvas.drawString(document.leftMargin, 0.27 * inch, "RHTC · AI/I · EFM/I · DS/I")
+        canvas.drawRightString(page_width - document.rightMargin, 0.27 * inch, str(document.page))
+        canvas.restoreState()
+
+    def pdf_text(value: str) -> str:
+        replacements = {"\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-", "\u2014": "-", "\u2212": "-", "\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"', "\u2026": "...", "\u2022": "*", "\u00a0": " ", "\u2122": "(TM)"}
+        return "".join(replacements.get(char, char) for char in str(value or "")).encode("latin-1", "replace").decode("latin-1")
+
+    safe_urls = {
+        ref.ref: ref.url.strip()
+        for ref in data.references
+        if urlparse(ref.url.strip()).scheme in {"http", "https"} and urlparse(ref.url.strip()).hostname
+    }
+
+    def markup(value: str) -> str:
+        text = html.escape(pdf_text(value), quote=False)
+        text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
+
+        def cite(match):
+            ref_id = match.group(1)
+            url = safe_urls.get(ref_id)
+            return f'<link href="{html.escape(url, quote=True)}" color="#755d25">[{ref_id}]</link>' if url else f"[{ref_id}]"
+
+        return re.sub(r"\[(S\d{4})\]", cite, text)
+
+    generated_label = "Date unavailable"
+    if data.generated_at:
+        try:
+            generated_time = datetime.fromisoformat(data.generated_at.replace("Z", "+00:00")).astimezone(PACIFIC)
+            hour = generated_time.strftime("%I").lstrip("0") or "12"
+            generated_label = generated_time.strftime("%b %d, %Y at ") + hour + generated_time.strftime(":%M %p PT")
+        except ValueError:
+            generated_label = data.generated_at
+    story = [
+        Paragraph(f"{data.story_count} filtered stories · {markup(generated_label)}", meta_style),
+        Paragraph(f"Filters: {markup(data.scope or 'All stories')}", meta_style),
+        Spacer(1, 8),
+    ]
+    paragraph_lines: list[str] = []
+    bullet_lines: list[str] = []
+
+    def flush_paragraph():
+        if paragraph_lines:
+            story.append(Paragraph(" ".join(markup(line) for line in paragraph_lines), body_style))
+            paragraph_lines.clear()
+
+    def flush_bullets():
+        if bullet_lines:
+            items = [ListItem(Paragraph(markup(line), body_style), leftIndent=8) for line in bullet_lines]
+            story.append(ListFlowable(items, bulletType="bullet", start="circle", bulletColor=gold, bulletFontName="Helvetica", bulletFontSize=7, leftIndent=18, bulletIndent=4, spaceAfter=7))
+            bullet_lines.clear()
+
+    for raw_line in data.analysis.replace("\r", "").split("\n"):
+        line = raw_line.strip()
+        if not line:
+            flush_paragraph()
+            flush_bullets()
+            continue
+        heading = re.match(r"^#{1,3}\s+(.+)$", line)
+        if heading:
+            flush_paragraph()
+            flush_bullets()
+            story.append(Paragraph(markup(heading.group(1)), heading_style))
+            continue
+        bullet = re.match(r"^(?:[-*•]|\d+[.)])\s+(.+)$", line)
+        if bullet:
+            flush_paragraph()
+            bullet_lines.append(bullet.group(1))
+            continue
+        flush_bullets()
+        paragraph_lines.append(line)
+    flush_paragraph()
+    flush_bullets()
+
+    valid_references = [ref for ref in data.references if ref.ref in safe_urls]
+    if valid_references:
+        story.extend([Paragraph("Sources", heading_style), Spacer(1, 2)])
+        for ref in valid_references:
+            label = f"[{ref.ref}] {ref.title or ref.source or ref.url}"
+            details = " · ".join(part for part in [ref.source, f"Published {ref.published_at}" if ref.published_at else ""] if part)
+            story.append(Paragraph(f'<link href="{html.escape(safe_urls[ref.ref], quote=True)}" color="#755d25"><b>{markup(label)}</b></link>' + (f"<br/><font color='#566273'>{markup(details)}</font>" if details else ""), source_style))
+
+    doc.build(story, onFirstPage=draw_page, onLaterPages=draw_page)
+    return Response(content=output.getvalue(), media_type="application/pdf", headers={"Content-Disposition": 'inline; filename="rhtc-news-summary.pdf"', "Cache-Control": "no-store"})
 
 
 async def daily_news_scheduler() -> None:
