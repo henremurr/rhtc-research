@@ -89,10 +89,21 @@
 <div class="youtube-publish-actions"><button id="youtube-publish-btn" type="button" disabled>▶ Publish to YouTube + X</button><span id="youtube-publish-status" role="status" aria-live="polite"></span></div>
 </section></div></div></div>
 <script src="/options/static/app.js?v=theme-news-summary-20261117-7"></script>
+<style>
+#trade-print-view{display:none}
+@media print{
+ body.printing-trades{display:block!important;background:white!important;color:black!important;overflow:visible!important;height:auto!important}
+ body.printing-trades > :not(#trade-print-view),body.printing-trades dialog::backdrop{display:none!important}
+ body.printing-trades #trade-print-view{display:block!important;color:black;background:white;font:10pt Arial,sans-serif}
+ #trade-print-view div{overflow:visible!important} #trade-print-view table{min-width:0!important;width:100%!important;color:black}
+ #trade-print-view tr{break-inside:avoid} #trade-print-view h3{break-after:avoid}
+ #trade-print-view tfoot{display:table-row-group} #trade-print-view thead{display:table-header-group}
+}
+</style>
 <dialog id="trade-report-dialog" aria-labelledby="trade-title" style="width:min(60rem,94vw);max-height:88vh;box-sizing:border-box;background:#171c21;color:#eef2f5;border:1px solid #847450;border-radius:12px;padding:1rem">
 <button type="button" id="trade-close" style="float:right">Close</button><h2 id="trade-title">Trade Report</h2>
 <form id="trade-filters"><label>Account <select id="trade-account" required></select></label> <label>Year <select id="trade-year" required></select></label> <button>View trades</button></form>
-<div id="trade-pdf-controls" hidden><a id="trade-print" target="_blank" rel="noopener">View / Print PDF</a> &nbsp; <a id="trade-download">Download PDF</a></div>
+<div id="trade-pdf-controls" hidden><button type="button" id="trade-printer">Print report</button> &nbsp; <a id="trade-print" target="_blank" rel="noopener">View PDF</a> &nbsp; <a id="trade-download">Download PDF</a></div>
 <p id="trade-status" role="status"></p><div id="trade-results"></div></dialog>
 <script>
 (()=>{
@@ -100,7 +111,21 @@
  const dialog=get('trade-report-dialog'),account=get('trade-account'),year=get('trade-year'),status=get('trade-status'),results=get('trade-results');
  let periods=[],sequence=0;
  function clear(){get('trade-pdf-controls').hidden=true;sequence++;results.replaceChildren();status.textContent='';}
- function years(){clear();year.replaceChildren(...periods.filter(p=>p[0]===account.value).map(p=>new Option(p[1],p[1])));}
+ get('trade-printer').onclick=()=>{
+   const printView=document.createElement('article');
+   printView.id='trade-print-view';
+   const logo=document.createElement('img');logo.src='/apple-touch-icon.png';logo.width=40;logo.height=40;
+   const title=document.createElement('h1');title.textContent='RHTC Trade Report';
+   const caption=document.createElement('p');caption.textContent='Account '+account.value+' · '+(year.value==='0'?'All years':year.value);
+   printView.append(logo,title,caption,results.cloneNode(true));
+   printView.lastChild.removeAttribute('id');
+   document.getElementById(printView.id)?.remove();
+   document.body.append(printView);
+   document.body.classList.add('printing-trades');
+   window.addEventListener('afterprint',()=>{printView.remove();document.body.classList.remove('printing-trades');},{once:true});
+   window.print();
+ };
+ function years(){clear();year.replaceChildren(...periods.filter(p=>p[0]===account.value).map(p=>new Option(p[1],p[1])),new Option("All","0"));}
  account.addEventListener('change',years);year.addEventListener('change',clear);
  async function request(query){const response=await fetch('/options/api/trade-report'+query,{cache:'no-store'});if(!response.ok)throw Error(response.status===401?'Sign in again to view trades.':'Unable to load trade history.');return response.json();}
  get('open-trade-report').addEventListener('click',async()=>{
