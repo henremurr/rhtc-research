@@ -1833,6 +1833,7 @@ async def _build_news_summary(data: NewsSummaryInput, job_id: str | None = None)
             analysis = await response_text(client, analysis_instructions, prompt, 6000)
             set_progress(86, "Building cited report", len(sources), len(sources))
         else:
+            set_progress(15, "Analyzing story batches", 0, len(sources))
             batch_summaries: list[str] = []
             semaphore = asyncio.Semaphore(4)
             progress_lock = asyncio.Lock()
