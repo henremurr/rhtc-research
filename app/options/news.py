@@ -476,7 +476,7 @@ def assign_news_relevance(
     symbols = symbols if symbols is not None else news_watchlist_symbols()
     if rows is None:
         rows = [dict(row) for row in connection.execute(
-            "SELECT url,title,snippet,story_content,topic_override FROM news_items ORDER BY last_seen_at DESC"
+            "SELECT url,title,snippet,story_content FROM news_items ORDER BY last_seen_at DESC"
         )]
     scores = [
         (rank_news_relevance(str(row.get("title") or ""), str(row.get("story_content") or row.get("snippet") or ""), symbols), row["url"])
@@ -1042,11 +1042,6 @@ async def scan_news_topics() -> dict[str, Any]:
         if not rows:
             return {"status": "complete", "scanned": 0, "topic_count": 0, "topics": []}
         assignments = build_news_topics(rows)
-        manual_topics = {
-            row["url"]: row["topic_override"]
-            for row in rows
-            if row.get("topic_override")
-        }
         connection.executemany(
             "UPDATE news_items SET topic=? WHERE url=? AND COALESCE(topic_override,'')=''",
             [(topic, url) for url, topic in assignments.items()],
