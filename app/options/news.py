@@ -946,34 +946,48 @@ async def get_news(
     topic: str | None = Query(default=None, max_length=120),
     relevance: str | None = Query(default=None, max_length=20),
 ):
-    query = """SELECT url,title,source,published_at,snippet,peak,topic,relevance_score,youtube_series,first_seen_at,last_seen_at,youtube_published,youtube_video_id,youtube_url,youtube_published_at,youtube_privacy_status,x_published,x_post_id,x_post_url,x_published_at FROM news_items WHERE 1=1"""
+    query = """SELECT url,title,source,published_at,snippet,peak,topic,relevance_score,youtube_series,first_seen_at,last_seen_at,youtube_published,youtube_video_id,youtube_url,youtube_published_at,youtube_privacy_status,x_published,x_post_id,x_post_url,x_published_at FROM news_items"""
+    count_query = """SELECT
+        COUNT(*) AS total,
+        SUM(CASE WHEN relevance_score >= 4 THEN 1 ELSE 0 END) AS high,
+        SUM(CASE WHEN relevance_score BETWEEN 2 AND 3 THEN 1 ELSE 0 END) AS medium,
+        SUM(CASE WHEN relevance_score BETWEEN 0 AND 1 THEN 1 ELSE 0 END) AS low,
+        SUM(CASE WHEN relevance_score IS NULL THEN 1 ELSE 0 END) AS not_ranked
+        FROM news_items"""
+    filters: list[str] = []
     params: list[Any] = []
     if peak and peak not in {"All", "All Peaks"}:
-        query += " AND peak = ?"
+        filters.append("peak = ?")
         params.append(peak)
     if publication == "Published":
-        query += " AND youtube_published = 1 AND x_published = 1"
+        filters.append("youtube_published = 1 AND x_published = 1")
     elif publication == "Not published":
-        query += " AND NOT (youtube_published = 1 AND x_published = 1)"
+        filters.append("NOT (youtube_published = 1 AND x_published = 1)")
     elif publication not in {None, "All"}:
         raise HTTPException(400, "Choose a valid publication filter.")
     if topic and topic not in {"All", "All topics"}:
-        query += " AND topic = ?"
+        filters.append("topic = ?")
         params.append(topic)
     if relevance == "High":
-        query += " AND relevance_score >= 4"
+        relevance_filter = "relevance_score >= 4"
     elif relevance == "Medium":
-        query += " AND relevance_score BETWEEN 2 AND 3"
+        relevance_filter = "relevance_score BETWEEN 2 AND 3"
     elif relevance == "Low":
-        query += " AND relevance_score BETWEEN 0 AND 1"
+        relevance_filter = "relevance_score BETWEEN 0 AND 1"
     elif relevance == "Not ranked":
-        query += " AND relevance_score IS NULL"
+        relevance_filter = "relevance_score IS NULL"
     elif relevance not in {None, "All relevance"}:
         raise HTTPException(400, "Choose a valid relevance filter.")
+    else:
+        relevance_filter = ""
     if q and q.strip():
-        query += " AND (title LIKE ? OR snippet LIKE ? OR source LIKE ?)"
+        filters.append("(title LIKE ? OR snippet LIKE ? OR source LIKE ?)")
         term = f"%{q.strip()}%"
         params.extend([term, term, term])
+    where_clause = " WHERE " + " AND ".join(filters) if filters else ""
+    query += where_clause
+    if relevance_filter:
+        query += " AND " + relevance_filter if where_clause else " WHERE " + relevance_filter
     query += " ORDER BY last_seen_at DESC, COALESCE(NULLIF(published_at,''), first_seen_at) DESC"
     symbols = news_watchlist_symbols() if relevance in {"High", "Medium", "Low"} else None
     with closing(connect_db()) as connection:
@@ -988,6 +1002,11 @@ async def get_news(
                     (now_pacific().isoformat(),),
                 )
                 connection.commit()
+        relevance_count_row = connection.execute(count_query + where_clause, params).fetchone()
+        relevance_counts = {
+            key: int(relevance_count_row[key] or 0)
+            for key in ("total", "high", "medium", "low", "not_ranked")
+        }
         rows = [dict(row) for row in connection.execute(query, params)]
         meta = {row["key"]: row["value"] for row in connection.execute("SELECT key,value FROM news_meta")}
         topics = [dict(row) for row in connection.execute(
@@ -1002,6 +1021,7 @@ async def get_news(
         "last_scan_count": int(meta.get("last_scan_count", "0")),
         "configured": bool(os.getenv("PERPLEXITY_API_KEY")),
         "topics": topics,
+        "relevance_counts": relevance_counts,
         "relevance_scan_at": meta.get("relevance_scan_at"),
     }
 
