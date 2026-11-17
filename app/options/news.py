@@ -1789,7 +1789,7 @@ async def _build_news_summary(data: NewsSummaryInput, job_id: str | None = None)
         "## What happened\nExplain the main developments as a small number of event-level findings. Combine duplicate coverage and show how related events connect; preserve material differences in status, scale, participants, and terms. Avoid source-by-source retelling.\n"
         "## When did it happen\nBuild a short chronology of event dates, announcements, decisions, and future milestones. Separate event dates from publication dates, flag conflicting dates, and say when timing is unknown.\n"
         "## Why it is relevant\nAnalyze the causal mechanisms and cross-story signals for the Three Peaks thesis: what changes operationally, economically, strategically, or in supply-chain constraints; what is a direct effect versus a second-order link; what is already demonstrated versus speculative; and what could weaken the thesis or offset the benefit. Explain the significance rather than restating story content.\n"
-        "## Forward impact assessment to relevant RHTC tickers\nFor each credible watchlist connection, state ticker and verified company, potentially positive/negative/mixed/unclear direction, direct or indirect exposure, near/medium/long time horizon, confidence, the evidence-backed mechanism, and a specific catalyst or indicator that would confirm or disconfirm the view. Compare impacted tickers where useful. Include only companies with a defensible link in the supplied stories; do not pad the list with thematic matches. If none qualify, say so.\n"
+        "## Forward impact assessment to relevant RHTC tickers\nFormat every company as its own third-level subheading, exactly like `### TICKER — Verified Company Name`. Never make the ticker/company line a bullet. Under each company subheading, use bullets for Direction, Exposure, Time horizon, Confidence, Mechanism, and Indicator to monitor. Keep all those bullets visually grouped under their company heading. Compare impacted tickers where useful. Include only companies with a defensible link in the supplied stories; do not pad the list with thematic matches. If none qualify, say so.\n"
         "Cite material facts and inferences with exact source IDs. Keep the report under 1,800 words; prioritize synthesis and decision-useful implications over exhaustive coverage. Do not add a separate introduction or conclusion."
     )
 
@@ -1884,6 +1884,22 @@ async def _build_news_summary(data: NewsSummaryInput, job_id: str | None = None)
         logger.warning("RHTC filtered-news summary failed: %s", exc)
         raise HTTPException(502, "The filtered stories could not be summarized. Try again.") from exc
 
+    # Normalize model output into the intended hierarchy even when it returns a
+    # ticker/company row as a bullet instead of a heading.
+    watchlist_symbols = {str(item.get("symbol") or "").upper() for item in watchlist}
+    normalized_lines = []
+    in_ticker_impact_section = False
+    for line in analysis.splitlines():
+        section = re.match(r"^#{1,3}\s+(.+)$", line.strip())
+        if section and len(line.strip()) - len(line.strip().lstrip("#")) <= 2:
+            in_ticker_impact_section = section.group(1).strip().casefold().startswith("forward impact assessment")
+        if in_ticker_impact_section:
+            ticker_bullet = re.match(r"^\s*(?:[-*•]|\d+[.)])\s+([A-Z][A-Z0-9.]{0,9})\s*[-–—:]\s+(.+?)\s*$", line)
+            if ticker_bullet and ticker_bullet.group(1).upper() in watchlist_symbols:
+                line = f"### {ticker_bullet.group(1).upper()} — {ticker_bullet.group(2)}"
+        normalized_lines.append(line)
+    analysis = "\n".join(normalized_lines)
+
     cited_refs = set(re.findall(r"\[(S\d{4})\]", analysis))
     references = [source for source in sources if source["ref"] in cited_refs]
     return {
@@ -1911,6 +1927,7 @@ async def create_news_summary_pdf(data: NewsSummaryPdfInput) -> Response:
     styles = getSampleStyleSheet()
     body_style = ParagraphStyle("RHTCBody", parent=styles["BodyText"], fontName="Helvetica", fontSize=10.5, leading=15, textColor=ink, spaceAfter=8)
     heading_style = ParagraphStyle("RHTCSection", parent=styles["Heading2"], fontName="Helvetica-Bold", fontSize=15, leading=19, textColor=ink, spaceBefore=17, spaceAfter=7, keepWithNext=True)
+    ticker_heading_style = ParagraphStyle("RHTCTickerHeading", parent=heading_style, fontSize=11.5, leading=14, spaceBefore=10, spaceAfter=2, keepWithNext=True)
     meta_style = ParagraphStyle("RHTCMeta", parent=body_style, fontSize=9, leading=12, textColor=muted, spaceAfter=4)
     source_style = ParagraphStyle("RHTCSource", parent=body_style, fontSize=8.5, leading=11, spaceAfter=5)
     output = io.BytesIO()
@@ -1994,11 +2011,12 @@ async def create_news_summary_pdf(data: NewsSummaryPdfInput) -> Response:
             flush_paragraph()
             flush_bullets()
             continue
-        heading = re.match(r"^#{1,3}\s+(.+)$", line)
+        heading = re.match(r"^(#{1,3})\s+(.+)$", line)
         if heading:
             flush_paragraph()
             flush_bullets()
-            story.append(Paragraph(markup(heading.group(1)), heading_style))
+            style = ticker_heading_style if len(heading.group(1)) >= 3 else heading_style
+            story.append(Paragraph(markup(heading.group(2)), style))
             continue
         bullet = re.match(r"^(?:[-*•]|\d+[.)])\s+(.+)$", line)
         if bullet:
