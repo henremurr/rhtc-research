@@ -1784,11 +1784,11 @@ async def _build_news_summary(data: NewsSummaryInput, job_id: str | None = None)
     )
     analysis_instructions = common_instructions + (
         "\nWrite an analytical synthesis, not a collection of article recaps. Do not make one bullet per story or paraphrase headlines and snippets. First cluster coverage about the same event, company, policy, or causal chain; distinguish separate developments that only share a broad topic. Compare what the sources collectively establish, identify corroboration, meaningful differences, gaps, and uncertainty, and explain why those patterns matter. Do not claim a development is new versus prior history unless the supplied stories establish that. Use concrete facts and numbers from the source set, with citations, to support each inference. Keep facts, interpretation, and forward-looking assessment clearly distinct.\n"
-        "## 60-second read\nStart with a brief, decision-useful opening (about 100–140 words) that tells a reader what the filtered coverage means overall: the central development or pattern, why it matters now to RHTC, the strongest likely implication, and the key uncertainty or condition that could change the view. Synthesize across stories; do not repeat headlines or write a story-by-story preview. Cite the evidence and label inference.\n"
+        "## 60-second read\nThis must be a level-two heading on its own line. Put the 100–140 word decision-useful opening in a paragraph immediately below it, not on the heading line. Explain the central development or pattern, why it matters now to RHTC, the strongest likely implication, and the key uncertainty or condition that could change the view. Synthesize across stories; do not repeat headlines or write a story-by-story preview. Cite evidence and label inference.\n"
         "Return a concise printable report using these exact headings:\n"
-        "## What happened\nExplain the main developments as a small number of event-level findings. Combine duplicate coverage and show how related events connect; preserve material differences in status, scale, participants, and terms. Avoid source-by-source retelling.\n"
-        "## When did it happen\nBuild a short chronology of event dates, announcements, decisions, and future milestones. Separate event dates from publication dates, flag conflicting dates, and say when timing is unknown.\n"
-        "## Why it is relevant\nAnalyze the causal mechanisms and cross-story signals for the Three Peaks thesis: what changes operationally, economically, strategically, or in supply-chain constraints; what is a direct effect versus a second-order link; what is already demonstrated versus speculative; and what could weaken the thesis or offset the benefit. Explain the significance rather than restating story content.\n"
+        "## What happened\nOrganize the event-level findings by topic. Give each distinct topic a level-three subheading on its own line, then put its supporting facts, figures, status, and citations in bullets below that subheading. Combine duplicate coverage and show how related events connect; preserve material differences in status, scale, participants, and terms. Avoid source-by-source retelling.\n"
+        "## When did it happen\nOrganize the chronology by topic or event, using level-three subheadings followed by bullets for event dates, announcements, decisions, and future milestones. Separate event dates from publication dates, flag conflicting dates, and say when timing is unknown.\n"
+        "## Why it is relevant\nOrganize the analysis by topic or causal mechanism, using level-three subheadings followed by bullets. Explain cross-story signals for the Three Peaks thesis: what changes operationally, economically, strategically, or in supply-chain constraints; what is a direct effect versus a second-order link; what is demonstrated versus speculative; and what could weaken the thesis or offset the benefit. Explain significance rather than restating story content.\n"
         "## Forward impact assessment to relevant RHTC tickers\nFormat every company as its own third-level subheading, exactly like `### TICKER — Verified Company Name`. Never make the ticker/company line a bullet. Under each company subheading, use bullets for Direction, Exposure, Time horizon, Confidence, Mechanism, and Indicator to monitor. Keep all those bullets visually grouped under their company heading. Compare impacted tickers where useful. Include only companies with a defensible link in the supplied stories; do not pad the list with thematic matches. If none qualify, say so.\n"
         "Cite material facts and inferences with exact source IDs. Keep the report under 1,800 words; prioritize synthesis and decision-useful implications over exhaustive coverage. Do not add a separate introduction or conclusion."
     )
@@ -1889,7 +1889,14 @@ async def _build_news_summary(data: NewsSummaryInput, job_id: str | None = None)
     watchlist_symbols = {str(item.get("symbol") or "").upper() for item in watchlist}
     normalized_lines = []
     in_ticker_impact_section = False
-    for line in analysis.splitlines():
+    for line_number, line in enumerate(analysis.splitlines()):
+        if line_number == 0:
+            read_heading = re.match(r"^\s*60[- ]second read\s*[:—–-]?\s*(.*)$", line, re.IGNORECASE)
+            if read_heading:
+                normalized_lines.append("## 60-second read")
+                if read_heading.group(1).strip():
+                    normalized_lines.append(read_heading.group(1).strip())
+                continue
         section = re.match(r"^#{1,3}\s+(.+)$", line.strip())
         if section and len(line.strip()) - len(line.strip().lstrip("#")) <= 2:
             in_ticker_impact_section = section.group(1).strip().casefold().startswith("forward impact assessment")
