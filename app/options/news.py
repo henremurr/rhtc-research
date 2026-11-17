@@ -1970,6 +1970,7 @@ async def create_news_summary_pdf(data: NewsSummaryPdfInput) -> Response:
     body_style = ParagraphStyle("RHTCBody", parent=styles["BodyText"], fontName="Helvetica", fontSize=10.5, leading=15, textColor=ink, spaceAfter=8)
     heading_style = ParagraphStyle("RHTCSection", parent=styles["Heading2"], fontName="Helvetica-Bold", fontSize=15, leading=19, textColor=ink, spaceBefore=17, spaceAfter=7, keepWithNext=True)
     ticker_heading_style = ParagraphStyle("RHTCTickerHeading", parent=heading_style, fontSize=11.5, leading=14, spaceBefore=10, spaceAfter=2, keepWithNext=True)
+    subheading_style = ParagraphStyle("RHTCSubheading", parent=heading_style, fontSize=11, leading=14, spaceBefore=8, spaceAfter=3, keepWithNext=True)
     meta_style = ParagraphStyle("RHTCMeta", parent=body_style, fontSize=9, leading=12, textColor=muted, spaceAfter=4)
     source_style = ParagraphStyle("RHTCSource", parent=body_style, fontSize=8.5, leading=11, spaceAfter=5)
     output = io.BytesIO()
@@ -2062,11 +2063,21 @@ async def create_news_summary_pdf(data: NewsSummaryPdfInput) -> Response:
             continue
         bullet = re.match(r"^(?:[-*•]|\d+[.)])\s+(.+)$", line)
         if bullet:
-            flush_paragraph()
-            bullet_lines.append(bullet.group(1))
+            label = bullet.group(1).strip()
+            if label.endswith(":"):
+                flush_paragraph()
+                flush_bullets()
+                story.append(Paragraph(markup(label[:-1]), subheading_style))
+            else:
+                flush_paragraph()
+                bullet_lines.append(label)
             continue
         flush_bullets()
-        paragraph_lines.append(line)
+        if line.endswith(":"):
+            flush_paragraph()
+            story.append(Paragraph(markup(line[:-1]), subheading_style))
+        else:
+            paragraph_lines.append(line)
     flush_paragraph()
     flush_bullets()
 
