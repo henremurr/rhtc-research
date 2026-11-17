@@ -5,10 +5,10 @@ import io
 import json
 import re
 import sqlite3
-from collections import Counter, defaultdict, deque
+from collections import Counter
 from contextlib import closing
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
@@ -115,7 +115,7 @@ def order_same_day(entries):
     return entries
 
 
-def trade_rows(db, account, year):
+def trade_rows(db, account, year, summaries=None):
     rows = db.execute("""
         SELECT trade_date, action, symbol, description, quantity, price, amount
         FROM trading_transactions
@@ -141,42 +141,28 @@ def trade_rows(db, account, year):
     result = {}
     for ticker, days in sorted(groups.items()):
         entries = [entry for day_entries in days.values() for entry in order_same_day(day_entries)]
-        mark_open_lots(entries)
-        visible = [row for _, row in entries if not year or row[0][:4] == str(year)]
+        visible = [(kind, row) for kind, row in entries if not year or row[0][:4] == str(year)]
         if visible:
-            result[ticker] = visible
+            result[ticker] = [row for _, row in visible]
+            if summaries is not None:
+                summaries[ticker] = position_summary(visible)
     return result
 
 
-def mark_open_lots(entries):
-    # Match only within this account and ticker. Each written contract series
-    # has its own FIFO queue, independent of the shares that cover the call.
-    queues = defaultdict(deque)
-    for kind, row in entries:
-        if kind not in {"stock_buy", "stock_sell", "call_write", "call_buy", "call_end"}:
+def position_summary(entries):
+    lines = []
+    for label, kinds in (("Stock", {"stock_buy", "stock_sell"}), ("Calls", {"call_write", "call_buy"})):
+        amounts = [row[5] for kind, row in entries if kind in kinds]
+        if not amounts:
             continue
-        if row[3] in (None, "") or not row[2]:
+        if any(value in (None, "") for value in amounts):
+            lines.append(f"{label} net amount: unavailable (missing amount)")
             continue
-        quantity = abs(Decimal(str(row[3])))
-        if not quantity:
-            continue
-        key = "shares" if kind.startswith("stock_") else re.sub(r"\s+", "", row[2]).upper().lstrip("-")
-        lots = queues[key]
-        if kind in {"stock_buy", "call_write"}:
-            lots.append([row, quantity])
-            continue
-        while quantity and lots:
-            matched = min(quantity, lots[0][1])
-            quantity -= matched
-            lots[0][1] -= matched
-            if not lots[0][1]:
-                lots.popleft()
-    for key, lots in queues.items():
-        for row, remaining in lots:
-            units = "shares" if key == "shares" else "contracts"
-            if remaining == 1:
-                units = units[:-1]
-            row[1] += f" [Open: {remaining:f} {units}]"
+        net = sum(Decimal(str(value)).quantize(Decimal(".01"), rounding=ROUND_HALF_UP) for value in amounts)
+        is_open = net < 0 if label == "Stock" else net > 0
+        status = "OPEN" if is_open else "No open flag"
+        lines.append(f"{label} net amount: {net:,.2f} USD  |  {status}")
+    return lines
 
 
 def register(app, database_path):
@@ -186,8 +172,9 @@ def register(app, database_path):
             if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='trading_transactions'").fetchone():
                 return {"periods": [], "groups": {}}
             periods = db.execute("SELECT DISTINCT account, substr(trade_date,1,4) FROM trading_transactions ORDER BY account, 2 DESC").fetchall()
-            groups = trade_rows(db, account, year) if account and 0 <= year <= 9998 else {}
-            return {"periods": periods, "groups": groups}
+            summaries = {}
+            groups = trade_rows(db, account, year, summaries) if account and 0 <= year <= 9998 else {}
+            return {"periods": periods, "groups": groups, "summaries": summaries}
 
     @app.get("/api/trade-report/pdf")
     def trade_pdf(account: str, year: int, download: bool = False):
@@ -196,7 +183,7 @@ def register(app, database_path):
             raise HTTPException(404, "No trades for this account and year.")
         disposition = "attachment" if download else "inline"
         filename = f"RHTC_Trade_Report_{year or 'All'}_{account}.pdf"
-        return Response(build_report(account, year or "All years", report["groups"]), media_type="application/pdf",
+        return Response(build_report(account, year or "All years", report["groups"], report["summaries"]), media_type="application/pdf",
                         headers={"Content-Disposition": f'{disposition}; filename="{filename}"',
                                  "Cache-Control": "private, no-store"})
 

@@ -10,7 +10,7 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import LongTable, Paragraph, SimpleDocTemplate, Spacer, TableStyle
 
 
-def build_report(account, year, groups):
+def build_report(account, year, groups, summaries):
     output = BytesIO()
     width, height = landscape(letter)
     doc = SimpleDocTemplate(output, pagesize=(width, height), leftMargin=32,
@@ -40,7 +40,8 @@ def build_report(account, year, groups):
 
     story = []
     for ticker, trades in groups.items():
-        rows = [[ticker, "", "", "", "", ""],
+        heading = "     ".join([ticker, *summaries[ticker]])
+        rows = [[heading, "", "", "", "", ""],
                 ["Date", "Action", "Security", "Quantity", "Price ($)", "Amount ($)"]]
         amounts = []
         for day, action, symbol, quantity, price, amount in trades:
