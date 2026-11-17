@@ -115,7 +115,36 @@
     const title=document.createElement('h3');title.textContent=ticker+' ('+rows.length+')';results.append(title);
     const wrap=document.createElement('div');wrap.style.overflowX='auto';const table=document.createElement('table');table.style.cssText='width:100%;min-width:620px;text-align:left;border-spacing:8px';wrap.append(table);results.append(wrap);
     const header=table.createTHead().insertRow();for(const label of ['Date','Action','Security','Quantity','Price ($)','Amount ($)']){const th=document.createElement('th');th.textContent=label;header.append(th);}
-    const body=table.createTBody();for(const values of rows){count++;const row=body.insertRow();values.forEach((v,i)=>{row.insertCell().textContent=v==null||v===''?'—':i===5?Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):v;});}
+    const body = table.createTBody();
+    const dollars = new Intl.NumberFormat('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+    let totalCents = 0;
+    let amountCount = 0;
+    for (const values of rows) {
+      count++;
+      const row = body.insertRow();
+      values.forEach((value, index) => {
+        const cell = row.insertCell();
+        const missing = value == null || value === '';
+        const monetary = index === 4 || index === 5;
+        cell.textContent = missing ? '—' : monetary ? dollars.format(value) : value;
+        if (monetary) cell.style.textAlign = 'right';
+        if (index === 5 && !missing) {
+          const amount = Number(value);
+          totalCents += Math.sign(amount) * Math.round((Math.abs(amount) + Number.EPSILON) * 100);
+          amountCount++;
+        }
+      });
+    }
+    const subtotal = table.createTFoot().insertRow();
+    const label = document.createElement('th');
+    label.colSpan = 5;
+    label.scope = 'row';
+    label.textContent = ticker + ' net amount total ($)';
+    subtotal.append(label);
+    const total = subtotal.insertCell();
+    total.style.textAlign = 'right';
+    total.style.fontWeight = 'bold';
+    total.textContent = amountCount ? dollars.format(totalCents / 100) : '—';
    }status.textContent=count?count+' trades, oldest first within each ticker.':'No trades for this account and year.';
   }catch(error){if(next===sequence)status.textContent=error.message;}
  };
