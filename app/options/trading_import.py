@@ -119,9 +119,9 @@ def trade_rows(db, account, year):
     rows = db.execute("""
         SELECT trade_date, action, symbol, description, quantity, price, amount
         FROM trading_transactions
-        WHERE account=? AND trade_date>=? AND trade_date<?
+        WHERE account=? AND (?=0 OR (trade_date>=? AND trade_date<?))
         ORDER BY trade_date, rowid
-    """, (account, f"{year:04d}-01-01", f"{year+1:04d}-01-01"))
+    """, (account, year, f"{year:04d}-01-01", f"{year+1:04d}-01-01"))
     groups = {}
     for day, action, symbol, description, quantity, price, amount in rows:
         if not symbol and re.search(r"\b(card|debit|merchant|payment)\b", action, re.I):
@@ -144,7 +144,7 @@ def register(app, database_path):
             if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='trading_transactions'").fetchone():
                 return {"periods": [], "groups": {}}
             periods = db.execute("SELECT DISTINCT account, substr(trade_date,1,4) FROM trading_transactions ORDER BY account, 2 DESC").fetchall()
-            groups = trade_rows(db, account, year) if account and 1 <= year <= 9998 else {}
+            groups = trade_rows(db, account, year) if account and 0 <= year <= 9998 else {}
             return {"periods": periods, "groups": groups}
 
     @app.get("/api/trade-report/pdf")
@@ -153,8 +153,8 @@ def register(app, database_path):
         if not report["groups"]:
             raise HTTPException(404, "No trades for this account and year.")
         disposition = "attachment" if download else "inline"
-        filename = f"RHTC_Trade_Report_{year}_{account}.pdf"
-        return Response(build_report(account, year, report["groups"]), media_type="application/pdf",
+        filename = f"RHTC_Trade_Report_{year or 'All'}_{account}.pdf"
+        return Response(build_report(account, year or "All years", report["groups"]), media_type="application/pdf",
                         headers={"Content-Disposition": f'{disposition}; filename="{filename}"',
                                  "Cache-Control": "private, no-store"})
 
