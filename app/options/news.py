@@ -1780,10 +1780,16 @@ async def _build_news_summary(data: NewsSummaryInput, job_id: str | None = None)
         "when the story supports a credible connection. Distinguish direct business exposure from indirect "
         "supply-chain, infrastructure, sentiment, or thematic exposure. Give a direction (potentially positive, "
         "negative, mixed, or unclear), a time horizon, confidence, and a concrete indicator to monitor. Do not "
-        "give price targets, trade instructions, or personal financial advice."
+        "give price targets, trade instructions, or personal financial advice. Write for an informed general "
+        "reader in plain, natural English. Prefer short sentences and familiar words. Explain technical terms "
+        "the first time they appear, and spell out acronyms before using the shortened form. Keep necessary "
+        "company names, tickers, dates, and figures, but translate specialist shorthand into ordinary language. "
+        "Avoid fragments, dense strings of abbreviations, slash-heavy phrases, and unexplained units. Never use "
+        "a question mark as a substitute for a missing symbol or separator; if a symbol is uncertain, rewrite "
+        "the phrase in words (for example, say \"more than $1 trillion\")."
     )
     analysis_instructions = common_instructions + (
-        "\nWrite an analytical synthesis, not a collection of article recaps. Do not make one bullet per story or paraphrase headlines and snippets. First cluster coverage about the same event, company, policy, or causal chain; distinguish separate developments that only share a broad topic. Compare what the sources collectively establish, identify corroboration, meaningful differences, gaps, and uncertainty, and explain why those patterns matter. Do not claim a development is new versus prior history unless the supplied stories establish that. Use concrete facts and numbers from the source set, with citations, to support each inference. Keep facts, interpretation, and forward-looking assessment clearly distinct.\n"
+        "\nWrite a clear, analytical synthesis rather than a stack of article recaps. Write as if explaining the story to a thoughtful reader who is not an industry specialist. Lead with the plain-English point, then support it with a few concrete facts. For every technical concept, explain what it means in everyday terms and why the reader should care. Avoid compressed phrases such as \"grid bottlenecks drive capex reallocation\"; explain the cause and consequence in a full sentence. Define units such as GW and TWh when they matter. Do not repeat the same fact in several sections. Do not make one bullet per story or paraphrase headlines and snippets. First group stories about the same event or cause, while keeping separate developments distinct. Explain what the reports collectively show, what differs, what remains unknown, and how that changes the outlook. Do not call something new unless the supplied stories establish it. Support factual claims and inferences with citations, and label interpretation clearly.\n"
         "## 60-second read\nThis must be a level-two heading on its own line. Put the 100–140 word decision-useful opening in a paragraph immediately below it, not on the heading line. Explain the central development or pattern, why it matters now to RHTC, the strongest likely implication, and the key uncertainty or condition that could change the view. Synthesize across stories; do not repeat headlines or write a story-by-story preview. Cite evidence and label inference.\n"
         "Return a concise printable report using these exact headings:\n"
         "## What happened\nOrganize the event-level findings by topic. Give each distinct topic a level-three subheading on its own line, then put its supporting facts, figures, status, and citations in bullets below that subheading. Combine duplicate coverage and show how related events connect; preserve material differences in status, scale, participants, and terms. Avoid source-by-source retelling.\n"
@@ -2001,8 +2007,27 @@ async def create_news_summary_pdf(data: NewsSummaryPdfInput) -> Response:
         canvas.restoreState()
 
     def pdf_text(value: str) -> str:
-        replacements = {"\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-", "\u2014": "-", "\u2212": "-", "\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"', "\u2026": "...", "\u2022": "*", "\u00a0": " ", "\u2122": "(TM)"}
-        return "".join(replacements.get(char, char) for char in str(value or "")).encode("latin-1", "replace").decode("latin-1")
+        import unicodedata
+
+        replacements = {
+            "\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-", "\u2014": "-", "\u2212": "-",
+            "\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"', "\u2026": "...",
+            "\u2022": "*", "\u00a0": " ", "\u2122": "(TM)", "\u00ae": "(R)", "\u00a9": "(C)",
+            "\u2190": "to", "\u2192": "to", "\u2191": "up", "\u2193": "down", "\u21d2": "therefore",
+            "\u2248": "about", "\u2264": "at most", "\u2265": "at least", "\u00b1": "plus or minus",
+            "\u00d7": "x", "\u00f7": "/", "\u00b0": " degrees", "\u2032": "'", "\u2033": '"',
+            "\u20ac": "EUR ", "\u00a3": "GBP ", "\u00a5": "JPY ", "\u20b9": "INR ",
+            "\u00b5": "micro", "\u03bc": "micro", "\u03a9": "ohms",
+        }
+        output = []
+        for char in str(value or ""):
+            if char in replacements:
+                output.append(replacements[char])
+                continue
+            normalized = unicodedata.normalize("NFKD", char)
+            ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
+            output.append(ascii_text or " ")
+        return re.sub(r"\s+", " ", "".join(output))
 
     safe_urls = {
         ref.ref: ref.url.strip()
