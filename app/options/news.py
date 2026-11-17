@@ -1865,18 +1865,58 @@ async def _build_news_summary(data: NewsSummaryInput, job_id: str | None = None)
                         summarize_batch(batch[midpoint:]),
                     ))
 
+            story_batches = [sources[start:start + 20] for start in range(0, len(sources), 20)]
             batch_summaries = await asyncio.gather(*(
-                summarize_batch(sources[start:start + 20])
-                for start in range(0, len(sources), 20)
+                summarize_batch(batch) for batch in story_batches
             ))
+            batch_digests = [
+                {
+                    "batch": f"{index + 1} of {len(story_batches)}",
+                    "story_refs": [story["ref"] for story in batch],
+                    "digest": digest,
+                }
+                for index, (batch, digest) in enumerate(zip(story_batches, batch_summaries))
+            ]
             set_progress(85, "Synthesizing cross-story findings", len(sources), len(sources))
             final_prompt = (
                 "Synthesize these factual digests of the currently filtered RHTC news stories into one printable "
-                "report. Keep all citations as exact [S0001] references to the supplied stories.\n"
+                "report. Read and compare every numbered batch from first to last; later batches are equally part "
+                "of the evidence and must not be skipped. Identify the distinct developments and cross-story "
+                "patterns across the complete set. Cite material facts using exact source IDs from the supplied "
+                "story_refs.\n"
                 f"RHTC watchlist (symbol and peak): {ticker_context}\n"
-                f"Story digests: {json.dumps(batch_summaries, ensure_ascii=False)}"
+                f"All batch digests: {json.dumps(batch_digests, ensure_ascii=False)}"
             )
             analysis = await response_text(client, analysis_instructions, final_prompt, 6000)
+            cited_ids = set(re.findall(r"\[(S\d{4})\]", analysis))
+            uncovered = [
+                batch for batch in batch_digests
+                if not cited_ids.intersection(batch["story_refs"])
+            ]
+            for _ in range(2):
+                if not uncovered:
+                    break
+                set_progress(89, f"Checking coverage across {len(batch_digests)} batches", len(sources), len(sources))
+                coverage_prompt = (
+                    "Revise the current report after reviewing the supplied batch digests that it did not cite. "
+                    "Integrate any distinct, material evidence or counterpoint into the appropriate topic section; "
+                    "do not append a batch-by-batch recap or add irrelevant facts. Keep the existing headings, "
+                    "analysis, citations, and concise style. Include at least one exact source citation from each "
+                    "previously uncited batch when its evidence is relevant. Return the complete revised report.\n"
+                    f"Current report: {analysis}\n"
+                    f"Uncovered batch digests: {json.dumps(uncovered, ensure_ascii=False)}"
+                )
+                analysis = await response_text(client, analysis_instructions, coverage_prompt, 6000)
+                cited_ids = set(re.findall(r"\[(S\d{4})\]", analysis))
+                uncovered = [
+                    batch for batch in batch_digests
+                    if not cited_ids.intersection(batch["story_refs"])
+                ]
+            if uncovered:
+                logger.warning(
+                    "News summary synthesis did not cite evidence from %s/%s story batches",
+                    len(uncovered), len(batch_digests),
+                )
             set_progress(92, "Formatting cited report", len(sources), len(sources))
     except HTTPException:
         raise
