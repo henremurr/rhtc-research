@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import time
+from uuid import uuid4
 import html
 import json
 import hashlib
@@ -30,6 +32,7 @@ router = APIRouter(prefix="/api/news", tags=["news"])
 SEARCH_URL = "https://api.perplexity.ai/search"
 PACIFIC = ZoneInfo("America/Los_Angeles")
 SCAN_LOCK = asyncio.Lock()
+NEWS_SUMMARY_JOBS: dict[str, dict[str, Any]] = {}
 DetectorFactory.seed = 0
 MAX_RESULTS_PER_QUERY = 20
 MAX_QUERIES_PER_REQUEST = 5
@@ -1659,9 +1662,65 @@ async def analyze_news_story(data: NewsAnalysisInput) -> dict[str, Any]:
     }
 
 
+async def _run_news_summary_job(job_id: str, data: NewsSummaryInput) -> None:
+    job = NEWS_SUMMARY_JOBS[job_id]
+    try:
+        result = await _build_news_summary(data, job_id=job_id)
+        job.update(status="completed", progress=100, phase="Report ready", result=result, updated_at=time.time())
+    except HTTPException as exc:
+        job.update(status="failed", error=str(exc.detail), updated_at=time.time())
+    except Exception as exc:
+        logger.exception("RHTC news summary job %s failed", job_id)
+        job.update(status="failed", error="The summary could not be completed. Return to the feed and try again.", updated_at=time.time())
+
+
 @router.post("/summarize")
-async def summarize_filtered_news(data: NewsSummaryInput) -> dict[str, Any]:
+async def start_news_summary(data: NewsSummaryInput) -> dict[str, Any]:
+    """Queue a report and return immediately so mobile clients can show real progress."""
+    now = time.time()
+    for old_id, old_job in list(NEWS_SUMMARY_JOBS.items()):
+        if now - float(old_job.get("created_at", now)) > 3600:
+            NEWS_SUMMARY_JOBS.pop(old_id, None)
+    job_id = uuid4().hex
+    total = len(set(data.urls))
+    NEWS_SUMMARY_JOBS[job_id] = {
+        "job_id": job_id,
+        "status": "queued",
+        "progress": 0,
+        "phase": "Queued",
+        "completed_stories": 0,
+        "total_stories": total,
+        "created_at": now,
+        "updated_at": now,
+    }
+    asyncio.create_task(_run_news_summary_job(job_id, data))
+    return {key: value for key, value in NEWS_SUMMARY_JOBS[job_id].items() if key not in {"created_at", "updated_at"}}
+
+
+@router.get("/summarize/{job_id}")
+async def get_news_summary_job(job_id: str) -> dict[str, Any]:
+    """Return the current status and, when complete, the report for a queued job."""
+    job = NEWS_SUMMARY_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(404, "This summary job is no longer available. Return to the feed and start it again.")
+    return {key: value for key, value in job.items() if key not in {"created_at", "updated_at"}}
+
+
+async def _build_news_summary(data: NewsSummaryInput, job_id: str | None = None) -> dict[str, Any]:
     """Create a printable, cited synthesis of the stories currently in the feed."""
+    def set_progress(progress: int, phase: str, completed: int | None = None, total: int | None = None) -> None:
+        if not job_id:
+            return
+        job = NEWS_SUMMARY_JOBS.get(job_id)
+        if not job:
+            return
+        job.update(progress=max(0, min(96, int(progress))), phase=phase, updated_at=time.time())
+        if completed is not None:
+            job["completed_stories"] = completed
+        if total is not None:
+            job["total_stories"] = total
+
+    set_progress(3, "Checking summary service")
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise HTTPException(503, "News summaries are unavailable. Configure OPENAI_API_KEY in the server settings.")
@@ -1685,6 +1744,7 @@ async def summarize_filtered_news(data: NewsSummaryInput) -> dict[str, Any]:
             stories_by_url.update({row["url"]: dict(row) for row in rows})
 
     stories = [stories_by_url[url] for url in requested_urls if url in stories_by_url]
+    set_progress(12, "Preparing story evidence", 0, len(stories))
     if not stories:
         raise HTTPException(404, "None of the filtered stories are still in the stored feed.")
 
@@ -1763,6 +1823,7 @@ async def summarize_filtered_news(data: NewsSummaryInput) -> dict[str, Any]:
         client = AsyncOpenAI(api_key=api_key, timeout=150, max_retries=0)
         ticker_context = json.dumps(watchlist, ensure_ascii=False)
         if len(sources) <= 50:
+            set_progress(22, "Analyzing filtered stories", 0, len(sources))
             prompt = (
                 "Summarize these filtered RHTC news stories. Each record includes a stable citation ID, title, "
                 "publisher, publication date, peak/topic tags, and a source excerpt.\n"
@@ -1770,9 +1831,13 @@ async def summarize_filtered_news(data: NewsSummaryInput) -> dict[str, Any]:
                 f"Stories: {json.dumps(sources, ensure_ascii=False)}"
             )
             analysis = await response_text(client, analysis_instructions, prompt, 6000)
+            set_progress(86, "Building cited report", len(sources), len(sources))
         else:
+            set_progress(15, "Analyzing story batches", 0, len(sources))
             batch_summaries: list[str] = []
             semaphore = asyncio.Semaphore(4)
+            progress_lock = asyncio.Lock()
+            processed_stories = 0
             batch_instructions = common_instructions + (
                 "\nCreate a compact factual digest of only the supplied batch. Preserve every relevant citation ID, "
                 "event date, publication date, named entity, quantity, and uncertainty. Do not make a final RHTC "
@@ -1780,15 +1845,21 @@ async def summarize_filtered_news(data: NewsSummaryInput) -> dict[str, Any]:
             )
 
             async def summarize_batch(batch: list[dict[str, Any]]) -> str:
+                nonlocal processed_stories
                 prompt = f"Filtered stories: {json.dumps(batch, ensure_ascii=False)}"
                 try:
                     async with semaphore:
-                        return await response_text(client, batch_instructions, prompt, 1800)
+                        result = await response_text(client, batch_instructions, prompt, 1800)
+                    async with progress_lock:
+                        processed_stories += len(batch)
+                        progress = 18 + int(65 * processed_stories / max(1, len(sources)))
+                        set_progress(progress, "Analyzed stories", processed_stories, len(sources))
+                    return result
                 except HTTPException:
                     if len(batch) <= 1:
                         raise
                     midpoint = max(1, len(batch) // 2)
-                    logger.warning("Retrying an unsuccessful news-summary batch as %s smaller batches", 2)
+                    logger.warning("Retrying an unsuccessful news-summary batch as two smaller batches")
                     return "\n".join(await asyncio.gather(
                         summarize_batch(batch[:midpoint]),
                         summarize_batch(batch[midpoint:]),
@@ -1798,6 +1869,7 @@ async def summarize_filtered_news(data: NewsSummaryInput) -> dict[str, Any]:
                 summarize_batch(sources[start:start + 20])
                 for start in range(0, len(sources), 20)
             ))
+            set_progress(85, "Synthesizing cross-story findings", len(sources), len(sources))
             final_prompt = (
                 "Synthesize these factual digests of the currently filtered RHTC news stories into one printable "
                 "report. Keep all citations as exact [S0001] references to the supplied stories.\n"
@@ -1805,6 +1877,7 @@ async def summarize_filtered_news(data: NewsSummaryInput) -> dict[str, Any]:
                 f"Story digests: {json.dumps(batch_summaries, ensure_ascii=False)}"
             )
             analysis = await response_text(client, analysis_instructions, final_prompt, 6000)
+            set_progress(92, "Formatting cited report", len(sources), len(sources))
     except HTTPException:
         raise
     except Exception as exc:
