@@ -1734,20 +1734,29 @@ async def summarize_filtered_news(data: NewsSummaryInput) -> dict[str, Any]:
     )
 
     async def response_text(client, instructions: str, prompt: str, limit: int) -> str:
-        try:
-            response = await client.responses.create(
-                model=os.getenv("OPENAI_ANALYSIS_MODEL", os.getenv("OPENAI_MODEL", "gpt-5-mini")),
-                instructions=instructions,
-                input=prompt,
-                max_output_tokens=limit,
-                store=False,
+        model = os.getenv("OPENAI_ANALYSIS_MODEL", os.getenv("OPENAI_MODEL", "gpt-5-mini"))
+        for attempt in range(2):
+            try:
+                response = await client.responses.create(
+                    model=model,
+                    instructions=instructions,
+                    input=prompt if attempt == 0 else prompt + "\n\nReturn the requested concise text directly; do not return an empty response.",
+                    max_output_tokens=limit,
+                    store=False,
+                )
+            except Exception as exc:
+                raise HTTPException(502, openai_error_message(exc)) from exc
+            text = (getattr(response, "output_text", "") or "").strip()
+            if text:
+                return text
+            logger.warning(
+                "OpenAI news summary returned empty text (attempt %s/2, status=%s, incomplete=%s)",
+                attempt + 1,
+                getattr(response, "status", "unknown"),
+                getattr(response, "incomplete_details", None),
             )
-        except Exception as exc:
-            raise HTTPException(502, openai_error_message(exc)) from exc
-        text = (getattr(response, "output_text", "") or "").strip()
-        if not text:
-            raise HTTPException(502, "The summary service returned no text. Try again.")
-        return text
+        raise HTTPException(502, "The summary service returned no text after a retry. Try again.")
+
 
     try:
         from openai import AsyncOpenAI
@@ -1772,8 +1781,18 @@ async def summarize_filtered_news(data: NewsSummaryInput) -> dict[str, Any]:
 
             async def summarize_batch(batch: list[dict[str, Any]]) -> str:
                 prompt = f"Filtered stories: {json.dumps(batch, ensure_ascii=False)}"
-                async with semaphore:
-                    return await response_text(client, batch_instructions, prompt, 1800)
+                try:
+                    async with semaphore:
+                        return await response_text(client, batch_instructions, prompt, 1800)
+                except HTTPException:
+                    if len(batch) <= 1:
+                        raise
+                    midpoint = max(1, len(batch) // 2)
+                    logger.warning("Retrying an unsuccessful news-summary batch as %s smaller batches", 2)
+                    return "\n".join(await asyncio.gather(
+                        summarize_batch(batch[:midpoint]),
+                        summarize_batch(batch[midpoint:]),
+                    ))
 
             batch_summaries = await asyncio.gather(*(
                 summarize_batch(sources[start:start + 20])
