@@ -92,13 +92,14 @@
 <dialog id="trade-report-dialog" aria-labelledby="trade-title" style="width:min(60rem,94vw);max-height:88vh;box-sizing:border-box;background:#171c21;color:#eef2f5;border:1px solid #847450;border-radius:12px;padding:1rem">
 <button type="button" id="trade-close" style="float:right">Close</button><h2 id="trade-title">Trade Report</h2>
 <form id="trade-filters"><label>Account <select id="trade-account" required></select></label> <label>Year <select id="trade-year" required></select></label> <button>View trades</button></form>
+<div id="trade-pdf-controls" hidden><a id="trade-print" target="_blank" rel="noopener">View / Print PDF</a> &nbsp; <a id="trade-download">Download PDF</a></div>
 <p id="trade-status" role="status"></p><div id="trade-results"></div></dialog>
 <script>
 (()=>{
  const get=id=>document.getElementById(id);
  const dialog=get('trade-report-dialog'),account=get('trade-account'),year=get('trade-year'),status=get('trade-status'),results=get('trade-results');
  let periods=[],sequence=0;
- function clear(){sequence++;results.replaceChildren();status.textContent='';}
+ function clear(){get('trade-pdf-controls').hidden=true;sequence++;results.replaceChildren();status.textContent='';}
  function years(){clear();year.replaceChildren(...periods.filter(p=>p[0]===account.value).map(p=>new Option(p[1],p[1])));}
  account.addEventListener('change',years);year.addEventListener('change',clear);
  async function request(query){const response=await fetch('/options/api/trade-report'+query,{cache:'no-store'});if(!response.ok)throw Error(response.status===401?'Sign in again to view trades.':'Unable to load trade history.');return response.json();}
@@ -145,7 +146,14 @@
     total.style.textAlign = 'right';
     total.style.fontWeight = 'bold';
     total.textContent = amountCount ? dollars.format(totalCents / 100) : '—';
-   }status.textContent=count?count+' trades, oldest first within each ticker.':'No trades for this account and year.';
+   }
+   if(count){
+     const url='/options/api/trade-report/pdf?'+new URLSearchParams({account:account.value,year:year.value});
+     get('trade-print').href=url;
+     get('trade-download').href=url+'&download=true';
+     get('trade-pdf-controls').hidden=false;
+   }
+   status.textContent=count?count+' trades, oldest first within each ticker.':'No trades for this account and year.';
   }catch(error){if(next===sequence)status.textContent=error.message;}
  };
 })();
