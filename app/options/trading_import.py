@@ -11,7 +11,8 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 from fastapi import HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
+from .trade_pdf import build_report
 from starlette.concurrency import run_in_threadpool
 
 HEADERS = ["Run Date", "Action", "Symbol", "Description", "Type", "Price ($)", "Quantity",
@@ -145,6 +146,17 @@ def register(app, database_path):
             periods = db.execute("SELECT DISTINCT account, substr(trade_date,1,4) FROM trading_transactions ORDER BY account, 2 DESC").fetchall()
             groups = trade_rows(db, account, year) if account and 1 <= year <= 9998 else {}
             return {"periods": periods, "groups": groups}
+
+    @app.get("/api/trade-report/pdf")
+    def trade_pdf(account: str, year: int, download: bool = False):
+        report = trade_report(account, year)
+        if not report["groups"]:
+            raise HTTPException(404, "No trades for this account and year.")
+        disposition = "attachment" if download else "inline"
+        filename = f"RHTC_Trade_Report_{year}_{account}.pdf"
+        return Response(build_report(account, year, report["groups"]), media_type="application/pdf",
+                        headers={"Content-Disposition": f'{disposition}; filename="{filename}"',
+                                 "Cache-Control": "private, no-store"})
 
     @app.get("/trading-import", response_class=HTMLResponse)
     def trading_import_page():
