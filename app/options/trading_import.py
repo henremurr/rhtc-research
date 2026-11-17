@@ -87,6 +87,33 @@ def import_history(path, account, payload, broker="Fidelity"):
         return {"added": inserted, "skipped": len(records) - inserted}
 
 
+def trade_kind(action, symbol, description):
+    option = re.search(r"\d{6}([CP])\d", symbol or "", re.I)
+    words = f"{action} {description or ''}"
+    call = option[1].upper() == "C" if option else bool(re.search(r"\bCALL\b", words, re.I))
+    bought = re.search(r"\b(buy|bought|purchase|purchased)\b", action, re.I)
+    sold = re.search(r"\b(sell|sold|sale)\b", action, re.I)
+    if call and bought:
+        return "call_buy"
+    if call and sold and re.search(r"\b(open|opening)\b", action, re.I):
+        return "call_write"
+    if not call and not option and not re.search(r"\b(call|put)\b", description or "", re.I):
+        if bought:
+            return "stock_buy"
+        if sold:
+            return "stock_sell"
+
+
+def order_same_day(entries):
+    # Reorder only the slots occupied by each affected pair.
+    for first, second in (("stock_buy", "call_write"), ("call_buy", "stock_sell")):
+        slots = [i for i, (kind, _) in enumerate(entries) if kind in (first, second)]
+        ordered = sorted((entries[i] for i in slots), key=lambda entry: entry[0] == second)
+        for i, entry in zip(slots, ordered):
+            entries[i] = entry
+    return [row for _, row in entries]
+
+
 def trade_rows(db, account, year):
     rows = db.execute("""
         SELECT trade_date, action, symbol, description, quantity, price, amount
@@ -102,9 +129,11 @@ def trade_rows(db, account, year):
             continue
         contract = re.match(r"^-?([A-Z.]+)\s*\d{6}[CP]", symbol or "", re.I)
         ticker = contract[1] if contract else (symbol or "").split(" ")[0]
-        groups.setdefault(ticker or "Unspecified ticker", []).append(
-            [day, action, symbol, quantity, price, amount])
-    return dict(sorted(groups.items()))
+        days = groups.setdefault(ticker or "Unspecified ticker", {})
+        days.setdefault(day, []).append((trade_kind(action, symbol, description),
+                                        [day, action, symbol, quantity, price, amount]))
+    return {ticker: [row for entries in days.values() for row in order_same_day(entries)]
+            for ticker, days in sorted(groups.items())}
 
 
 def register(app, database_path):
