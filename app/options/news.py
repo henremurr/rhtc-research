@@ -1891,7 +1891,7 @@ async def _build_news_summary(data: NewsSummaryInput, job_id: str | None = None)
     in_ticker_impact_section = False
     for line in analysis.splitlines():
         section = re.match(r"^#{1,3}\s+(.+)$", line.strip())
-        if section:
+        if section and len(line.strip()) - len(line.strip().lstrip("#")) <= 2:
             in_ticker_impact_section = section.group(1).strip().casefold().startswith("forward impact assessment")
         if in_ticker_impact_section:
             ticker_bullet = re.match(r"^\s*(?:[-*•]|\d+[.)])\s+([A-Z][A-Z0-9.]{0,9})\s*[-–—:]\s+(.+?)\s*$", line)
