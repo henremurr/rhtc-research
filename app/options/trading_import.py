@@ -71,6 +71,28 @@ def register(app, database_path):
     def trading_import_page():
         return PAGE
 
+    def transaction_count(db):
+        exists = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='trading_transactions'").fetchone()
+        return db.execute("SELECT COUNT(*) FROM trading_transactions").fetchone()[0] if exists else 0
+
+    @app.get("/api/trading-import/count")
+    def count_history():
+        with closing(sqlite3.connect(database_path(), timeout=20)) as db:
+            return {"count": transaction_count(db)}
+
+    @app.delete("/api/trading-import")
+    def purge_history(request: Request, expected_count: int):
+        if request.headers.get("X-RHTC-Confirm") != "purge-trading-history":
+            raise HTTPException(400, "Confirm the purge first.")
+        with closing(sqlite3.connect(database_path(), timeout=20)) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            count = transaction_count(db)
+            if count != expected_count:
+                raise HTTPException(409, "Trading history changed. Review the count and confirm again.")
+            if count:
+                db.execute("DELETE FROM trading_transactions")
+            return {"deleted": count}
+
     @app.post("/api/trading-import")
     async def trading_import(request: Request, account: str):
         if request.headers.get("content-type", "").split(";")[0] != "text/csv":
@@ -92,7 +114,28 @@ def register(app, database_path):
 PAGE = """<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Import trading history</title><style>body{color-scheme:dark;background:#11171c;color:#edf1f4;font:16px system-ui;margin:auto;max-width:36rem;padding:2rem 1rem}label,input{display:block;margin:1rem 0}input,button{padding:.65rem;max-width:95%;font:inherit}a{color:#e2c778}button{background:#e2c778;color:#141414;border:0;border-radius:.4rem}</style>
 <a href="/options/">Back to dashboard</a><h1>Import trading history</h1><p>Select a Fidelity account history CSV. Use the same account ID for future imports.</p>
-<form><label>History CSV<input id="file" type="file" accept=".csv,text/csv" required></label><label>Account ID<input id="account" required maxlength="40" pattern="[A-Za-z0-9_\\-]+" autocomplete="off"></label><button>Import transactions</button></form><p role="status"></p>
+<form><label>History CSV<input id="file" type="file" accept=".csv,text/csv" required></label><label>Account ID<input id="account" required maxlength="40" pattern="[A-Za-z0-9_\\-]+" autocomplete="off"></label><button>Import transactions</button></form><hr><button type="button" id="purge" style="background:#a32c32;color:white">Purge all trading history</button><p role="status"></p>
 <script>const file=document.querySelector('#file'),account=document.querySelector('#account'),statusText=document.querySelector('[role=status]'),button=document.querySelector('button');
 file.onchange=()=>{const match=file.files[0]?.name.match(/History_for_Account_([a-z0-9]+)/i);account.value=match?.[1]||'';statusText.textContent=''};
-document.querySelector('form').onsubmit=async event=>{event.preventDefault();button.disabled=true;statusText.textContent='Importing…';try{const response=await fetch('/options/api/trading-import?account='+encodeURIComponent(account.value.trim()),{method:'POST',headers:{'Content-Type':'text/csv'},body:file.files[0]});if(response.status===401)throw Error('Sign in again to import.');const result=await response.json();if(!response.ok)throw Error(result.detail||'Import failed.');statusText.textContent=result.added+' added. '+result.skipped+' already loaded.'}catch(error){statusText.textContent=error.message}finally{button.disabled=false}};</script></html>"""
+document.querySelector('form').onsubmit=async event=>{event.preventDefault();button.disabled=true;statusText.textContent='Importing…';try{const response=await fetch('/options/api/trading-import?account='+encodeURIComponent(account.value.trim()),{method:'POST',headers:{'Content-Type':'text/csv'},body:file.files[0]});if(response.status===401)throw Error('Sign in again to import.');const result=await response.json();if(!response.ok)throw Error(result.detail||'Import failed.');statusText.textContent=result.added+' added. '+result.skipped+' already loaded.'}catch(error){statusText.textContent=error.message}finally{button.disabled=false}};
+const purge = document.getElementById('purge');
+purge.onclick = async () => {
+  purge.disabled = true;
+  button.disabled = true;
+  try {
+    const endpoint = '/options/api/trading-import';
+    const preview = await fetch(endpoint + '/count', {cache:'no-store'});
+    if (!preview.ok) throw Error('Unable to read the transaction count. Check your sign-in and try again.');
+    const {count} = await preview.json();
+    if (!count) { statusText.textContent = 'No imported transactions to purge.'; return; }
+    if (!window.confirm('Permanently delete ' + count + ' imported transactions across ALL trading accounts?')) return;
+    const response = await fetch(endpoint + '?expected_count=' + count, {
+      method:'DELETE', headers:{'X-RHTC-Confirm':'purge-trading-history'}
+    });
+    const result = await response.json();
+    if (!response.ok) throw Error(result.detail || 'Purge failed.');
+    statusText.textContent = result.deleted + ' imported transactions deleted.';
+  } catch (error) { statusText.textContent = error.message; }
+  finally { purge.disabled = false; button.disabled = false; }
+};
+</script></html>"""
