@@ -5,7 +5,7 @@ import io
 import json
 import re
 import sqlite3
-from collections import Counter
+from collections import Counter, defaultdict, deque
 from contextlib import closing
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -112,16 +112,16 @@ def order_same_day(entries):
         ordered = sorted((entries[i] for i in slots), key=lambda entry: entry[0] == second)
         for i, entry in zip(slots, ordered):
             entries[i] = entry
-    return [row for _, row in entries]
+    return entries
 
 
 def trade_rows(db, account, year):
     rows = db.execute("""
         SELECT trade_date, action, symbol, description, quantity, price, amount
         FROM trading_transactions
-        WHERE account=? AND (?=0 OR (trade_date>=? AND trade_date<?))
+        WHERE account=?
         ORDER BY trade_date, rowid
-    """, (account, year, f"{year:04d}-01-01", f"{year+1:04d}-01-01"))
+    """, (account,))
     groups = {}
     for day, action, symbol, description, quantity, price, amount in rows:
         if not symbol and re.search(r"\b(card|debit|merchant|payment)\b", action, re.I):
@@ -130,11 +130,53 @@ def trade_rows(db, account, year):
             continue
         contract = re.match(r"^-?([A-Z.]+)\s*\d{6}[CP]", symbol or "", re.I)
         ticker = contract[1] if contract else (symbol or "").split(" ")[0]
+        kind = trade_kind(action, symbol, description)
+        if contract and re.search(r"\b(expired|expiration|assigned|assignment)\b", action, re.I):
+            kind = "call_end"
+        elif kind == "call_buy" and re.search(r"\b(open|opening)\b", action, re.I):
+            kind = None
         days = groups.setdefault(ticker or "Unspecified ticker", {})
-        days.setdefault(day, []).append((trade_kind(action, symbol, description),
+        days.setdefault(day, []).append((kind,
                                         [day, action, symbol, quantity, price, amount]))
-    return {ticker: [row for entries in days.values() for row in order_same_day(entries)]
-            for ticker, days in sorted(groups.items())}
+    result = {}
+    for ticker, days in sorted(groups.items()):
+        entries = [entry for day_entries in days.values() for entry in order_same_day(day_entries)]
+        mark_open_lots(entries)
+        visible = [row for _, row in entries if not year or row[0][:4] == str(year)]
+        if visible:
+            result[ticker] = visible
+    return result
+
+
+def mark_open_lots(entries):
+    # Match only within this account and ticker. Each written contract series
+    # has its own FIFO queue, independent of the shares that cover the call.
+    queues = defaultdict(deque)
+    for kind, row in entries:
+        if kind not in {"stock_buy", "stock_sell", "call_write", "call_buy", "call_end"}:
+            continue
+        if row[3] in (None, "") or not row[2]:
+            continue
+        quantity = abs(Decimal(str(row[3])))
+        if not quantity:
+            continue
+        key = "shares" if kind.startswith("stock_") else re.sub(r"\s+", "", row[2]).upper().lstrip("-")
+        lots = queues[key]
+        if kind in {"stock_buy", "call_write"}:
+            lots.append([row, quantity])
+            continue
+        while quantity and lots:
+            matched = min(quantity, lots[0][1])
+            quantity -= matched
+            lots[0][1] -= matched
+            if not lots[0][1]:
+                lots.popleft()
+    for key, lots in queues.items():
+        for row, remaining in lots:
+            units = "shares" if key == "shares" else "contracts"
+            if remaining == 1:
+                units = units[:-1]
+            row[1] += f" [Open: {remaining:f} {units}]"
 
 
 def register(app, database_path):
