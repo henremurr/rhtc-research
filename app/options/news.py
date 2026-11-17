@@ -1740,7 +1740,7 @@ async def summarize_filtered_news(data: NewsSummaryInput) -> dict[str, Any]:
                 response = await client.responses.create(
                     model=model,
                     instructions=instructions,
-                    input=prompt if attempt == 0 else prompt + "\\n\\nReturn the requested concise text directly; do not return an empty response.",
+                    input=prompt if attempt == 0 else prompt + "\n\nReturn the requested concise text directly; do not return an empty response.",
                     max_output_tokens=limit,
                     store=False,
                 )
@@ -1789,7 +1789,7 @@ async def summarize_filtered_news(data: NewsSummaryInput) -> dict[str, Any]:
                         raise
                     midpoint = max(1, len(batch) // 2)
                     logger.warning("Retrying an unsuccessful news-summary batch as %s smaller batches", 2)
-                    return "\\n".join(await asyncio.gather(
+                    return "\n".join(await asyncio.gather(
                         summarize_batch(batch[:midpoint]),
                         summarize_batch(batch[midpoint:]),
                     ))
