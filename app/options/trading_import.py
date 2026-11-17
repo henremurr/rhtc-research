@@ -87,7 +87,36 @@ def import_history(path, account, payload, broker="Fidelity"):
         return {"added": inserted, "skipped": len(records) - inserted}
 
 
+def trade_rows(db, account, year):
+    rows = db.execute("""
+        SELECT trade_date, action, symbol, description, quantity, price, amount
+        FROM trading_transactions
+        WHERE account=? AND trade_date>=? AND trade_date<?
+        ORDER BY trade_date, rowid
+    """, (account, f"{year:04d}-01-01", f"{year+1:04d}-01-01"))
+    groups = {}
+    for day, action, symbol, description, quantity, price, amount in rows:
+        if not symbol and re.search(r"\b(card|debit|merchant|payment)\b", action, re.I):
+            continue
+        if not re.search(r"\b(buy|bought|sell|sold|sale|purchase|purchased|assigned|assignment|expired|expiration|exercise|exercised|reinvest\w*)\b", action, re.I):
+            continue
+        contract = re.match(r"^-?([A-Z.]+)\s*\d{6}[CP]", symbol or "", re.I)
+        ticker = contract[1] if contract else (symbol or "").split(" ")[0]
+        groups.setdefault(ticker or "Unspecified ticker", []).append(
+            [day, action, symbol, quantity, price, amount])
+    return dict(sorted(groups.items()))
+
+
 def register(app, database_path):
+    @app.get("/api/trade-report")
+    def trade_report(account: str = "", year: int = 0):
+        with closing(sqlite3.connect(database_path())) as db:
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='trading_transactions'").fetchone():
+                return {"periods": [], "groups": {}}
+            periods = db.execute("SELECT DISTINCT account, substr(trade_date,1,4) FROM trading_transactions ORDER BY account, 2 DESC").fetchall()
+            groups = trade_rows(db, account, year) if account and 1 <= year <= 9998 else {}
+            return {"periods": periods, "groups": groups}
+
     @app.get("/trading-import", response_class=HTMLResponse)
     def trading_import_page():
         return PAGE
