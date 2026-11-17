@@ -323,6 +323,7 @@ def connect_db() -> sqlite3.Connection:
         ("x_published_at", "TEXT NOT NULL DEFAULT ''"),
         ("story_content", "TEXT NOT NULL DEFAULT ''"),
         ("topic", "TEXT NOT NULL DEFAULT ''"),
+        ("topic_override", "TEXT NOT NULL DEFAULT ''"),
         ("relevance_score", "INTEGER"),
     ):
         if column not in existing_columns:
@@ -1042,12 +1043,13 @@ async def scan_news_topics() -> dict[str, Any]:
             return {"status": "complete", "scanned": 0, "topic_count": 0, "topics": []}
         assignments = build_news_topics(rows)
         connection.executemany(
-            "UPDATE news_items SET topic=? WHERE url=?",
+            "UPDATE news_items SET topic=? WHERE url=? AND COALESCE(topic_override,'')=''",
             [(topic, url) for url, topic in assignments.items()],
         )
-        counts: dict[str, int] = {}
-        for topic in assignments.values():
-            counts[topic] = counts.get(topic, 0) + 1
+        topic_rows = connection.execute(
+            "SELECT topic,COUNT(*) AS count FROM news_items WHERE topic!='' GROUP BY topic ORDER BY topic COLLATE NOCASE"
+        ).fetchall()
+        counts = {row["topic"]: int(row["count"]) for row in topic_rows}
         connection.execute(
             "INSERT OR REPLACE INTO news_meta(key,value) VALUES('topic_scan_at',?)",
             (now_pacific().isoformat(),),
@@ -1106,14 +1108,19 @@ async def update_news_peak(data: NewsPeakInput) -> dict[str, Any]:
 @router.patch("/topic")
 async def update_news_topic(data: NewsTopicInput) -> dict[str, Any]:
     """Change the assigned topic for one stored story."""
-    topic = _canonical_topic_label(data.topic.strip())
+    # A manual selection must keep the exact topic label chosen in the UI.
+    # Canonicalizing here can collapse distinct options such as singular/plural labels.
+    topic = " ".join(data.topic.split())
     if not topic or len(topic) > 120:
         raise HTTPException(400, "Choose a valid news topic.")
     url = canonical_news_url(data.url)
     if not url:
         raise HTTPException(400, "A valid story URL is required.")
     with closing(connect_db()) as connection:
-        result = connection.execute("UPDATE news_items SET topic=? WHERE url=?", (topic, url))
+        result = connection.execute(
+            "UPDATE news_items SET topic=?, topic_override=? WHERE url=?",
+            (topic, topic, url),
+        )
         if result.rowcount == 0:
             raise HTTPException(404, "The story is no longer in the stored news feed.")
         connection.commit()
@@ -1404,7 +1411,7 @@ async def deduplicate_news() -> dict[str, Any]:
 
     with closing(connect_db()) as connection:
         rows = [dict(row) for row in connection.execute(
-            "SELECT url,title,published_at,snippet,story_content,first_seen_at,last_seen_at,youtube_published,youtube_video_id,youtube_url,youtube_published_at,youtube_privacy_status,x_published,x_post_id,x_post_url,x_published_at FROM news_items ORDER BY first_seen_at,url"
+            "SELECT url,title,published_at,snippet,story_content,topic,topic_override,first_seen_at,last_seen_at,youtube_published,youtube_video_id,youtube_url,youtube_published_at,youtube_privacy_status,x_published,x_post_id,x_post_url,x_published_at FROM news_items ORDER BY first_seen_at,url"
         )]
         words_by_url = {row["url"]: set(content_words(row)) for row in rows}
         document_frequency: dict[str, int] = {}
@@ -1467,6 +1474,16 @@ async def deduplicate_news() -> dict[str, Any]:
                     keep["url"],
                 ),
             )
+            manually_assigned = max(
+                (item for item in group if item.get("topic_override")),
+                key=lambda item: item.get("last_seen_at", ""),
+                default=None,
+            )
+            if manually_assigned:
+                connection.execute(
+                    "UPDATE news_items SET topic=?, topic_override=? WHERE url=?",
+                    (manually_assigned["topic_override"], manually_assigned["topic_override"], keep["url"]),
+                )
             for item in group:
                 if item["url"] != keep["url"]:
                     connection.execute("DELETE FROM news_items WHERE url=?", (item["url"],))
