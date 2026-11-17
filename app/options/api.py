@@ -1335,13 +1335,15 @@ class Tradier:
                 contracts = cdata.get("options", {}).get("option", [])
                 if isinstance(contracts, dict):
                     contracts = [contracts]
+                target_strike = max(projected, last)
                 calls = [
                     contract for contract in contracts
-                    if contract.get("option_type") == "call" and parse_number(contract.get("strike")) > 0
+                    if contract.get("option_type") == "call"
+                    and parse_number(contract.get("strike")) >= target_strike
                 ]
                 if not calls:
-                    return {**base, "expiry": expiry, "dte": dte, "error": "No call contract returned"}
-                selected = min(calls, key=lambda contract: abs(parse_number(contract.get("strike")) - projected))
+                    return {**base, "expiry": expiry, "dte": dte, "error": "No call strike at or above the current and projected share price"}
+                selected = min(calls, key=lambda contract: parse_number(contract.get("strike")) - target_strike)
                 bid = parse_number(selected.get("bid"))
                 ask = parse_number(selected.get("ask"))
                 return {
