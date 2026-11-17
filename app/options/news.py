@@ -1942,8 +1942,8 @@ async def _build_news_summary(data: NewsSummaryInput, job_id: str | None = None)
         normalized_lines.append(line)
     analysis = "\n".join(normalized_lines)
 
-    cited_refs = set(re.findall(r"\[(S\d{4})\]", analysis))
-    references = [source for source in sources if source["ref"] in cited_refs]
+    # Preserve the complete filtered source set in the report appendix; the prose citations remain selective.
+    references = sources
     return {
         "analysis": analysis,
         "story_count": len(stories),
