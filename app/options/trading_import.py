@@ -258,7 +258,8 @@ def tax_lot_rows(db, account, year):
                                       "proceeds": str(proceeds.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)) if proceeds is not None else None,
                                       "basis": str(basis.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)) if basis is not None else None,
                                       "code": "", "adjustment": "",
-                                      "gain": str((proceeds - basis).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)) if proceeds is not None and basis is not None else None})
+                                      "gain": str((proceeds - basis).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)) if proceeds is not None and basis is not None else None,
+                                      "term": holding_term(lot["date"], day)})
                 lot["qty"] -= matched
                 if lot["value"] is not None:
                     lot["value"] -= basis if lot["side"] == "long" else proceeds
@@ -284,6 +285,7 @@ def tax_lot_rows(db, account, year):
                     "basis": str(basis.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)) if basis is not None else None,
                     "code": "", "adjustment": "",
                     "gain": str((proceeds - basis).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)) if proceeds is not None and basis is not None else None,
+                    "term": holding_term(lot["date"], day),
                 })
             lot["qty"] -= matched
             if lot["value"] is not None:
@@ -296,6 +298,32 @@ def tax_lot_rows(db, account, year):
             lots.append({"date": day, "qty": remaining, "value": opened_cash,
                          "side": "long" if bought else "short", "option": is_option})
     return sorted(completed, key=lambda row: (row["sold"], row["description"], row["acquired"]))
+
+
+def holding_term(acquired, sold):
+    """Classify a lot as long-term only after it has been held over one year."""
+    acquired_date = datetime.strptime(acquired, "%Y-%m-%d").date()
+    sold_date = datetime.strptime(sold, "%Y-%m-%d").date()
+    try:
+        one_year = acquired_date.replace(year=acquired_date.year + 1)
+    except ValueError:  # February 29 acquisition in a non-leap year.
+        one_year = acquired_date.replace(year=acquired_date.year + 1, day=28)
+    return "long" if sold_date > one_year else "short"
+
+
+def tax_lot_summary(lots):
+    totals = {term: {"proceeds": Decimal(0), "basis": Decimal(0), "gain": Decimal(0), "count": 0}
+              for term in ("short", "long")}
+    for lot in lots:
+        if lot.get("gain") in (None, ""):
+            continue
+        total = totals[lot["term"]]
+        total["proceeds"] += Decimal(lot["proceeds"])
+        total["basis"] += Decimal(lot["basis"])
+        total["gain"] += Decimal(lot["gain"])
+        total["count"] += 1
+    return {term: {key: str(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)) if key != "count" else value
+                   for key, value in values.items()} for term, values in totals.items()}
 
 
 def register(app, database_path):
@@ -327,7 +355,7 @@ def register(app, database_path):
                 return {"periods": [], "lots": []}
             periods = db.execute("SELECT DISTINCT account, substr(trade_date,1,4) FROM trading_transactions ORDER BY account, 2 DESC").fetchall()
             lots = tax_lot_rows(db, account, year) if account and 0 <= year <= 9998 else []
-            return {"periods": periods, "lots": lots}
+            return {"periods": periods, "lots": lots, "summary": tax_lot_summary(lots)}
 
     @app.get("/api/tax-lot-report/pdf")
     def tax_lot_pdf(account: str, year: int, download: bool = False):
