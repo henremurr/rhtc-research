@@ -65,7 +65,12 @@ def import_history(path, account, payload, broker="Fidelity"):
             target_account = source_account
         row = [row[i].strip() if i is not None else "" for i in positions]
         try:
-            row[0] = datetime.strptime(row[0], "%m/%d/%Y").date().isoformat()
+            trade_date = row[0]
+            if broker == "Schwab":
+                # Schwab appends "as of MM/DD/YYYY" to some cash activity dates.
+                # The leading date is the transaction date used in the report.
+                trade_date = re.split(r"\\s+as\\s+of\\s+", trade_date, maxsplit=1, flags=re.I)[0].strip()
+            row[0] = datetime.strptime(trade_date, "%m/%d/%Y").date().isoformat()
             if row[12]:
                 row[12] = datetime.strptime(row[12], "%m/%d/%Y").date().isoformat()
             for i in range(5, 11):
