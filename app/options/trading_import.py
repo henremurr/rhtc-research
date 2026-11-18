@@ -130,13 +130,16 @@ def trade_kind(action, symbol, description):
 
 
 def order_same_day(entries):
-    # Reorder only the slots occupied by each affected pair.
-    for first, second in (("stock_buy", "call_write"), ("call_buy", "stock_sell")):
-        slots = [i for i, (kind, _) in enumerate(entries) if kind in (first, second)]
-        ordered = sorted((entries[i] for i in slots), key=lambda entry: entry[0] == second)
-        for i, entry in zip(slots, ordered):
-            entries[i] = entry
-    return entries
+    def action_order(entry):
+        action = entry[1][1] or ""
+        if re.search(r"\b(buy|bought|purchase|purchased|reinvest\w*)\b", action, re.I):
+            return 0
+        if re.search(r"\b(sell|sold|sale)\b", action, re.I):
+            return 2
+        return 1
+
+    # Python's stable sort preserves the imported order among buys and sells.
+    return sorted(entries, key=action_order)
 
 
 def trade_rows(db, account, year, summaries=None):
