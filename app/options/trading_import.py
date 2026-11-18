@@ -113,10 +113,12 @@ def trade_kind(action, symbol, description):
     sold = re.search(r"\b(sell|sold|sale)\b", action, re.I)
     if call and bought:
         return "call_buy"
+    if call and sold and re.search(r"\b(close|closing)\b", action, re.I):
+        return "call_sell"
     if call and sold and re.search(r"\b(open|opening)\b", action, re.I):
         return "call_write"
     if not call and not option and not re.search(r"\b(call|put)\b", description or "", re.I):
-        if bought:
+        if bought or re.search(r"\breinvest\w*", action, re.I):
             return "stock_buy"
         if sold:
             return "stock_sell"
@@ -148,10 +150,8 @@ def trade_rows(db, account, year, summaries=None):
         contract = re.match(r"^-?([A-Z.]+)\s*\d{6}[CP]", symbol or "", re.I)
         ticker = contract[1] if contract else (symbol or "").split(" ")[0]
         kind = trade_kind(action, symbol, description)
-        if contract and re.search(r"\b(expired|expiration|assigned|assignment)\b", action, re.I):
+        if (re.search(r"\d{6}C\d", symbol or "", re.I) or re.search(r"\bCALL\b", description or "", re.I)) and re.search(r"\b(expired|expiration|assigned|assignment|exercise|exercised)\b", action, re.I):
             kind = "call_end"
-        elif kind == "call_buy" and re.search(r"\b(open|opening)\b", action, re.I):
-            kind = None
         days = groups.setdefault(ticker or "Unspecified ticker", {})
         days.setdefault(day, []).append((kind,
                                         [day, action, symbol, quantity, price, amount]))
@@ -162,23 +162,45 @@ def trade_rows(db, account, year, summaries=None):
         if visible:
             result[ticker] = [row for _, row in visible]
             if summaries is not None:
-                summaries[ticker] = position_summary(visible)
+                summaries[ticker] = position_summary([entry for entry in entries if not year or entry[1][0][:4] <= str(year)])
     return result
 
 
 def position_summary(entries):
+    shares = Decimal(0)
+    contracts = Counter()
+    seen = set()
+    missing = set()
+    for kind, row in entries:
+        if kind is None:
+            continue
+        stock = kind.startswith("stock_")
+        label = "Stock" if stock else "Calls"
+        seen.add(label)
+        if row[3] in (None, ""):
+            missing.add(label)
+            continue
+        quantity = abs(Decimal(str(row[3])))
+        if stock:
+            shares += quantity if kind == "stock_buy" else -quantity
+        else:
+            series = (row[2] or "").strip().upper()
+            if kind == "call_end":
+                balance = contracts[series]
+                closed = min(abs(balance), quantity)
+                contracts[series] += closed if balance < 0 else -closed
+            else:
+                contracts[series] += quantity if kind == "call_buy" else -quantity
+
     lines = []
-    for label, kinds in (("Stock", {"stock_buy", "stock_sell"}), ("Calls", {"call_write", "call_buy"})):
-        amounts = [row[5] for kind, row in entries if kind in kinds]
-        if not amounts:
+    for label, balance, unit in (("Stock", shares, "shares"), ("Calls", sum(map(abs, contracts.values())), "contracts")):
+        if label not in seen:
             continue
-        if any(value in (None, "") for value in amounts):
-            lines.append(f"{label} net amount: unavailable (missing amount)")
-            continue
-        net = sum(Decimal(str(value)).quantize(Decimal(".01"), rounding=ROUND_HALF_UP) for value in amounts)
-        is_open = net < 0 if label == "Stock" else net > 0
-        status = "OPEN" if is_open else "No open flag"
-        lines.append(f"{label} net amount: {net:,.2f} USD  |  {status}")
+        if label in missing:
+            lines.append(f"{label}: unknown (missing quantity)")
+        else:
+            status = "OPEN" if balance else "CLOSED"
+            lines.append(f"{label}: {balance:,f} {unit} | {status}")
     return lines
 
 
