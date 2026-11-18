@@ -107,6 +107,10 @@
 #trade-preview nav{display:flex;align-items:center;gap:.6rem;padding:.5rem;background:#172229;flex-wrap:wrap}
 #trade-preview button{min-height:44px;padding:0 .8rem;color:#171717;background:#e2c778;border:0;border-radius:.4rem}
 #trade-preview iframe,#preview-pages{flex:1;min-height:0;width:100%;border:0}
+/* Dashboard table cells have their own theme colors. Set paper colors on the cells. */
+:is(#preview-pages,#trade-print-view) :is(th,td){color:#111;background:#fff}
+:is(#preview-pages,#trade-print-view) thead th{color:#111;background:#e6e9eb;font-weight:700}
+:is(#preview-pages,#trade-print-view) tfoot :is(th,td){color:#000;font-weight:700}
 #preview-pages{overflow:auto;background:white;color:#172229;padding:1rem;box-sizing:border-box}
 </style>
 <dialog id="trade-preview" aria-label="Trade Report preview">
