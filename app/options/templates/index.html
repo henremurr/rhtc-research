@@ -105,6 +105,9 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
 .trade-toolbar #trade-close{margin-inline-start:auto}
 #trade-status{margin:.45rem 0;font-size:.82rem}
 #trade-status:empty{margin:0}
+#trade-report-dialog[open]{display:flex;flex-direction:column;overflow:hidden}
+#trade-report-dialog > :is(.trade-toolbar,#trade-status){flex:none}
+#trade-results{flex:1 1 auto;min-height:0;overflow:auto;overscroll-behavior:contain}
 :is(#trade-results,#preview-pages) thead th:nth-last-child(-n+2){text-align:right}
 #preview-pages{flex:1;min-height:0;width:100%;border:0}
 /* Dashboard table cells have their own theme colors. Set paper colors on the cells. */
@@ -144,7 +147,7 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
  const get=id=>document.getElementById(id);
  const dialog=get('trade-report-dialog'),account=get('trade-account'),year=get('trade-year'),status=get('trade-status'),results=get('trade-results');
  let periods=[],sequence=0;
- function clear(){printRequest?.abort();printFile=undefined;get('trade-pdf-controls').hidden=true;sequence++;results.replaceChildren();status.textContent='';}
+ function clear(){printRequest?.abort();printFile=undefined;get('trade-pdf-controls').hidden=true;sequence++;results.replaceChildren();results.scrollTop=0;status.textContent='';}
  function reportContent(target, heading){
    const logo=target.createElement('img');logo.src=new URL('/apple-touch-icon.png',location.href).href;logo.width=44;logo.height=44;logo.alt='RHTC';
    const title=target.createElement(heading);title.textContent='RHTC Trade Report';
