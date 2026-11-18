@@ -127,13 +127,13 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
 }
 </style>
 <dialog id="trade-preview" aria-modal="true" aria-label="Trade Report preview">
-<nav><button type="button" class="trade-action" id="preview-close">Close preview</button><button type="button" id="preview-return" class="trade-action">Return to dashboard</button><button type="button" id="preview-expand" class="trade-action" aria-pressed="false">Full screen</button><button type="button" id="preview-print" class="trade-action">Print report</button><a id="preview-download" class="trade-action" target="_blank" rel="noopener">Download PDF</a><span id="preview-print-status" role="status"></span></nav>
+<nav><button type="button" class="trade-action" id="preview-close">Close preview</button><button type="button" id="preview-return" class="trade-action">Return to dashboard</button><button type="button" id="preview-expand" class="trade-action" aria-pressed="false">Full screen</button><button type="button" id="preview-print" class="trade-action">Print report</button><a id="preview-download" class="trade-action" download>Download PDF</a><span id="preview-print-status" role="status"></span></nav>
 <div id="preview-pages" hidden></div></dialog>
 <dialog id="trade-report-dialog" aria-labelledby="trade-title" style="width:min(60rem,94vw);max-height:88vh;box-sizing:border-box;background:#171c21;color:#eef2f5;border:1px solid #847450;border-radius:12px;padding:1rem">
 <div class="trade-toolbar">
 <h2 id="trade-title">Trade Report</h2>
 <form id="trade-filters"><label>Account <select id="trade-account" required></select></label><label>Year <select id="trade-year" required></select></label><button class="trade-action">View trades</button></form>
-<div id="trade-pdf-controls" hidden><button type="button" id="trade-preview-open" class="trade-action">Preview report</button><a id="trade-download" class="trade-action" target="_blank" rel="noopener">Download PDF</a></div>
+<div id="trade-pdf-controls" hidden><button type="button" id="trade-preview-open" class="trade-action">Preview report</button><a id="trade-download" class="trade-action" download>Download PDF</a></div>
 <button type="button" id="trade-close" class="trade-action">Return to dashboard</button>
 </div>
 <p id="trade-status" role="status"></p><div id="trade-results"></div></dialog>
@@ -142,7 +142,7 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
  const get=id=>document.getElementById(id);
  const dialog=get('trade-report-dialog'),account=get('trade-account'),year=get('trade-year'),status=get('trade-status'),results=get('trade-results');
  let periods=[],sequence=0;
- function clear(){get('trade-pdf-controls').hidden=true;sequence++;results.replaceChildren();status.textContent='';}
+ function clear(){printRequest?.abort();printFile=undefined;get('trade-pdf-controls').hidden=true;sequence++;results.replaceChildren();status.textContent='';}
  function reportContent(target, heading){
    const logo=target.createElement('img');logo.src=new URL('/apple-touch-icon.png',location.href).href;logo.width=44;logo.height=44;logo.alt='RHTC';
    const title=target.createElement(heading);title.textContent='RHTC Trade Report';
@@ -160,27 +160,66 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
  });
  const preview=get('trade-preview'),expand=get('preview-expand'),pages=get('preview-pages');
  const printButton=get('preview-print'),printStatus=get('preview-print-status');
+ const reportDownload=get('trade-download'),previewDownload=get('preview-download');
  const appleMobile=/iPad|iPhone|iPod/.test(navigator.userAgent)||
    (navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+ const canShareFiles=Boolean(navigator.share&&navigator.canShare);
  let printRequest,printFile;
+ function pdfFilename(){return 'RHTC_Trade_Report_'+(year.value==='0'?'All':year.value)+'.pdf';}
+ async function fetchPdf(url,signal){
+   const response=await fetch(url,{signal,cache:'no-store'});
+   if(!response.ok||!response.headers.get('Content-Type')?.includes('application/pdf'))throw Error('PDF unavailable');
+   return response.blob();
+ }
  async function preparePrintFile(url){
    const request=new AbortController();
    printRequest=request;
-   printButton.disabled=true;
-   printStatus.textContent='Preparing PDF for printing…';
+   printButton.disabled=appleMobile;
    try{
-     const response=await fetch(url,{signal:request.signal,cache:'no-store'});
-     if(!response.ok||!response.headers.get('Content-Type')?.includes('application/pdf'))throw Error('PDF unavailable');
-     const blob=await response.blob();
-     if(request.signal.aborted)return;
-     printFile=new File([blob],'RHTC_Trade_Report.pdf',{type:'application/pdf'});
-     printStatus.textContent='';
+     const blob=await fetchPdf(url,request.signal);
+     if(!request.signal.aborted)printFile=new File([blob],pdfFilename(),{type:'application/pdf'});
    }catch{
-     if(!request.signal.aborted)printStatus.textContent='Use Download PDF, then open the file and choose Share → Print.';
+     // The download link remains available if preparing the shareable file fails.
    }finally{
-     if(!request.signal.aborted)printButton.disabled=false;
+     if(!request.signal.aborted){
+       printRequest=undefined;
+       printButton.disabled=false;
+     }
    }
  }
+ async function savePdf(event){
+   const url=event.currentTarget.href;
+   const feedback=preview.open?printStatus:status;
+   if(window.showSaveFilePicker){
+     event.preventDefault();
+     try{
+       const handle=await window.showSaveFilePicker({
+         suggestedName:pdfFilename(),
+         types:[{description:'PDF document',accept:{'application/pdf':['.pdf']}}]
+       });
+       const blob=printFile||await fetchPdf(url);
+       const writer=await handle.createWritable();
+       await writer.write(blob);
+       await writer.close();
+       feedback.textContent='PDF saved.';
+     }catch(error){
+       if(error.name!=='AbortError')feedback.textContent='Could not save the PDF. Please try again.';
+     }
+     return;
+   }
+   if(printFile&&navigator.canShare?.({files:[printFile]})){
+     event.preventDefault();
+     feedback.textContent='Choose Save to Files to name and save the PDF.';
+     try{await navigator.share({files:[printFile]});}
+     catch(error){
+       if(error.name!=='AbortError')feedback.textContent='Could not open Save to Files. Please try again.';
+     }
+   }else if(printRequest&&!printRequest.signal.aborted){
+     event.preventDefault();
+     feedback.textContent='Preparing the PDF. Try Download PDF again in a moment.';
+   }
+ }
+ reportDownload.onclick=previewDownload.onclick=savePdf;
  function expanded(active){
    preview.classList.toggle('expanded',active);
    expand.textContent=active?'Exit full screen':'Full screen';
@@ -188,14 +227,14 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
  }
  expand.onclick=()=>expanded(!preview.classList.contains('expanded'));
  get('trade-preview-open').onclick=()=>{
-   get('preview-download').href=get('trade-download').href;
+   previewDownload.href=reportDownload.href;
+   previewDownload.download=pdfFilename();
    pages.replaceChildren(...reportContent(document,'h2'));pages.hidden=false;
    pages.scrollTop=0;
    preview.show();
    dialog.close();
    document.querySelector(".shell").inert=true;
    get('preview-close').focus();
-   if(appleMobile&&navigator.share&&navigator.canShare)preparePrintFile(get('preview-download').href);
  };
  printButton.onclick=async()=>{
    if(!appleMobile){window.print();return;}
@@ -215,9 +254,6 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
  preview.addEventListener('keydown',event=>{if(event.key==='Escape')closePreview();});
  get('preview-return').onclick=()=>{preview.close();document.querySelector(".shell").inert=false;clear();get('guide-menu-toggle').focus();};
  preview.addEventListener('close',()=>{
-   printRequest?.abort();
-   printFile=undefined;
-   printButton.disabled=false;
    printStatus.textContent='';
    expanded(false);pages.replaceChildren();pages.hidden=true;
  });
@@ -263,7 +299,10 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
    }
    if(count){
      const url='/options/api/trade-report/pdf?'+new URLSearchParams({account:account.value,year:year.value});
-     get('trade-download').href=url+'&download=true';
+     reportDownload.href=url+'&download=true';
+     reportDownload.download=pdfFilename();
+     printButton.disabled=false;
+     if(canShareFiles&&(appleMobile||!window.showSaveFilePicker))preparePrintFile(reportDownload.href);
      get('trade-pdf-controls').hidden=false;
    }
    status.textContent=count?count+' trades, oldest first within each ticker.':'No trades for this account and year.';
