@@ -7,7 +7,7 @@ from xml.sax.saxutils import escape
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import landscape, letter
 from reportlab.lib.styles import ParagraphStyle
-from reportlab.platypus import LongTable, Paragraph, SimpleDocTemplate, Spacer, TableStyle
+from reportlab.platypus import LongTable, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 
 def build_report(account, year, groups, summaries):
@@ -99,25 +99,53 @@ def build_tax_lot_report(account, year, lots):
     def display_date(value):
         parts = value.split("-")
         return f"{parts[1]}/{parts[2]}/{parts[0]}" if len(parts) == 3 else value
-    data = [headings]
-    for lot in lots:
-        def money(value):
-            return f"${Decimal(value):,.2f}" if value not in (None, "") else "--"
-        data.append([
-            Paragraph(escape(lot["description"]), body), display_date(lot["acquired"]), display_date(lot["sold"]),
-            money(lot["proceeds"]), money(lot["basis"]), lot["code"] or "",
-            money(lot["adjustment"]) if lot["adjustment"] not in (None, "") else "", money(lot["gain"]),
-        ])
-    table = LongTable(data, colWidths=[142, 62, 62, 82, 86, 48, 86, 80],
-                      repeatRows=1, hAlign="LEFT", splitInRow=1)
-    table.setStyle(TableStyle([
+    def money(value):
+        return f"${Decimal(value):,.2f}" if value not in (None, "") else "--"
+
+    story = []
+    sections = (("short", "Part I - Short-term transactions (held 1 year or less)"),
+                ("long", "Part II - Long-term transactions (held more than 1 year)"))
+    totals = {term: {key: Decimal(0) for key in ("proceeds", "basis", "gain")} for term, _ in sections}
+    for term, title in sections:
+        selected = [lot for lot in lots if lot["term"] == term]
+        if not selected:
+            continue
+        story.append(Paragraph(escape(title), ParagraphStyle("TaxLotSection", parent=body, fontName="Helvetica-Bold", fontSize=9, leading=12, textColor=ink)))
+        data = [headings]
+        for lot in selected:
+            data.append([
+                Paragraph(escape(lot["description"]), body), display_date(lot["acquired"]), display_date(lot["sold"]),
+                money(lot["proceeds"]), money(lot["basis"]), lot["code"] or "",
+                money(lot["adjustment"]) if lot["adjustment"] not in (None, "") else "", money(lot["gain"]),
+            ])
+            if lot["gain"] not in (None, ""):
+                for key in totals[term]:
+                    totals[term][key] += Decimal(lot[key])
+        table = LongTable(data, colWidths=[142, 62, 62, 82, 86, 48, 86, 80],
+                          repeatRows=1, hAlign="LEFT", splitInRow=1)
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), ink), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 7),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"), ("ALIGN", (3, 1), (-1, -1), "RIGHT"),
+            ("BACKGROUND", (0, 1), (-1, -1), colors.white),
+            ("LINEBELOW", (0, 0), (-1, 0), 1, gold), ("LINEBELOW", (0, 1), (-1, -1), .3, colors.HexColor("#D5DADD")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ]))
+        story.extend([table, Spacer(1, 9)])
+
+    totals_data = [["Holding period", "Proceeds", "Cost or basis", "Net gain/(loss)"]]
+    for term, label in (("short", "Short-term"), ("long", "Long-term")):
+        totals_data.append([label, *(money(totals[term][key]) for key in ("proceeds", "basis", "gain"))])
+    totals_table = Table(totals_data, colWidths=[260, 120, 140, 148], hAlign="LEFT")
+    totals_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), ink), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 7),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"), ("ALIGN", (3, 1), (-1, -1), "RIGHT"),
-        ("BACKGROUND", (0, 1), (-1, -1), colors.white),
-        ("LINEBELOW", (0, 0), (-1, 0), 1, gold), ("LINEBELOW", (0, 1), (-1, -1), .3, colors.HexColor("#D5DADD")),
-        ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-        ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTNAME", (0, -2), (-1, -1), "Helvetica-Bold"),
+        ("ALIGN", (1, 1), (-1, -1), "RIGHT"), ("LINEBELOW", (0, 0), (-1, 0), 1, gold),
+        ("LINEABOVE", (0, -2), (-1, -2), .7, gold), ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6), ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
     ]))
-    doc.build([table], onFirstPage=decorate, onLaterPages=decorate)
+    story.extend([Paragraph("Capital gain/(loss) totals", ParagraphStyle("TaxLotSummaryHeading", parent=body, fontName="Helvetica-Bold", fontSize=10, leading=13, textColor=ink)), totals_table])
+    doc.build(story, onFirstPage=decorate, onLaterPages=decorate)
     return output.getvalue()
