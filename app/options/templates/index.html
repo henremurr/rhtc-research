@@ -96,8 +96,14 @@
 #trade-preview nav{display:flex;align-items:center;gap:.6rem;padding:.5rem;background:#172229;flex-wrap:wrap}
 .trade-action{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-height:44px;padding:0 .8rem;color:#171717;background:#e2c778;border:0;border-radius:.4rem;font:inherit;text-decoration:none;cursor:pointer}
 a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
-#trade-filters,#trade-pdf-controls:not([hidden]){display:flex;align-items:center;flex-wrap:wrap;gap:.6rem}
-#trade-pdf-controls{margin-top:.6rem}
+.trade-toolbar,#trade-filters,#trade-pdf-controls:not([hidden]){display:flex;align-items:center;flex-wrap:wrap;gap:.4rem}
+.trade-toolbar #trade-title{margin:0 .3rem 0 0;font-size:1.1rem;white-space:nowrap}
+.trade-toolbar label{display:inline-flex;align-items:center;gap:.25rem;white-space:nowrap}
+.trade-toolbar .trade-action,#trade-filters select{min-height:2.25rem;font:inherit}
+.trade-toolbar .trade-action{padding:0 .55rem;white-space:nowrap}
+.trade-toolbar #trade-close{margin-inline-start:auto}
+#trade-status{margin:.45rem 0;font-size:.82rem}
+#trade-status:empty{margin:0}
 #preview-pages{flex:1;min-height:0;width:100%;border:0}
 /* Dashboard table cells have their own theme colors. Set paper colors on the cells. */
 #preview-pages :is(th,td){color:#111;background:#fff}
@@ -124,9 +130,12 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
 <nav><button type="button" class="trade-action" id="preview-close">Close preview</button><button type="button" id="preview-return" class="trade-action">Return to dashboard</button><button type="button" id="preview-expand" class="trade-action" aria-pressed="false">Full screen</button><button type="button" id="preview-print" class="trade-action">Print report</button><a id="preview-download" class="trade-action" target="_blank" rel="noopener">Download PDF</a></nav>
 <div id="preview-pages" hidden></div></dialog>
 <dialog id="trade-report-dialog" aria-labelledby="trade-title" style="width:min(60rem,94vw);max-height:88vh;box-sizing:border-box;background:#171c21;color:#eef2f5;border:1px solid #847450;border-radius:12px;padding:1rem">
-<button type="button" id="trade-close" class="trade-action" style="position:sticky;top:0;z-index:1;float:right">Return to dashboard</button><h2 id="trade-title">Trade Report</h2>
-<form id="trade-filters"><label>Account <select id="trade-account" required></select></label> <label>Year <select id="trade-year" required></select></label> <button class="trade-action">View trades</button></form>
-<div id="trade-pdf-controls" hidden><button type="button" id="trade-preview-open" class="trade-action">Preview report</button> <a id="trade-download" class="trade-action" target="_blank" rel="noopener">Download PDF</a></div>
+<div class="trade-toolbar">
+<h2 id="trade-title">Trade Report</h2>
+<form id="trade-filters"><label>Account <select id="trade-account" required></select></label><label>Year <select id="trade-year" required></select></label><button class="trade-action">View trades</button></form>
+<div id="trade-pdf-controls" hidden><button type="button" id="trade-preview-open" class="trade-action">Preview report</button><a id="trade-download" class="trade-action" target="_blank" rel="noopener">Download PDF</a></div>
+<button type="button" id="trade-close" class="trade-action">Return to dashboard</button>
+</div>
 <p id="trade-status" role="status"></p><div id="trade-results"></div></dialog>
 <script>
 (()=>{
