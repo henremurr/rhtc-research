@@ -48,7 +48,6 @@ def import_history(path, account, payload, broker="Fidelity"):
         raise ValueError(f"The file does not contain the expected {broker} transaction-history columns. Check the selected format.")
     positions = [header.index(name) if name else None for name in mapping]
     account_column = header.index("Account Number") if embedded else None
-    source_accounts = set()
     counts = Counter()
     records = []
     for row in reader:
@@ -61,11 +60,9 @@ def import_history(path, account, payload, broker="Fidelity"):
             source_account = row[account_column].strip().upper()
             if not re.fullmatch(r"[A-Z0-9_-]{1,40}", source_account):
                 raise ValueError(f"Invalid account number at line {reader.line_num}.")
-            if account:
-                source_accounts.add(source_account)
-                if len(source_accounts) > 1:
-                    raise ValueError("Clear Account ID to import a file containing multiple accounts.")
-            target_account = account or source_account
+            if account and account != source_account:
+                continue
+            target_account = source_account
         row = [row[i].strip() if i is not None else "" for i in positions]
         try:
             row[0] = datetime.strptime(row[0], "%m/%d/%Y").date().isoformat()
@@ -82,10 +79,12 @@ def import_history(path, account, payload, broker="Fidelity"):
         # Balance and settlement status can change between exports. Occurrence
         # counts preserve separate identical fills in the same account history.
         key = hashlib.sha256(json.dumps(row[:11] if broker in ("Fidelity", "Fidelity IRA") else [broker, *row[:11]], ensure_ascii=False).encode()).hexdigest()
+        if broker == "Fidelity IRA":
+            key = "ira:" + key
         counts[target_account, key] += 1
         records.append((target_account, key, counts[target_account, key], *row, broker))
     if not records:
-        raise ValueError("No transactions found.")
+        raise ValueError("No transactions found for the selected account." if embedded and account else "No transactions found.")
     with closing(sqlite3.connect(path, timeout=20)) as db, db:
         db.execute("BEGIN IMMEDIATE")
         db.execute("""CREATE TABLE IF NOT EXISTS trading_transactions (
@@ -97,8 +96,12 @@ def import_history(path, account, payload, broker="Fidelity"):
         if "broker" not in {col[1] for col in db.execute("PRAGMA table_info(trading_transactions)")}:
             db.execute("ALTER TABLE trading_transactions ADD COLUMN broker TEXT NOT NULL DEFAULT 'Fidelity'")
         db.execute("CREATE INDEX IF NOT EXISTS trading_account_date ON trading_transactions(account, trade_date, symbol)")
+        if embedded:
+            db.execute("""UPDATE trading_transactions SET fingerprint='ira:' || fingerprint
+                          WHERE broker='Fidelity IRA' AND length(fingerprint)=64""")
+        before_insert = db.total_changes
         db.executemany(f"INSERT INTO trading_transactions(account,fingerprint,occurrence,{COLUMNS},broker) VALUES ({','.join(['?']*17)}) ON CONFLICT(account,fingerprint,occurrence) DO NOTHING", records)
-        inserted = db.total_changes
+        inserted = db.total_changes - before_insert
         return {"added": inserted, "skipped": len(records) - inserted}
 
 
@@ -205,26 +208,32 @@ def register(app, database_path):
     def trading_import_page():
         return PAGE
 
-    def transaction_count(db):
+    def transaction_count(db, broker, account):
+        if broker not in FORMATS or not re.fullmatch(r"[A-Z0-9_-]{1,40}", account):
+            raise HTTPException(422, "Choose a file format and enter an account ID.")
         exists = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='trading_transactions'").fetchone()
-        return db.execute("SELECT COUNT(*) FROM trading_transactions").fetchone()[0] if exists else 0
+        if not exists:
+            return 0
+        if "broker" not in {col[1] for col in db.execute("PRAGMA table_info(trading_transactions)")}:
+            db.execute("ALTER TABLE trading_transactions ADD COLUMN broker TEXT NOT NULL DEFAULT 'Fidelity'")
+        return db.execute("SELECT COUNT(*) FROM trading_transactions WHERE broker=? AND account=?", (broker, account)).fetchone()[0]
 
     @app.get("/api/trading-import/count")
-    def count_history():
+    def count_history(broker: str, account: str):
         with closing(sqlite3.connect(database_path(), timeout=20)) as db:
-            return {"count": transaction_count(db)}
+            return {"count": transaction_count(db, broker, account)}
 
     @app.delete("/api/trading-import")
-    def purge_history(request: Request, expected_count: int):
+    def purge_history(request: Request, expected_count: int, broker: str, account: str):
         if request.headers.get("X-RHTC-Confirm") != "purge-trading-history":
             raise HTTPException(400, "Confirm the purge first.")
         with closing(sqlite3.connect(database_path(), timeout=20)) as db, db:
             db.execute("BEGIN IMMEDIATE")
-            count = transaction_count(db)
+            count = transaction_count(db, broker, account)
             if count != expected_count:
                 raise HTTPException(409, "Trading history changed. Review the count and confirm again.")
             if count:
-                db.execute("DELETE FROM trading_transactions")
+                db.execute("DELETE FROM trading_transactions WHERE broker=? AND account=?", (broker, account))
             return {"deleted": count}
 
     @app.post("/api/trading-import")
@@ -248,10 +257,10 @@ def register(app, database_path):
 PAGE = """<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Import trading history</title><style>body{color-scheme:dark;background:#11171c;color:#edf1f4;font:16px system-ui;margin:auto;max-width:36rem;padding:2rem 1rem}label,input{display:block;margin:1rem 0}input,button{padding:.65rem;max-width:95%;font:inherit}a{color:#e2c778}button{background:#e2c778;color:#141414;border:0;border-radius:.4rem}</style>
 <a href="/options/">Back to dashboard</a><h1>Import trading history</h1><p>Select the broker that produced your account history CSV. Use the same account ID for future imports.</p>
-<form><label>File format<select id="broker" style="display:block;padding:.65rem;font:inherit"><option>Fidelity</option><option>Fidelity IRA</option><option>Schwab</option><option>Vanguard</option></select></label><p id="format-help" aria-live="polite"></p><label>History CSV<input id="file" type="file" accept=".csv,text/csv" required></label><label>Account ID<input id="account" required maxlength="40" pattern="[A-Za-z0-9_\\-]+" autocomplete="off"></label><button>Import transactions</button></form><hr><button type="button" id="purge" style="background:#a32c32;color:white">Purge all trading history</button><p role="status"></p>
+<form><label>File format<select id="broker" style="display:block;padding:.65rem;font:inherit"><option>Fidelity</option><option>Fidelity IRA</option><option>Schwab</option><option>Vanguard</option></select></label><p id="format-help" aria-live="polite"></p><label>History CSV<input id="file" type="file" accept=".csv,text/csv" required></label><label>Account ID<input id="account" required maxlength="40" pattern="[A-Za-z0-9_\\-]+" autocomplete="off"></label><button>Import transactions</button></form><hr><button type="button" id="purge" style="background:#a32c32;color:white">Purge selected account</button><p role="status"></p>
 <script>const file=document.querySelector('#file'),account=document.querySelector('#account'),statusText=document.querySelector('[role=status]'),button=document.querySelector('button');
 const broker=document.querySelector('#broker');
-const guides={'Fidelity IRA':'Fidelity Accounts History CSV. Leave Account ID blank to use the account numbers in the CSV, or enter an ID for a single-account file.',Fidelity:'Fidelity account history CSV. Run Date sets the trade date and Amount ($) supplies the cash movement.',Schwab:'Schwab transaction history CSV. Date sets the trade date, Amount supplies the cash movement, and Fees & Comm maps to fees.',Vanguard:'Vanguard transaction history CSV. Trade Date sets the trade date, Transaction Type maps to action, Shares maps to quantity, and Net Amount supplies the cash movement.'};
+const guides={'Fidelity IRA':'Fidelity Accounts History CSV. Leave Account ID blank to use the account numbers in the CSV, or enter an account number to import only its matching rows.',Fidelity:'Fidelity account history CSV. Run Date sets the trade date and Amount ($) supplies the cash movement.',Schwab:'Schwab transaction history CSV. Date sets the trade date, Amount supplies the cash movement, and Fees & Comm maps to fees.',Vanguard:'Vanguard transaction history CSV. Trade Date sets the trade date, Transaction Type maps to action, Shares maps to quantity, and Net Amount supplies the cash movement.'};
 function showFormat(){account.required=broker.value!=='Fidelity IRA';account.placeholder=account.required?'':'Optional';document.querySelector('#format-help').textContent=guides[broker.value];}
 broker.onchange=()=>{showFormat();file.value='';account.value='';statusText.textContent='';};showFormat();
 file.onchange=()=>{const match=file.files[0]?.name.match(/History_for_Account_([a-z0-9]+)/i);if(broker.value==='Fidelity')account.value=match?.[1]||'';statusText.textContent=''};
@@ -262,12 +271,16 @@ purge.onclick = async () => {
   button.disabled = true;
   try {
     const endpoint = '/options/api/trading-import';
-    const preview = await fetch(endpoint + '/count', {cache:'no-store'});
+    const id = account.value.trim().toUpperCase();
+    const format = broker.value;
+    if (!id) throw Error('Enter the account ID to purge.');
+    const scope = new URLSearchParams({broker:format, account:id});
+    const preview = await fetch(endpoint + '/count?' + scope, {cache:'no-store'});
     if (!preview.ok) throw Error('Unable to read the transaction count. Check your sign-in and try again.');
     const {count} = await preview.json();
     if (!count) { statusText.textContent = 'No imported transactions to purge.'; return; }
-    if (!window.confirm('Permanently delete ' + count + ' imported transactions across ALL trading accounts?')) return;
-    const response = await fetch(endpoint + '?expected_count=' + count, {
+    if (!window.confirm('Permanently delete ' + count + ' transactions for ' + format + ' account ' + id + '?')) return;
+    const response = await fetch(endpoint + '?' + scope + '&expected_count=' + count, {
       method:'DELETE', headers:{'X-RHTC-Confirm':'purge-trading-history'}
     });
     const result = await response.json();
