@@ -101,7 +101,7 @@
 }
 </style>
 <dialog id="trade-report-dialog" aria-labelledby="trade-title" style="width:min(60rem,94vw);max-height:88vh;box-sizing:border-box;background:#171c21;color:#eef2f5;border:1px solid #847450;border-radius:12px;padding:1rem">
-<button type="button" id="trade-close" style="float:right">Close</button><h2 id="trade-title">Trade Report</h2>
+<button type="button" id="trade-close" style="position:sticky;top:0;z-index:1;float:right;min-height:44px;padding:0 12px;background:#e2c778;color:#141414;border:0;border-radius:6px;cursor:pointer">Return to dashboard</button><h2 id="trade-title">Trade Report</h2>
 <form id="trade-filters"><label>Account <select id="trade-account" required></select></label> <label>Year <select id="trade-year" required></select></label> <button>View trades</button></form>
 <div id="trade-pdf-controls" hidden><button type="button" id="trade-printer">Print report</button> &nbsp; <a id="trade-print" target="_blank" rel="noopener">View PDF</a> &nbsp; <a id="trade-download">Download PDF</a></div>
 <p id="trade-status" role="status"></p><div id="trade-results"></div></dialog>
