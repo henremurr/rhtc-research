@@ -94,6 +94,7 @@
 #trade-preview[open]{display:flex;flex-direction:column;position:fixed;inset:0;margin:auto;z-index:10000;box-shadow:0 0 0 100vmax #0009}
 #trade-preview.expanded,#trade-preview:fullscreen{width:100vw;height:100vh;height:100dvh;margin:0}
 #trade-preview nav{display:flex;align-items:center;gap:.6rem;padding:.5rem;background:#172229;flex-wrap:wrap}
+.trade-action[hidden]{display:none}
 .trade-action{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-height:44px;padding:0 .8rem;color:#171717;background:#e2c778;border:0;border-radius:.4rem;font:inherit;text-decoration:none;cursor:pointer}
 a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
 .trade-toolbar,#trade-filters,#trade-pdf-controls:not([hidden]){display:flex;align-items:center;flex-wrap:wrap;gap:.4rem}
@@ -164,6 +165,11 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
  const appleMobile=/iPad|iPhone|iPod/.test(navigator.userAgent)||
    (navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
  const canShareFiles=Boolean(navigator.share&&navigator.canShare);
+ const combinedPdfAction=appleMobile||(canShareFiles&&!window.showSaveFilePicker);
+ if(combinedPdfAction){
+   printButton.hidden=true;
+   reportDownload.textContent=previewDownload.textContent='Print or save PDF';
+ }
  let printRequest,printFile;
  function pdfFilename(){return 'RHTC_Trade_Report_'+(year.value==='0'?'All':year.value)+'.pdf';}
  async function fetchPdf(url,signal){
@@ -174,7 +180,6 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
  async function preparePrintFile(url){
    const request=new AbortController();
    printRequest=request;
-   printButton.disabled=appleMobile;
    try{
      const blob=await fetchPdf(url,request.signal);
      if(!request.signal.aborted)printFile=new File([blob],pdfFilename(),{type:'application/pdf'});
@@ -183,14 +188,13 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
    }finally{
      if(!request.signal.aborted){
        printRequest=undefined;
-       printButton.disabled=false;
      }
    }
  }
  async function savePdf(event){
    const url=event.currentTarget.href;
    const feedback=preview.open?printStatus:status;
-   if(window.showSaveFilePicker){
+   if(!combinedPdfAction&&window.showSaveFilePicker){
      event.preventDefault();
      try{
        const handle=await window.showSaveFilePicker({
@@ -209,14 +213,14 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
    }
    if(printFile&&navigator.canShare?.({files:[printFile]})){
      event.preventDefault();
-     feedback.textContent='Choose Save to Files to name and save the PDF.';
+     feedback.textContent='Choose Print or Save to Files.';
      try{await navigator.share({files:[printFile]});}
      catch(error){
-       if(error.name!=='AbortError')feedback.textContent='Could not open Save to Files. Please try again.';
+       if(error.name!=='AbortError')feedback.textContent='Could not open PDF options. Please try again.';
      }
    }else if(printRequest&&!printRequest.signal.aborted){
      event.preventDefault();
-     feedback.textContent='Preparing the PDF. Try Download PDF again in a moment.';
+     feedback.textContent='Preparing the PDF. Try again in a moment.';
    }
  }
  reportDownload.onclick=previewDownload.onclick=savePdf;
@@ -236,14 +240,7 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
    document.querySelector(".shell").inert=true;
    get('preview-close').focus();
  };
- printButton.onclick=async()=>{
-   if(!appleMobile){window.print();return;}
-   if(printFile&&navigator.canShare?.({files:[printFile]})){
-     try{await navigator.share({files:[printFile]});return;}
-     catch(error){if(error.name==='AbortError')return;}
-   }
-   printStatus.textContent='Use Download PDF, then open the file and choose Share → Print.';
- };
+ printButton.onclick=()=>window.print();
  function closePreview(){
    preview.close();
    document.querySelector(".shell").inert=false;
@@ -301,7 +298,6 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
      const url='/options/api/trade-report/pdf?'+new URLSearchParams({account:account.value,year:year.value});
      reportDownload.href=url+'&download=true';
      reportDownload.download=pdfFilename();
-     printButton.disabled=false;
      if(canShareFiles&&(appleMobile||!window.showSaveFilePicker))preparePrintFile(reportDownload.href);
      get('trade-pdf-controls').hidden=false;
    }
