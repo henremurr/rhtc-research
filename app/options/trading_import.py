@@ -25,6 +25,7 @@ LIMIT = 8 * 1024 * 1024
 # export does not supply that field. Combined Schwab fees stay in fees.
 FORMATS = {
     "Fidelity": HEADERS,
+    "Fidelity IRA": [None if name == "Cash Balance ($)" else name for name in HEADERS],
     "Schwab": ["Date", "Action", "Symbol", "Description", None, "Price", "Quantity",
                None, "Fees & Comm", None, "Amount", None, None],
     "Vanguard": ["Trade Date", "Transaction Type", "Symbol", "Investment Name", "Account Type",
@@ -35,16 +36,18 @@ FORMATS = {
 
 def import_history(path, account, payload, broker="Fidelity"):
     if broker not in FORMATS:
-        raise ValueError("Choose Fidelity, Schwab, or Vanguard.")
+        raise ValueError("Choose Fidelity, Fidelity IRA, Schwab, or Vanguard.")
     mapping = FORMATS[broker]
+    embedded = broker == "Fidelity IRA"
     reader = csv.reader(io.StringIO(payload.decode("utf-8-sig")), strict=True)
     for header in reader:
         header = [name.strip() for name in header]
-        if all(name in header for name in mapping if name):
+        if all(name in header for name in mapping if name) and (not embedded or "Account Number" in header):
             break
     else:
         raise ValueError(f"The file does not contain the expected {broker} transaction-history columns. Check the selected format.")
     positions = [header.index(name) if name else None for name in mapping]
+    account_column = header.index("Account Number") if embedded else None
     counts = Counter()
     records = []
     for row in reader:
@@ -52,6 +55,10 @@ def import_history(path, account, payload, broker="Fidelity"):
             continue
         if len(row) != len(header):
             raise ValueError(f"Unexpected column count at line {reader.line_num}.")
+        if embedded:
+            account = row[account_column].strip().upper()
+            if not re.fullmatch(r"[A-Z0-9_-]{1,40}", account):
+                raise ValueError(f"Invalid account number at line {reader.line_num}.")
         row = [row[i].strip() if i is not None else "" for i in positions]
         try:
             row[0] = datetime.strptime(row[0], "%m/%d/%Y").date().isoformat()
@@ -67,9 +74,9 @@ def import_history(path, account, payload, broker="Fidelity"):
             raise ValueError(f"Invalid date or number at line {reader.line_num}.") from None
         # Balance and settlement status can change between exports. Occurrence
         # counts preserve separate identical fills in the same account history.
-        key = hashlib.sha256(json.dumps(row[:11] if broker == "Fidelity" else [broker, *row[:11]], ensure_ascii=False).encode()).hexdigest()
-        counts[key] += 1
-        records.append((account, key, counts[key], *row, broker))
+        key = hashlib.sha256(json.dumps(row[:11] if broker in ("Fidelity", "Fidelity IRA") else [broker, *row[:11]], ensure_ascii=False).encode()).hexdigest()
+        counts[account, key] += 1
+        records.append((account, key, counts[account, key], *row, broker))
     if not records:
         raise ValueError("No transactions found.")
     with closing(sqlite3.connect(path, timeout=20)) as db, db:
@@ -218,7 +225,7 @@ def register(app, database_path):
         if request.headers.get("content-type", "").split(";")[0] != "text/csv":
             raise HTTPException(415, "Select a CSV file.")
         account = account.strip().upper()
-        if not re.fullmatch(r"[A-Z0-9_-]{1,40}", account):
+        if broker != "Fidelity IRA" and not re.fullmatch(r"[A-Z0-9_-]{1,40}", account):
             raise HTTPException(422, "Enter a consistent account ID using letters, digits, underscores or hyphens.")
         payload = bytearray()
         async for chunk in request.stream():
@@ -234,11 +241,11 @@ def register(app, database_path):
 PAGE = """<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Import trading history</title><style>body{color-scheme:dark;background:#11171c;color:#edf1f4;font:16px system-ui;margin:auto;max-width:36rem;padding:2rem 1rem}label,input{display:block;margin:1rem 0}input,button{padding:.65rem;max-width:95%;font:inherit}a{color:#e2c778}button{background:#e2c778;color:#141414;border:0;border-radius:.4rem}</style>
 <a href="/options/">Back to dashboard</a><h1>Import trading history</h1><p>Select the broker that produced your account history CSV. Use the same account ID for future imports.</p>
-<form><label>File format<select id="broker" style="display:block;padding:.65rem;font:inherit"><option>Fidelity</option><option>Schwab</option><option>Vanguard</option></select></label><p id="format-help" aria-live="polite"></p><label>History CSV<input id="file" type="file" accept=".csv,text/csv" required></label><label>Account ID<input id="account" required maxlength="40" pattern="[A-Za-z0-9_\\-]+" autocomplete="off"></label><button>Import transactions</button></form><hr><button type="button" id="purge" style="background:#a32c32;color:white">Purge all trading history</button><p role="status"></p>
+<form><label>File format<select id="broker" style="display:block;padding:.65rem;font:inherit"><option>Fidelity</option><option>Fidelity IRA</option><option>Schwab</option><option>Vanguard</option></select></label><p id="format-help" aria-live="polite"></p><label>History CSV<input id="file" type="file" accept=".csv,text/csv" required></label><label>Account ID<input id="account" required maxlength="40" pattern="[A-Za-z0-9_\\-]+" autocomplete="off"></label><button>Import transactions</button></form><hr><button type="button" id="purge" style="background:#a32c32;color:white">Purge all trading history</button><p role="status"></p>
 <script>const file=document.querySelector('#file'),account=document.querySelector('#account'),statusText=document.querySelector('[role=status]'),button=document.querySelector('button');
 const broker=document.querySelector('#broker');
-const guides={Fidelity:'Fidelity account history CSV. Run Date sets the trade date and Amount ($) supplies the cash movement.',Schwab:'Schwab transaction history CSV. Date sets the trade date, Amount supplies the cash movement, and Fees & Comm maps to fees.',Vanguard:'Vanguard transaction history CSV. Trade Date sets the trade date, Transaction Type maps to action, Shares maps to quantity, and Net Amount supplies the cash movement.'};
-function showFormat(){document.querySelector('#format-help').textContent=guides[broker.value];}
+const guides={'Fidelity IRA':'Fidelity Accounts History CSV. Each transaction is filed under the Account Number in its row, including when the export contains multiple accounts.',Fidelity:'Fidelity account history CSV. Run Date sets the trade date and Amount ($) supplies the cash movement.',Schwab:'Schwab transaction history CSV. Date sets the trade date, Amount supplies the cash movement, and Fees & Comm maps to fees.',Vanguard:'Vanguard transaction history CSV. Trade Date sets the trade date, Transaction Type maps to action, Shares maps to quantity, and Net Amount supplies the cash movement.'};
+function showFormat(){account.disabled=broker.value==='Fidelity IRA';account.closest('label').hidden=account.disabled;document.querySelector('#format-help').textContent=guides[broker.value];}
 broker.onchange=()=>{showFormat();file.value='';account.value='';statusText.textContent='';};showFormat();
 file.onchange=()=>{const match=file.files[0]?.name.match(/History_for_Account_([a-z0-9]+)/i);account.value=broker.value==='Fidelity'?(match?.[1]||''):'';statusText.textContent=''};
 document.querySelector('form').onsubmit=async event=>{event.preventDefault();button.disabled=true;statusText.textContent='Importing…';try{const response=await fetch('/options/api/trading-import?account='+encodeURIComponent(account.value.trim())+'&broker='+encodeURIComponent(broker.value),{method:'POST',headers:{'Content-Type':'text/csv'},body:file.files[0]});if(response.status===401)throw Error('Sign in again to import.');const result=await response.json();if(!response.ok)throw Error(result.detail||'Import failed.');statusText.textContent=result.added+' added. '+result.skipped+' already loaded.'}catch(error){statusText.textContent=error.message}finally{button.disabled=false}};
