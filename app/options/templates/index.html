@@ -261,7 +261,7 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
   try{const data=await request('?'+new URLSearchParams({account:account.value,year:year.value}));if(next!==sequence)return;
    let count=0;for(const [ticker,rows] of Object.entries(data.groups)){
     const title=document.createElement('h3');title.textContent=ticker+' ('+rows.length+')';results.append(title);
-    for(const line of data.summaries[ticker]){const summary=document.createElement('p');summary.textContent=line;results.append(summary);}
+    for(const line of data.summaries[ticker].filter(line=>line.endsWith(' | OPEN'))){const summary=document.createElement('p');summary.textContent=line;results.append(summary);}
     const wrap=document.createElement('div');wrap.style.overflowX='auto';const table=document.createElement('table');table.style.cssText='width:100%;min-width:620px;text-align:left;border-spacing:8px';wrap.append(table);results.append(wrap);
     const header=table.createTHead().insertRow();for(const label of ['Date','Action','Security','Quantity','Price ($)','Amount ($)']){const th=document.createElement('th');th.textContent=label;header.append(th);}
     const body = table.createTBody();
