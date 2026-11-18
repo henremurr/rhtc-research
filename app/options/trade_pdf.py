@@ -67,3 +67,57 @@ def build_report(account, year, groups, summaries):
         story.extend([table, Spacer(1, 12)])
     doc.build(story, onFirstPage=decorate, onLaterPages=decorate)
     return output.getvalue()
+
+
+def build_tax_lot_report(account, year, lots):
+    """Create a printable Form 8949 style tax lot schedule."""
+    output = BytesIO()
+    width, height = landscape(letter)
+    doc = SimpleDocTemplate(output, pagesize=(width, height), leftMargin=28,
+                            rightMargin=28, topMargin=75, bottomMargin=38,
+                            title=f"RHTC Form 8949 Tax Lot Report {year}")
+    ink = colors.HexColor("#182229")
+    gold = colors.HexColor("#C6A45C")
+    body = ParagraphStyle("TaxLot", fontName="Helvetica", fontSize=7, leading=8)
+    logo = Path(__file__).parent / "static" / "apple-touch-icon.png"
+
+    def decorate(canvas, document):
+        canvas.saveState()
+        canvas.drawImage(str(logo), 34, height-55, width=34, height=34, mask="auto")
+        canvas.setFillColor(ink)
+        canvas.setFont("Helvetica-Bold", 17)
+        canvas.drawString(78, height-37, "RHTC Tax Lot Report - Form 8949 columns")
+        canvas.setFont("Helvetica", 10)
+        canvas.drawString(78, height-52, f"Account {account}   |   Tax year {year}")
+        canvas.setStrokeColor(gold)
+        canvas.line(34, height-64, width-34, height-64)
+        canvas.setFont("Helvetica", 8)
+        canvas.drawRightString(width-34, 20, f"Rocking Horse Trading Co.   |   {document.page}")
+        canvas.restoreState()
+
+    headings = ["(a) Description", "(b) Acquired", "(c) Sold", "(d) Proceeds", "(e) Cost/basis", "(f) Code", "(g) Adjustment", "(h) Gain/loss"]
+    def display_date(value):
+        parts = value.split("-")
+        return f"{parts[1]}/{parts[2]}/{parts[0]}" if len(parts) == 3 else value
+    data = [headings]
+    for lot in lots:
+        def money(value):
+            return f"${Decimal(value):,.2f}" if value not in (None, "") else "--"
+        data.append([
+            Paragraph(escape(lot["description"]), body), display_date(lot["acquired"]), display_date(lot["sold"]),
+            money(lot["proceeds"]), money(lot["basis"]), lot["code"] or "",
+            money(lot["adjustment"]) if lot["adjustment"] not in (None, "") else "", money(lot["gain"]),
+        ])
+    table = LongTable(data, colWidths=[142, 62, 62, 82, 86, 48, 86, 80],
+                      repeatRows=1, hAlign="LEFT", splitInRow=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), ink), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 7),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"), ("ALIGN", (3, 1), (-1, -1), "RIGHT"),
+        ("BACKGROUND", (0, 1), (-1, -1), colors.white),
+        ("LINEBELOW", (0, 0), (-1, 0), 1, gold), ("LINEBELOW", (0, 1), (-1, -1), .3, colors.HexColor("#D5DADD")),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]))
+    doc.build([table], onFirstPage=decorate, onLaterPages=decorate)
+    return output.getvalue()
