@@ -127,7 +127,7 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
 }
 </style>
 <dialog id="trade-preview" aria-modal="true" aria-label="Trade Report preview">
-<nav><button type="button" class="trade-action" id="preview-close">Close preview</button><button type="button" id="preview-return" class="trade-action">Return to dashboard</button><button type="button" id="preview-expand" class="trade-action" aria-pressed="false">Full screen</button><button type="button" id="preview-print" class="trade-action">Print report</button><a id="preview-download" class="trade-action" target="_blank" rel="noopener">Download PDF</a></nav>
+<nav><button type="button" class="trade-action" id="preview-close">Close preview</button><button type="button" id="preview-return" class="trade-action">Return to dashboard</button><button type="button" id="preview-expand" class="trade-action" aria-pressed="false">Full screen</button><button type="button" id="preview-print" class="trade-action">Print report</button><a id="preview-download" class="trade-action" target="_blank" rel="noopener">Download PDF</a><span id="preview-print-status" role="status"></span></nav>
 <div id="preview-pages" hidden></div></dialog>
 <dialog id="trade-report-dialog" aria-labelledby="trade-title" style="width:min(60rem,94vw);max-height:88vh;box-sizing:border-box;background:#171c21;color:#eef2f5;border:1px solid #847450;border-radius:12px;padding:1rem">
 <div class="trade-toolbar">
@@ -159,6 +159,28 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
   try{const data=await request('');if(next!==sequence)return;periods=data.periods;account.replaceChildren(...[...new Set(periods.map(p=>p[0]))].map(a=>new Option(a,a)));years();status.textContent=periods.length?'Select an account and year, then choose View trades.':'Import trading history to view a report.';}catch(e){if(next===sequence)status.textContent=e.message;}
  });
  const preview=get('trade-preview'),expand=get('preview-expand'),pages=get('preview-pages');
+ const printButton=get('preview-print'),printStatus=get('preview-print-status');
+ const appleMobile=/iPad|iPhone|iPod/.test(navigator.userAgent)||
+   (navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+ let printRequest,printFile;
+ async function preparePrintFile(url){
+   const request=new AbortController();
+   printRequest=request;
+   printButton.disabled=true;
+   printStatus.textContent='Preparing PDF for printing…';
+   try{
+     const response=await fetch(url,{signal:request.signal,cache:'no-store'});
+     if(!response.ok||!response.headers.get('Content-Type')?.includes('application/pdf'))throw Error('PDF unavailable');
+     const blob=await response.blob();
+     if(request.signal.aborted)return;
+     printFile=new File([blob],'RHTC_Trade_Report.pdf',{type:'application/pdf'});
+     printStatus.textContent='';
+   }catch{
+     if(!request.signal.aborted)printStatus.textContent='Use Download PDF, then open the file and choose Share → Print.';
+   }finally{
+     if(!request.signal.aborted)printButton.disabled=false;
+   }
+ }
  function expanded(active){
    preview.classList.toggle('expanded',active);
    expand.textContent=active?'Exit full screen':'Full screen';
@@ -173,8 +195,16 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
    dialog.close();
    document.querySelector(".shell").inert=true;
    get('preview-close').focus();
+   if(appleMobile&&navigator.share&&navigator.canShare)preparePrintFile(get('preview-download').href);
  };
- get('preview-print').onclick=()=>window.print();
+ printButton.onclick=async()=>{
+   if(!appleMobile){window.print();return;}
+   if(printFile&&navigator.canShare?.({files:[printFile]})){
+     try{await navigator.share({files:[printFile]});return;}
+     catch(error){if(error.name==='AbortError')return;}
+   }
+   printStatus.textContent='Use Download PDF, then open the file and choose Share → Print.';
+ };
  function closePreview(){
    preview.close();
    document.querySelector(".shell").inert=false;
@@ -184,7 +214,13 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
  get('preview-close').onclick=closePreview;
  preview.addEventListener('keydown',event=>{if(event.key==='Escape')closePreview();});
  get('preview-return').onclick=()=>{preview.close();document.querySelector(".shell").inert=false;clear();get('guide-menu-toggle').focus();};
- preview.addEventListener('close',()=>{expanded(false);pages.replaceChildren();pages.hidden=true;});
+ preview.addEventListener('close',()=>{
+   printRequest?.abort();
+   printFile=undefined;
+   printButton.disabled=false;
+   printStatus.textContent='';
+   expanded(false);pages.replaceChildren();pages.hidden=true;
+ });
  get('trade-close').onclick=()=>dialog.close();dialog.addEventListener('close',()=>{if(!preview.open&&!dialog.open)clear();});
  get('trade-filters').onsubmit=async e=>{
   e.preventDefault();clear();const next=sequence;status.textContent='Loading trades…';
