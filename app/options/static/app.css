@@ -1596,3 +1596,9 @@ body > #ticker-print-report.ticker-report-detached .ticker-report-toolbar button
     background-color: var(--dashboard-header);
   }
 }
+
+@media screen {
+  :root:not([data-theme="dark"]) .screener-table .income-value.income-neutral {color:#24313d}
+  :root:not([data-theme="dark"]) .screener-table .income-value.income-high {color:#14643f}
+  :root:not([data-theme="dark"]) .screener-table .income-value.income-low {color:#943c37}
+}
