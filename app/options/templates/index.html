@@ -100,10 +100,22 @@
  #trade-print-view tfoot{display:table-row-group} #trade-print-view thead{display:table-header-group}
 }
 </style>
+<style>
+#trade-preview{padding:0;border:0;width:92vw;height:88vh;max-width:none;max-height:none;background:#222;color:white}
+#trade-preview[open]{display:flex;flex-direction:column}
+#trade-preview.expanded,#trade-preview:fullscreen{width:100vw;height:100vh;height:100dvh;margin:0}
+#trade-preview nav{display:flex;align-items:center;gap:.6rem;padding:.5rem;background:#172229;flex-wrap:wrap}
+#trade-preview button{min-height:44px;padding:0 .8rem;color:#171717;background:#e2c778;border:0;border-radius:.4rem}
+#trade-preview iframe,#preview-pages{flex:1;min-height:0;width:100%;border:0}
+#preview-pages{overflow:auto;background:white;color:#172229;padding:1rem;box-sizing:border-box}
+</style>
+<dialog id="trade-preview" aria-label="Trade Report preview">
+<nav><button type="button" id="preview-return">Return to dashboard</button><button type="button" id="preview-expand" aria-pressed="false">Full screen</button><a id="preview-download" style="color:white">Download PDF</a></nav>
+<div id="preview-pages" hidden></div></dialog>
 <dialog id="trade-report-dialog" aria-labelledby="trade-title" style="width:min(60rem,94vw);max-height:88vh;box-sizing:border-box;background:#171c21;color:#eef2f5;border:1px solid #847450;border-radius:12px;padding:1rem">
 <button type="button" id="trade-close" style="position:sticky;top:0;z-index:1;float:right;min-height:44px;padding:0 12px;background:#e2c778;color:#141414;border:0;border-radius:6px;cursor:pointer">Return to dashboard</button><h2 id="trade-title">Trade Report</h2>
 <form id="trade-filters"><label>Account <select id="trade-account" required></select></label> <label>Year <select id="trade-year" required></select></label> <button>View trades</button></form>
-<div id="trade-pdf-controls" hidden><button type="button" id="trade-printer">Print report</button> &nbsp; <a id="trade-print" target="_blank" rel="noopener">View PDF</a> &nbsp; <a id="trade-download">Download PDF</a></div>
+<div id="trade-pdf-controls" hidden><button type="button" id="trade-printer">Print report</button> &nbsp; <a id="trade-print">View PDF</a> &nbsp; <a id="trade-download">Download PDF</a></div>
 <p id="trade-status" role="status"></p><div id="trade-results"></div></dialog>
 <script>
 (()=>{
@@ -133,6 +145,39 @@
   dialog.showModal();clear();account.replaceChildren();year.replaceChildren();periods=[];const next=sequence;status.textContent='Loading accounts…';
   try{const data=await request('');if(next!==sequence)return;periods=data.periods;account.replaceChildren(...[...new Set(periods.map(p=>p[0]))].map(a=>new Option(a,a)));years();status.textContent=periods.length?'Select an account and year, then choose View trades.':'Import trading history to view a report.';}catch(e){if(next===sequence)status.textContent=e.message;}
  });
+ const preview=get('trade-preview'),expand=get('preview-expand'),pages=get('preview-pages');
+ function expanded(active){
+   preview.classList.toggle('expanded',active);
+   expand.textContent=active?'Exit full screen':'Full screen';
+   expand.setAttribute('aria-pressed',String(active));
+ }
+ expand.onclick=async()=>{
+   if(preview.classList.contains('expanded')){
+     if(document.fullscreenElement===preview) await document.exitFullscreen();
+     expanded(false);
+   }else{
+     expanded(true);
+     try{await preview.requestFullscreen?.();}catch{/* Keep the viewport-sized layout. */}
+   }
+ };
+ document.addEventListener('fullscreenchange',()=>expanded(document.fullscreenElement===preview));
+ get('trade-print').onclick=event=>{
+   event.preventDefault();
+   get('preview-download').href=get('trade-download').href;
+   const ipad=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+   if(ipad){
+     const logo=document.createElement('img');logo.src='/apple-touch-icon.png';logo.width=44;logo.alt='RHTC';
+     const title=document.createElement('h2');title.textContent='RHTC Trade Report';
+     const subtitle=document.createElement('p');subtitle.textContent='Account '+account.value+' · '+(year.value==='0'?'All years':year.value);
+     const content=results.cloneNode(true);content.removeAttribute('id');
+     pages.replaceChildren(logo,title,subtitle,content);pages.hidden=false;
+   }else{
+     const frame=document.createElement('iframe');frame.title='RHTC Trade Report PDF';frame.src=get('trade-print').href;preview.append(frame);
+   }
+   preview.showModal();
+ };
+ get('preview-return').onclick=()=>{preview.close();dialog.close();};
+ preview.addEventListener('close',()=>{expanded(false);preview.querySelector('iframe')?.remove();pages.replaceChildren();pages.hidden=true;});
  get('trade-close').onclick=()=>dialog.close();dialog.addEventListener('close',clear);
  get('trade-filters').onsubmit=async e=>{
   e.preventDefault();clear();const next=sequence;status.textContent='Loading trades…';
