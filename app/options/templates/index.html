@@ -115,6 +115,32 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
 #preview-pages thead th{color:#111;background:#e6e9eb;font-weight:700}
 #preview-pages tfoot :is(th,td){color:#000;font-weight:700}
 #preview-pages{overflow:auto;background:white;color:#172229;padding:1rem;box-sizing:border-box}
+@media (max-width:600px){
+ #trade-preview{width:100vw;height:100vh;height:100dvh;margin:0}
+ #trade-preview nav{display:grid;grid-template-columns:1fr 1fr;gap:.45rem;padding:.55rem}
+ #trade-preview nav .trade-action{width:100%;min-width:0;min-height:42px;padding:.35rem .45rem;font-size:.88rem;line-height:1.15;text-align:center}
+ #preview-print-status{grid-column:1/-1}
+ #preview-pages{padding:.65rem}
+ #preview-pages h2{font-size:1.25rem;margin:.45rem 0}
+ #preview-pages h3{margin:1rem 0 .4rem}
+ #preview-pages p{margin:.35rem 0}
+ #preview-pages #trade-results > div{overflow:visible!important}
+ #preview-pages table{display:block;width:100%!important;min-width:0!important;border-spacing:0!important}
+ #preview-pages :is(thead,tbody,tfoot){display:block}
+ #preview-pages thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%)}
+ #preview-pages tbody{display:grid;gap:.65rem}
+ #preview-pages tbody tr{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border:1px solid #aeb7bd;border-radius:.55rem;overflow:hidden;background:#fff}
+ #preview-pages tbody td{display:block;min-width:0;padding:.45rem .55rem;border:0;color:#111;background:#fff;overflow-wrap:anywhere}
+ #preview-pages tbody td::before{content:attr(data-label);display:block;margin-bottom:.15rem;color:#5b6770;font-size:.68rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+ #preview-pages tbody td:nth-child(-n+3){grid-column:1/-1}
+ #preview-pages tbody td:nth-child(2){font-weight:600;border-top:1px solid #e0e4e7}
+ #preview-pages tbody td:nth-child(3){border-top:1px solid #e0e4e7}
+ #preview-pages tbody td:nth-child(n+4){border-top:1px solid #e0e4e7}
+ #preview-pages tbody td:nth-child(n+5){text-align:right!important}
+ #preview-pages tfoot tr{display:grid;grid-template-columns:1fr auto;align-items:center;margin-top:.55rem;padding:.5rem .55rem;border-top:2px solid #56636c}
+ #preview-pages tfoot :is(th,td){display:block;padding:0;background:#fff;color:#111;border:0;font-size:.85rem}
+ #preview-pages tfoot th{padding-right:.75rem}
+}
 @media print{
  html:has(#trade-preview[open]),body:has(#trade-preview[open]){height:auto!important;overflow:visible!important;background:white!important}
  body:has(#trade-preview[open]) > :not(#trade-preview){display:none!important}
@@ -274,8 +300,10 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
     for (const values of rows) {
       count++;
       const row = body.insertRow();
+      const labels = ['Date','Action','Security','Quantity','Price ($)','Amount ($)'];
       values.forEach((value, index) => {
         const cell = row.insertCell();
+        cell.dataset.label = labels[index];
         const missing = value == null || value === '';
         const monetary = index === 4 || index === 5;
         cell.textContent = missing ? '—' : monetary ? dollars.format(value) : value;
