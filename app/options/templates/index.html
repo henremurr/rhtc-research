@@ -90,36 +90,28 @@
 </section></div></div></div>
 <script src="/options/static/app.js?v=watchlist-ticker-order-20261117"></script>
 <style>
-#trade-print-view{display:none}
-@media print{
- body.printing-trades{display:block!important;background:white!important;color:black!important;overflow:visible!important;height:auto!important}
- body.printing-trades > :not(#trade-print-view),body.printing-trades dialog::backdrop{display:none!important}
- body.printing-trades #trade-print-view{display:block!important;color:black;background:white;font:10pt Arial,sans-serif}
- #trade-print-view div{overflow:visible!important} #trade-print-view table{min-width:0!important;width:100%!important;color:black}
- #trade-print-view tr{break-inside:avoid} #trade-print-view h3{break-after:avoid}
- #trade-print-view tfoot{display:table-row-group} #trade-print-view thead{display:table-header-group}
-}
-</style>
-<style>
 #trade-preview{padding:0;border:0;width:92vw;height:88vh;max-width:none;max-height:none;background:#222;color:white}
 #trade-preview[open]{display:flex;flex-direction:column}
 #trade-preview.expanded,#trade-preview:fullscreen{width:100vw;height:100vh;height:100dvh;margin:0}
 #trade-preview nav{display:flex;align-items:center;gap:.6rem;padding:.5rem;background:#172229;flex-wrap:wrap}
-#trade-preview button{min-height:44px;padding:0 .8rem;color:#171717;background:#e2c778;border:0;border-radius:.4rem}
+.trade-action{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-height:44px;padding:0 .8rem;color:#171717;background:#e2c778;border:0;border-radius:.4rem;font:inherit;text-decoration:none;cursor:pointer}
+a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
+#trade-filters,#trade-pdf-controls:not([hidden]){display:flex;align-items:center;flex-wrap:wrap;gap:.6rem}
+#trade-pdf-controls{margin-top:.6rem}
 #trade-preview iframe,#preview-pages{flex:1;min-height:0;width:100%;border:0}
 /* Dashboard table cells have their own theme colors. Set paper colors on the cells. */
-:is(#preview-pages,#trade-print-view) :is(th,td){color:#111;background:#fff}
-:is(#preview-pages,#trade-print-view) thead th{color:#111;background:#e6e9eb;font-weight:700}
-:is(#preview-pages,#trade-print-view) tfoot :is(th,td){color:#000;font-weight:700}
+#preview-pages :is(th,td){color:#111;background:#fff}
+#preview-pages thead th{color:#111;background:#e6e9eb;font-weight:700}
+#preview-pages tfoot :is(th,td){color:#000;font-weight:700}
 #preview-pages{overflow:auto;background:white;color:#172229;padding:1rem;box-sizing:border-box}
 </style>
 <dialog id="trade-preview" aria-label="Trade Report preview">
-<nav><button type="button" id="preview-return">Return to dashboard</button><button type="button" id="preview-expand" aria-pressed="false">Full screen</button><a id="preview-download" style="color:white">Download PDF</a></nav>
+<nav><button type="button" id="preview-return" class="trade-action">Return to dashboard</button><button type="button" id="preview-expand" class="trade-action" aria-pressed="false">Full screen</button><a id="preview-download" class="trade-action">Download PDF</a></nav>
 <div id="preview-pages" hidden></div></dialog>
 <dialog id="trade-report-dialog" aria-labelledby="trade-title" style="width:min(60rem,94vw);max-height:88vh;box-sizing:border-box;background:#171c21;color:#eef2f5;border:1px solid #847450;border-radius:12px;padding:1rem">
-<button type="button" id="trade-close" style="position:sticky;top:0;z-index:1;float:right;min-height:44px;padding:0 12px;background:#e2c778;color:#141414;border:0;border-radius:6px;cursor:pointer">Return to dashboard</button><h2 id="trade-title">Trade Report</h2>
-<form id="trade-filters"><label>Account <select id="trade-account" required></select></label> <label>Year <select id="trade-year" required></select></label> <button>View trades</button></form>
-<div id="trade-pdf-controls" hidden><button type="button" id="trade-printer">Print report</button> &nbsp; <a id="trade-print">View PDF</a> &nbsp; <a id="trade-download">Download PDF</a></div>
+<button type="button" id="trade-close" class="trade-action" style="position:sticky;top:0;z-index:1;float:right">Return to dashboard</button><h2 id="trade-title">Trade Report</h2>
+<form id="trade-filters"><label>Account <select id="trade-account" required></select></label> <label>Year <select id="trade-year" required></select></label> <button class="trade-action">View trades</button></form>
+<div id="trade-pdf-controls" hidden><button type="button" id="trade-printer" class="trade-action">Print report</button> <a id="trade-print" class="trade-action">View PDF</a> <a id="trade-download" class="trade-action">Download PDF</a></div>
 <p id="trade-status" role="status"></p><div id="trade-results"></div></dialog>
 <script>
 (()=>{
@@ -127,19 +119,43 @@
  const dialog=get('trade-report-dialog'),account=get('trade-account'),year=get('trade-year'),status=get('trade-status'),results=get('trade-results');
  let periods=[],sequence=0;
  function clear(){get('trade-pdf-controls').hidden=true;sequence++;results.replaceChildren();status.textContent='';}
+ function reportContent(target, heading){
+   const logo=target.createElement('img');logo.src=new URL('/apple-touch-icon.png',location.href).href;logo.width=44;logo.height=44;logo.alt='RHTC';
+   const title=target.createElement(heading);title.textContent='RHTC Trade Report';
+   const caption=target.createElement('p');caption.textContent='Account '+account.value+' · '+(year.value==='0'?'All years':year.value);
+   const content=target.importNode(results,true);content.removeAttribute('id');
+   return [logo,title,caption,content];
+ }
  get('trade-printer').onclick=()=>{
-   const printView=document.createElement('article');
-   printView.id='trade-print-view';
-   const logo=document.createElement('img');logo.src='/apple-touch-icon.png';logo.width=40;logo.height=40;
-   const title=document.createElement('h1');title.textContent='RHTC Trade Report';
-   const caption=document.createElement('p');caption.textContent='Account '+account.value+' · '+(year.value==='0'?'All years':year.value);
-   printView.append(logo,title,caption,results.cloneNode(true));
-   printView.lastChild.removeAttribute('id');
-   document.getElementById(printView.id)?.remove();
-   document.body.append(printView);
-   document.body.classList.add('printing-trades');
-   window.addEventListener('afterprint',()=>{printView.remove();document.body.classList.remove('printing-trades');},{once:true});
-   window.print();
+   const printTab=window.open('','_blank');
+   if(!printTab){status.textContent='Allow pop-ups to open the print report.';return;}
+   printTab.opener=null;
+   const doc=printTab.document;
+   doc.title='RHTC Trade Report';
+   const style=doc.createElement('style');
+   style.textContent=`
+     body{margin:1rem;color:#111;background:#fff;font:10pt Arial,sans-serif}
+     button{margin-bottom:1rem;min-height:44px;padding:0 .8rem;background:#e2c778;color:#171717;border:0;border-radius:.4rem;cursor:pointer}
+     main div{overflow:visible!important}
+     main table{min-width:0!important;width:100%;border-collapse:collapse}
+     th,td{padding:.35rem;border-bottom:1px solid #bbb;overflow-wrap:anywhere}
+     thead th{background:#e6e9eb}
+     @media print{
+       body{margin:0}
+       button{display:none}
+       tr{break-inside:avoid}
+       h3{break-after:avoid}
+       thead{display:table-header-group}
+       tfoot{display:table-row-group}
+     }
+   `;
+   doc.head.append(style);
+   const button=doc.createElement('button');button.type='button';button.textContent='Print report';
+   button.onclick=()=>printTab.print();
+   const report=doc.createElement('main');report.append(...reportContent(doc,'h1'));
+   doc.body.append(button,report);
+   const logo=report.firstElementChild;
+   logo.decode().catch(()=>{}).then(()=>printTab.requestAnimationFrame(()=>printTab.print()));
  };
  function years(){clear();year.replaceChildren(...periods.filter(p=>p[0]===account.value).map(p=>new Option(p[1],p[1])),new Option("All","0"));}
  account.addEventListener('change',years);year.addEventListener('change',clear);
@@ -170,11 +186,7 @@
    get('preview-download').href=get('trade-download').href;
    const ipad=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
    if(ipad){
-     const logo=document.createElement('img');logo.src='/apple-touch-icon.png';logo.width=44;logo.alt='RHTC';
-     const title=document.createElement('h2');title.textContent='RHTC Trade Report';
-     const subtitle=document.createElement('p');subtitle.textContent='Account '+account.value+' · '+(year.value==='0'?'All years':year.value);
-     const content=results.cloneNode(true);content.removeAttribute('id');
-     pages.replaceChildren(logo,title,subtitle,content);pages.hidden=false;
+     pages.replaceChildren(...reportContent(document,'h2'));pages.hidden=false;
    }else{
      const frame=document.createElement('iframe');frame.title='RHTC Trade Report PDF';frame.src=get('trade-print').href;preview.append(frame);
    }
