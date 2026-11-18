@@ -13,6 +13,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 from .trade_pdf import build_report
+from .trade_pdf import build_tax_lot_report
 from starlette.concurrency import run_in_threadpool
 
 HEADERS = ["Run Date", "Action", "Symbol", "Description", "Type", "Price ($)", "Quantity",
@@ -212,6 +213,91 @@ def position_summary(entries):
     return lines
 
 
+def tax_lot_rows(db, account, year):
+    """Match completed security lots FIFO and return Form 8949 columns."""
+    rows = db.execute("""
+        SELECT trade_date, action, symbol, description, quantity, amount
+        FROM trading_transactions WHERE account=?
+        ORDER BY trade_date, rowid
+    """, (account,))
+    inventory = {}
+    completed = []
+    for day, action, symbol, description, quantity, amount in rows:
+        if not symbol or quantity in (None, ""):
+            continue
+        expired = bool(re.search(r"\b(expired|expiration)\b", action or "", re.I))
+        if not expired and not re.search(r"\b(buy|bought|sell|sold|sale|purchase|purchased|reinvest\w*)\b", action or "", re.I):
+            continue
+        is_option = bool(re.search(r"\d{6}[CP]\d", f"{symbol} {description or ''}", re.I)
+                         or re.search(r"\b(call|put)\b", description or "", re.I))
+        security = symbol.strip().upper()
+        try:
+            qty = abs(Decimal(str(quantity)))
+            cash = abs(Decimal(str(amount))) if amount not in (None, "") else None
+        except InvalidOperation:
+            continue
+        if qty <= 0:
+            continue
+        bought = bool(re.search(r"\b(buy|bought|purchase|purchased|reinvest\w*)\b", action or "", re.I))
+        lots = inventory.setdefault(security, [])
+        if expired:
+            remaining = qty
+            for lot in list(lots):
+                matched = min(remaining, lot["qty"])
+                if matched <= 0:
+                    continue
+                if lot["side"] == "long":
+                    basis = lot["value"] * matched / lot["qty"] if lot["value"] is not None else None
+                    proceeds = Decimal(0)
+                else:
+                    proceeds = lot["value"] * matched / lot["qty"] if lot["value"] is not None else None
+                    basis = Decimal(0)
+                if not year or day[:4] == str(year):
+                    completed.append({"description": f"{matched.normalize():f} {'contract' if lot['option'] else 'share'}{'s' if matched != 1 else ''} {security}",
+                                      "acquired": lot["date"], "sold": day,
+                                      "proceeds": str(proceeds.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)) if proceeds is not None else None,
+                                      "basis": str(basis.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)) if basis is not None else None,
+                                      "code": "", "adjustment": "",
+                                      "gain": str((proceeds - basis).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)) if proceeds is not None and basis is not None else None})
+                lot["qty"] -= matched
+                if lot["value"] is not None:
+                    lot["value"] -= basis if lot["side"] == "long" else proceeds
+                remaining -= matched
+                if lot["qty"] == 0:
+                    lots.remove(lot)
+                if remaining == 0:
+                    break
+            continue
+        remaining = qty
+        close_side = "short" if bought else "long"
+        while remaining > 0 and any(lot["side"] == close_side for lot in lots):
+            lot = next(lot for lot in lots if lot["side"] == close_side)
+            matched = min(remaining, lot["qty"])
+            lot_value = lot["value"] * matched / lot["qty"] if lot["value"] is not None else None
+            cash_piece = cash * matched / qty if cash is not None else None
+            basis, proceeds = (lot_value, cash_piece) if lot["side"] == "long" else (cash_piece, lot_value)
+            if not year or day[:4] == str(year):
+                completed.append({
+                    "description": f"{matched.normalize():f} {'contract' if lot['option'] else 'share'}{'s' if matched != 1 else ''} {security}",
+                    "acquired": lot["date"], "sold": day,
+                    "proceeds": str(proceeds.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)) if proceeds is not None else None,
+                    "basis": str(basis.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)) if basis is not None else None,
+                    "code": "", "adjustment": "",
+                    "gain": str((proceeds - basis).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)) if proceeds is not None and basis is not None else None,
+                })
+            lot["qty"] -= matched
+            if lot["value"] is not None:
+                lot["value"] -= lot_value
+            remaining -= matched
+            if lot["qty"] == 0:
+                lots.remove(lot)
+        if remaining > 0:
+            opened_cash = cash * remaining / qty if cash is not None else None
+            lots.append({"date": day, "qty": remaining, "value": opened_cash,
+                         "side": "long" if bought else "short", "option": is_option})
+    return sorted(completed, key=lambda row: (row["sold"], row["description"], row["acquired"]))
+
+
 def register(app, database_path):
     @app.get("/api/trade-report")
     def trade_report(account: str = "", year: int = 0):
@@ -231,6 +317,26 @@ def register(app, database_path):
         disposition = "attachment" if download else "inline"
         filename = f"RHTC_Trade_Report_{year or 'All'}_{account}.pdf"
         return Response(build_report(account, year or "All years", report["groups"], report["summaries"]), media_type="application/pdf",
+                        headers={"Content-Disposition": f'{disposition}; filename="{filename}"',
+                                 "Cache-Control": "private, no-store"})
+
+    @app.get("/api/tax-lot-report")
+    def tax_lot_report(account: str = "", year: int = 0):
+        with closing(sqlite3.connect(database_path())) as db:
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='trading_transactions'").fetchone():
+                return {"periods": [], "lots": []}
+            periods = db.execute("SELECT DISTINCT account, substr(trade_date,1,4) FROM trading_transactions ORDER BY account, 2 DESC").fetchall()
+            lots = tax_lot_rows(db, account, year) if account and 0 <= year <= 9998 else []
+            return {"periods": periods, "lots": lots}
+
+    @app.get("/api/tax-lot-report/pdf")
+    def tax_lot_pdf(account: str, year: int, download: bool = False):
+        report = tax_lot_report(account, year)
+        if not report["lots"]:
+            raise HTTPException(404, "No completed tax lots for this account and year.")
+        disposition = "attachment" if download else "inline"
+        filename = f"RHTC_Form_8949_{year or 'All'}_{account}.pdf"
+        return Response(build_tax_lot_report(account, year or "All years", report["lots"]), media_type="application/pdf",
                         headers={"Content-Disposition": f'{disposition}; filename="{filename}"',
                                  "Cache-Control": "private, no-store"})
 
