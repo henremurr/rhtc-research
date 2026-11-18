@@ -98,7 +98,7 @@
 a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
 #trade-filters,#trade-pdf-controls:not([hidden]){display:flex;align-items:center;flex-wrap:wrap;gap:.6rem}
 #trade-pdf-controls{margin-top:.6rem}
-#trade-preview iframe,#preview-pages{flex:1;min-height:0;width:100%;border:0}
+#preview-pages{flex:1;min-height:0;width:100%;border:0}
 /* Dashboard table cells have their own theme colors. Set paper colors on the cells. */
 #preview-pages :is(th,td){color:#111;background:#fff}
 #preview-pages thead th{color:#111;background:#e6e9eb;font-weight:700}
@@ -106,12 +106,12 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
 #preview-pages{overflow:auto;background:white;color:#172229;padding:1rem;box-sizing:border-box}
 </style>
 <dialog id="trade-preview" aria-label="Trade Report preview">
-<nav><button type="button" id="preview-return" class="trade-action">Return to dashboard</button><button type="button" id="preview-expand" class="trade-action" aria-pressed="false">Full screen</button><a id="preview-download" class="trade-action">Download PDF</a></nav>
+<nav><button type="button" class="trade-action" id="preview-close">Close preview</button><button type="button" id="preview-return" class="trade-action">Return to dashboard</button><button type="button" id="preview-expand" class="trade-action" aria-pressed="false">Full screen</button><a id="preview-download" class="trade-action" target="_blank" rel="noopener">Download PDF</a></nav>
 <div id="preview-pages" hidden></div></dialog>
 <dialog id="trade-report-dialog" aria-labelledby="trade-title" style="width:min(60rem,94vw);max-height:88vh;box-sizing:border-box;background:#171c21;color:#eef2f5;border:1px solid #847450;border-radius:12px;padding:1rem">
 <button type="button" id="trade-close" class="trade-action" style="position:sticky;top:0;z-index:1;float:right">Return to dashboard</button><h2 id="trade-title">Trade Report</h2>
 <form id="trade-filters"><label>Account <select id="trade-account" required></select></label> <label>Year <select id="trade-year" required></select></label> <button class="trade-action">View trades</button></form>
-<div id="trade-pdf-controls" hidden><button type="button" id="trade-printer" class="trade-action">Print report</button> <a id="trade-print" class="trade-action">View PDF</a> <a id="trade-download" class="trade-action">Download PDF</a></div>
+<div id="trade-pdf-controls" hidden><button type="button" id="trade-printer" class="trade-action">Print report</button> <button type="button" id="trade-preview-open" class="trade-action">Preview report</button> <a id="trade-download" class="trade-action" target="_blank" rel="noopener">Download PDF</a></div>
 <p id="trade-status" role="status"></p><div id="trade-results"></div></dialog>
 <script>
 (()=>{
@@ -153,7 +153,11 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
    const button=doc.createElement('button');button.type='button';button.textContent='Print report';
    button.onclick=()=>printTab.print();
    const report=doc.createElement('main');report.append(...reportContent(doc,'h1'));
-   doc.body.append(button,report);
+   const close=doc.createElement('button');close.type='button';close.textContent='Close print tab';
+   close.onclick=()=>printTab.close();
+   const actions=doc.createElement('nav');actions.style.cssText='position:sticky;top:0;display:flex;gap:.6rem;background:white';
+   actions.append(close,button);
+   doc.body.append(actions,report);
    const logo=report.firstElementChild;
    logo.decode().catch(()=>{}).then(()=>printTab.requestAnimationFrame(()=>printTab.print()));
  };
@@ -171,29 +175,16 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
    expand.textContent=active?'Exit full screen':'Full screen';
    expand.setAttribute('aria-pressed',String(active));
  }
- expand.onclick=async()=>{
-   if(preview.classList.contains('expanded')){
-     if(document.fullscreenElement===preview) await document.exitFullscreen();
-     expanded(false);
-   }else{
-     expanded(true);
-     try{await preview.requestFullscreen?.();}catch{/* Keep the viewport-sized layout. */}
-   }
- };
- document.addEventListener('fullscreenchange',()=>expanded(document.fullscreenElement===preview));
- get('trade-print').onclick=event=>{
-   event.preventDefault();
+ expand.onclick=()=>expanded(!preview.classList.contains('expanded'));
+ get('trade-preview-open').onclick=()=>{
    get('preview-download').href=get('trade-download').href;
-   const ipad=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
-   if(ipad){
-     pages.replaceChildren(...reportContent(document,'h2'));pages.hidden=false;
-   }else{
-     const frame=document.createElement('iframe');frame.title='RHTC Trade Report PDF';frame.src=get('trade-print').href;preview.append(frame);
-   }
+   pages.replaceChildren(...reportContent(document,'h2'));pages.hidden=false;
+   pages.scrollTop=0;
    preview.showModal();
  };
+ get('preview-close').onclick=()=>preview.close();
  get('preview-return').onclick=()=>{preview.close();dialog.close();};
- preview.addEventListener('close',()=>{expanded(false);preview.querySelector('iframe')?.remove();pages.replaceChildren();pages.hidden=true;});
+ preview.addEventListener('close',()=>{expanded(false);pages.replaceChildren();pages.hidden=true;});
  get('trade-close').onclick=()=>dialog.close();dialog.addEventListener('close',clear);
  get('trade-filters').onsubmit=async e=>{
   e.preventDefault();clear();const next=sequence;status.textContent='Loading trades…';
@@ -236,7 +227,6 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
    }
    if(count){
      const url='/options/api/trade-report/pdf?'+new URLSearchParams({account:account.value,year:year.value});
-     get('trade-print').href=url;
      get('trade-download').href=url+'&download=true';
      get('trade-pdf-controls').hidden=false;
    }
