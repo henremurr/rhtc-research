@@ -69,7 +69,7 @@ def import_history(path, account, payload, broker="Fidelity"):
             if broker == "Schwab":
                 # Schwab appends "as of MM/DD/YYYY" to some cash activity dates.
                 # The leading date is the transaction date used in the report.
-                trade_date = re.split(r"\\s+as\\s+of\\s+", trade_date, maxsplit=1, flags=re.I)[0].strip()
+                trade_date = re.split(r"\s+as\s+of\s+", trade_date, maxsplit=1, flags=re.I)[0].strip()
             row[0] = datetime.strptime(trade_date, "%m/%d/%Y").date().isoformat()
             if row[12]:
                 row[12] = datetime.strptime(row[12], "%m/%d/%Y").date().isoformat()
