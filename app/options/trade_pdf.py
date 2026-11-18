@@ -40,7 +40,7 @@ def build_report(account, year, groups, summaries):
 
     story = []
     for ticker, trades in groups.items():
-        heading = "     ".join([ticker, *summaries[ticker]])
+        heading = "     ".join([ticker, *(line for line in summaries[ticker] if line.endswith(" | OPEN"))])
         rows = [[heading, "", "", "", "", ""],
                 ["Date", "Action", "Security", "Quantity", "Price ($)", "Amount ($)"]]
         amounts = []
