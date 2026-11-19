@@ -449,6 +449,25 @@ def register(app, database_path):
             db.execute("ALTER TABLE trading_transactions ADD COLUMN broker TEXT NOT NULL DEFAULT 'Fidelity'")
         return db.execute("SELECT COUNT(*) FROM trading_transactions WHERE broker=? AND account=?", (broker, account)).fetchone()[0]
 
+    @app.get("/api/trading-import/accounts")
+    def list_import_accounts(broker: str):
+        if broker not in FORMATS:
+            raise HTTPException(422, "Choose a file format.")
+        with closing(sqlite3.connect(database_path(), timeout=20)) as db:
+            columns = {column[1] for column in db.execute("PRAGMA table_info(trading_transactions)")}
+            if "account" not in columns:
+                return {"accounts": []}
+            if "broker" in columns:
+                rows = db.execute(
+                    "SELECT DISTINCT account FROM trading_transactions WHERE broker=? ORDER BY account",
+                    (broker,),
+                )
+            elif broker == "Fidelity":
+                rows = db.execute("SELECT DISTINCT account FROM trading_transactions ORDER BY account")
+            else:
+                return {"accounts": []}
+            return {"accounts": [account for (account,) in rows if account]}
+
     @app.get("/api/trading-import/count")
     def count_history(broker: str, account: str):
         with closing(sqlite3.connect(database_path(), timeout=20)) as db:
@@ -488,14 +507,40 @@ def register(app, database_path):
 PAGE = """<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Import trading history</title><style>body{color-scheme:dark;background:#11171c;color:#edf1f4;font:16px system-ui;margin:auto;max-width:36rem;padding:2rem 1rem}label,input{display:block;margin:1rem 0}input,button{padding:.65rem;max-width:95%;font:inherit}a{color:#e2c778}button{background:#e2c778;color:#141414;border:0;border-radius:.4rem}</style>
 <a href="/options/">Back to dashboard</a><h1>Import trading history</h1><p>Select the broker that produced your account history CSV. Use the same account ID for future imports.</p>
-<form><label>File format<select id="broker" style="display:block;padding:.65rem;font:inherit"><option>Fidelity</option><option>Fidelity IRA</option><option>Schwab</option><option>Vanguard</option></select></label><p id="format-help" aria-live="polite"></p><label>History CSV<input id="file" type="file" accept=".csv,text/csv" required></label><label>Account ID<input id="account" required maxlength="40" pattern="[A-Za-z0-9_\\-]+" autocomplete="off"></label><button>Import transactions</button></form><hr><button type="button" id="purge" style="background:#a32c32;color:white">Purge selected account</button><p role="status"></p>
+<form><label>File format<select id="broker" style="display:block;padding:.65rem;font:inherit"><option>Fidelity</option><option>Fidelity IRA</option><option>Schwab</option><option>Vanguard</option></select></label><p id="format-help" aria-live="polite"></p><label>History CSV<input id="file" type="file" accept=".csv,text/csv" required></label><label for="saved-account">Existing account</label><select id="saved-account" style="padding:.65rem;font:inherit;max-width:100%"><option value="">Select an account</option></select><label>Account ID<input id="account" required maxlength="40" pattern="[A-Za-z0-9_\\-]+" autocomplete="off"></label><button>Import transactions</button></form><hr><button type="button" id="purge" style="background:#a32c32;color:white">Purge selected account</button><p role="status"></p>
 <script>const file=document.querySelector('#file'),account=document.querySelector('#account'),statusText=document.querySelector('[role=status]'),button=document.querySelector('button');
-const broker=document.querySelector('#broker');
+const broker=document.querySelector('#broker'),savedAccount=document.querySelector('#saved-account');
 const guides={'Fidelity IRA':'Fidelity Accounts History CSV. Leave Account ID blank to use the account numbers in the CSV, or enter an account number to import only its matching rows.',Fidelity:'Fidelity account history CSV. Run Date sets the trade date and Amount ($) supplies the cash movement.',Schwab:'Schwab transaction history CSV. Date sets the trade date, Amount supplies the cash movement, and Fees & Comm maps to fees.',Vanguard:'Vanguard transaction history CSV. Trade Date sets the trade date, Transaction Type maps to action, Shares maps to quantity, and Net Amount supplies the cash movement.'};
-function showFormat(){account.required=broker.value!=='Fidelity IRA';account.placeholder=account.required?'':'Optional';document.querySelector('#format-help').textContent=guides[broker.value];}
-broker.onchange=()=>{showFormat();file.value='';account.value='';statusText.textContent='';};showFormat();
-file.onchange=()=>{const match=file.files[0]?.name.match(/History_for_Account_([a-z0-9]+)/i);if(broker.value==='Fidelity')account.value=match?.[1]||'';statusText.textContent=''};
-document.querySelector('form').onsubmit=async event=>{event.preventDefault();button.disabled=true;statusText.textContent='Importing…';try{const response=await fetch('/options/api/trading-import?account='+encodeURIComponent(account.value.trim())+'&broker='+encodeURIComponent(broker.value),{method:'POST',headers:{'Content-Type':'text/csv'},body:file.files[0]});if(response.status===401)throw Error('Sign in again to import.');const result=await response.json();if(!response.ok)throw Error(result.detail||'Import failed.');statusText.textContent=result.added+' added. '+result.skipped+' already loaded.'}catch(error){statusText.textContent=error.message}finally{button.disabled=false}};
+function showFormat(){account.required=broker.value!=='Fidelity IRA';account.placeholder=account.required?'Enter an account ID':'Optional for Fidelity IRA';document.querySelector('#format-help').textContent=guides[broker.value];}
+let accountsRequest=0;
+function syncAccountSelection(){savedAccount.value=account.value.trim().toUpperCase();if(!savedAccount.value)savedAccount.selectedIndex=0;}
+async function loadAccounts(){
+  const request=++accountsRequest;
+  savedAccount.replaceChildren(new Option('Loading accounts…',''));
+  savedAccount.disabled=true;
+  try{
+    const response=await fetch('/options/api/trading-import/accounts?'+new URLSearchParams({broker:broker.value}),{cache:'no-store'});
+    if(!response.ok)throw Error('Could not load accounts');
+    const {accounts}=await response.json();
+    if(request!==accountsRequest)return;
+    savedAccount.replaceChildren(new Option(accounts.length?'Select an account':'No saved accounts',''),...accounts.map(id=>new Option(id,id)));
+    savedAccount.disabled=!accounts.length;
+    syncAccountSelection();
+  }catch{
+    if(request===accountsRequest)savedAccount.replaceChildren(new Option('Saved accounts unavailable',''));
+  }
+}
+savedAccount.onchange=()=>{account.value=savedAccount.value;statusText.textContent='';};
+account.oninput=()=>{syncAccountSelection();statusText.textContent='';};
+broker.onchange=()=>{showFormat();file.value='';account.value='';statusText.textContent='';loadAccounts();};
+showFormat();loadAccounts();
+file.onchange=()=>{
+  const match=file.files[0]?.name.match(/History_for_Account_([a-z0-9]+)/i);
+  if(broker.value==='Fidelity'&&!account.value.trim()&&match)account.value=match[1];
+  syncAccountSelection();
+  statusText.textContent='';
+};
+document.querySelector('form').onsubmit=async event=>{event.preventDefault();button.disabled=true;statusText.textContent='Importing…';try{const response=await fetch('/options/api/trading-import?account='+encodeURIComponent(account.value.trim())+'&broker='+encodeURIComponent(broker.value),{method:'POST',headers:{'Content-Type':'text/csv'},body:file.files[0]});if(response.status===401)throw Error('Sign in again to import.');const result=await response.json();if(!response.ok)throw Error(result.detail||'Import failed.');statusText.textContent=result.added+' added. '+result.skipped+' already loaded.';loadAccounts()}catch(error){statusText.textContent=error.message}finally{button.disabled=false}};
 const purge = document.getElementById('purge');
 purge.onclick = async () => {
   purge.disabled = true;
@@ -504,7 +549,7 @@ purge.onclick = async () => {
     const endpoint = '/options/api/trading-import';
     const id = account.value.trim().toUpperCase();
     const format = broker.value;
-    if (!id) throw Error('Enter the account ID to purge.');
+    if (!id) throw Error('Select or enter the account ID to purge.');
     const scope = new URLSearchParams({broker:format, account:id});
     const preview = await fetch(endpoint + '/count?' + scope, {cache:'no-store'});
     if (!preview.ok) throw Error('Unable to read the transaction count. Check your sign-in and try again.');
@@ -517,6 +562,7 @@ purge.onclick = async () => {
     const result = await response.json();
     if (!response.ok) throw Error(result.detail || 'Purge failed.');
     statusText.textContent = result.deleted + ' imported transactions deleted.';
+    loadAccounts();
   } catch (error) { statusText.textContent = error.message; }
   finally { purge.disabled = false; button.disabled = false; }
 };
