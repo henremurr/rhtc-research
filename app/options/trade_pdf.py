@@ -1,3 +1,4 @@
+from datetime import date, timedelta
 """Printable RHTC trade report."""
 from decimal import Decimal, ROUND_HALF_UP
 from io import BytesIO
@@ -69,6 +70,30 @@ def build_report(account, year, groups, summaries):
     return output.getvalue()
 
 
+def weekly_income_rows(lots, year):
+    """Summarize calendar-year sales in seven-day buckets beginning January 1."""
+    start = date(year, 1, 1)
+    year_end = date(year, 12, 31)
+    buckets = {}
+    for lot in lots:
+        sold = date.fromisoformat(lot["sold"])
+        week = min(52, (sold - start).days // 7 + 1)
+        buckets.setdefault(week, []).append(lot)
+
+    rows = []
+    for week in range(1, max(buckets, default=0) + 1):
+        entries = buckets.get(week, [])
+        first = start + timedelta(weeks=week - 1)
+        last = year_end if week == 52 else first + timedelta(days=6)
+        row = {"week": week, "dates": f"{first:%m/%d} – {last:%m/%d}", "count": len(entries)}
+        for key in ("proceeds", "basis", "gain"):
+            values = [lot[key] for lot in entries]
+            row[key] = None if any(value in (None, "") for value in values) else str(
+                sum((Decimal(value) for value in values), Decimal("0.00")))
+        rows.append(row)
+    return rows
+
+
 def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False):
     """Create a printable Form 8949 style tax lot schedule."""
     output = BytesIO()
@@ -86,7 +111,7 @@ def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False):
         canvas.drawImage(str(logo), 34, height-55, width=34, height=34, mask="auto")
         canvas.setFillColor(ink)
         canvas.setFont("Helvetica-Bold", 17)
-        title = "RHTC Weekly Income Report - Form 8949" if weekly_income else "RHTC Tax Lot Report - Form 8949 columns"
+        title = "RHTC Weekly Income Report" if weekly_income else "RHTC Tax Lot Report - Form 8949 columns"
         canvas.drawString(78, height-37, title)
         canvas.setFont("Helvetica", 10)
         scope = f"Account {account}   |   Tax year {year}" + (f"   |   Ticker {ticker}" if ticker else "")
@@ -105,6 +130,22 @@ def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False):
         return f"${Decimal(value):,.2f}" if value not in (None, "") else "--"
 
     story = []
+    if weekly_income:
+        data = [["Week", "Date range", "Closed lots", "Proceeds", "Cost basis", "Net gain/loss"]]
+        for row in weekly_income_rows(lots, int(year)):
+            data.append([row["week"], row["dates"], row["count"],
+                         *(money(row[key]) for key in ("proceeds", "basis", "gain"))])
+        table = LongTable(data, repeatRows=1, colWidths=[60, 120, 90, 128, 128, 134])
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), ink),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("ALIGN", (2, 0), (-1, -1), "RIGHT"),
+            ("LINEBELOW", (0, 0), (-1, 0), 1, gold),
+            ("LINEBELOW", (0, 1), (-1, -1), .3, colors.lightgrey),
+        ]))
+        doc.build([table], onFirstPage=decorate, onLaterPages=decorate)
+        return output.getvalue()
+
     sections = (("short", "Part I - Short-term transactions (held 1 year or less)"),
                 ("long", "Part II - Long-term transactions (held more than 1 year)"))
     totals = {term: {key: Decimal(0) for key in ("proceeds", "basis", "gain")} for term, _ in sections}
