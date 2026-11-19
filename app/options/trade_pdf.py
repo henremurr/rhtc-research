@@ -70,7 +70,7 @@ def build_report(account, year, groups, summaries):
     return output.getvalue()
 
 
-def weekly_income_rows(lots, year):
+def weekly_income_rows(lots, year, include_details=False):
     """Summarize calendar-year sales in seven-day buckets beginning January 1."""
     start = date(year, 1, 1)
     year_end = date(year, 12, 31)
@@ -90,6 +90,8 @@ def weekly_income_rows(lots, year):
             values = [lot[key] for lot in entries]
             row[key] = None if any(value in (None, "") for value in values) else str(
                 sum((Decimal(value) for value in values), Decimal("0.00")))
+        if include_details:
+            row['lots'] = entries
         rows.append(row)
     return rows
 
@@ -103,13 +105,13 @@ def weekly_income_totals(weeks):
     return totals
 
 
-def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False):
+def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False, weekly_detail=False):
     """Create a printable Form 8949 style tax lot schedule."""
     output = BytesIO()
     width, height = landscape(letter)
     doc = SimpleDocTemplate(output, pagesize=(width, height), leftMargin=28,
                             rightMargin=28, topMargin=75, bottomMargin=38,
-                            title=f"RHTC Weekly Income Summary Report {year}" if weekly_income else f"RHTC Form 8949 Tax Lot Report {year}")
+                            title=f"RHTC Weekly Income {'Detail' if weekly_detail else 'Summary'} Report {year}" if weekly_income else f"RHTC Form 8949 Tax Lot Report {year}")
     ink = colors.HexColor("#182229")
     gold = colors.HexColor("#C6A45C")
     body = ParagraphStyle("TaxLot", fontName="Helvetica", fontSize=7, leading=8)
@@ -120,7 +122,7 @@ def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False):
         canvas.drawImage(str(logo), 34, height-55, width=34, height=34, mask="auto")
         canvas.setFillColor(ink)
         canvas.setFont("Helvetica-Bold", 17)
-        title = "RHTC Weekly Income Summary Report" if weekly_income else "RHTC Tax Lot Report - Form 8949 columns"
+        title = ("RHTC Weekly Income Detail Report" if weekly_detail else "RHTC Weekly Income Summary Report") if weekly_income else "RHTC Tax Lot Report - Form 8949 columns"
         canvas.drawString(78, height-37, title)
         canvas.setFont("Helvetica", 10)
         scope = f"Account {account}   |   Tax year {year}" + (f"   |   Ticker {ticker}" if ticker else "")
@@ -141,7 +143,7 @@ def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False):
     story = []
     if weekly_income:
         data = [["Week", "Date range", "Closed lots", "Proceeds", "Cost basis", "Net gain/loss"]]
-        weeks = weekly_income_rows(lots, int(year))
+        weeks = weekly_income_rows(lots, int(year), include_details=weekly_detail)
         for row in weeks:
             data.append([row["week"], row["dates"], row["count"],
                          *(money(row[key]) for key in ("proceeds", "basis", "gain"))])
@@ -158,7 +160,37 @@ def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False):
             ("LINEBELOW", (0, 0), (-1, 0), 1, gold),
             ("LINEBELOW", (0, 1), (-1, -1), .3, colors.lightgrey),
         ]))
-        doc.build([table], onFirstPage=decorate, onLaterPages=decorate)
+        story = [table]
+        if weekly_detail:
+            for week in weeks:
+                if not week["lots"]:
+                    continue
+                heading = (f'Week {week["week"]} | {week["dates"]} | '
+                           f'Net gain/loss {money(week["gain"])}')
+                story.append(Spacer(1, 10))
+                story.append(Paragraph(escape(heading), ParagraphStyle(
+                    "WeeklyDetailHeading", parent=body, fontName="Helvetica-Bold",
+                    fontSize=9, keepWithNext=True)))
+                detail = [headings]
+                for lot in week["lots"]:
+                    detail.append([
+                        Paragraph(escape(lot["description"]), body),
+                        display_date(lot["acquired"]), display_date(lot["sold"]),
+                        money(lot["proceeds"]), money(lot["basis"]), lot["code"] or "",
+                        money(lot["adjustment"]) if lot["adjustment"] not in (None, "") else "",
+                        money(lot["gain"]),
+                    ])
+                lots_table = LongTable(detail, repeatRows=1,
+                                       colWidths=[142, 62, 62, 82, 86, 48, 86, 80])
+                lots_table.setStyle(TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, 0), ink),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("FONTSIZE", (0, 0), (-1, -1), 7),
+                    ("ALIGN", (3, 0), (-1, -1), "RIGHT"),
+                    ("LINEBELOW", (0, 1), (-1, -1), .3, colors.lightgrey),
+                ]))
+                story.append(lots_table)
+        doc.build(story, onFirstPage=decorate, onLaterPages=decorate)
         return output.getvalue()
 
     sections = (("short", "Part I - Short-term transactions (held 1 year or less)"),
