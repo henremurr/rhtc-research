@@ -91,7 +91,9 @@ def weekly_income_rows(lots, year, include_details=False):
             row[key] = None if any(value in (None, "") for value in values) else str(
                 sum((Decimal(value) for value in values), Decimal("0.00")))
         if include_details:
-            row['lots'] = entries
+            row["lots"] = sorted(entries, key=lambda lot: (
+                lot["sold"], lot["ticker"], not lot["is_option"], lot["acquired"],
+            ))
         rows.append(row)
     return rows
 
