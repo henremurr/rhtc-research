@@ -109,7 +109,7 @@ def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False):
     width, height = landscape(letter)
     doc = SimpleDocTemplate(output, pagesize=(width, height), leftMargin=28,
                             rightMargin=28, topMargin=75, bottomMargin=38,
-                            title=f"RHTC Form 8949 Tax Lot Report {year}")
+                            title=f"RHTC Weekly Income Summary Report {year}" if weekly_income else f"RHTC Form 8949 Tax Lot Report {year}")
     ink = colors.HexColor("#182229")
     gold = colors.HexColor("#C6A45C")
     body = ParagraphStyle("TaxLot", fontName="Helvetica", fontSize=7, leading=8)
@@ -120,7 +120,7 @@ def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False):
         canvas.drawImage(str(logo), 34, height-55, width=34, height=34, mask="auto")
         canvas.setFillColor(ink)
         canvas.setFont("Helvetica-Bold", 17)
-        title = "RHTC Weekly Income Report" if weekly_income else "RHTC Tax Lot Report - Form 8949 columns"
+        title = "RHTC Weekly Income Summary Report" if weekly_income else "RHTC Tax Lot Report - Form 8949 columns"
         canvas.drawString(78, height-37, title)
         canvas.setFont("Helvetica", 10)
         scope = f"Account {account}   |   Tax year {year}" + (f"   |   Ticker {ticker}" if ticker else "")
