@@ -372,15 +372,18 @@ def register(app, database_path):
             return {"periods": periods, "lots": lots, "tickers": tickers, "summary": tax_lot_summary(lots)}
 
     @app.get("/api/tax-lot-report/pdf")
-    def tax_lot_pdf(account: str, year: int, ticker: str = "", download: bool = False):
+    def tax_lot_pdf(account: str, year: int, ticker: str = "", weekly_income: bool = False, download: bool = False):
         report = tax_lot_report(account, year, ticker)
         if not report["lots"]:
             raise HTTPException(404, "No completed tax lots for this account, ticker, and tax year.")
         disposition = "attachment" if download else "inline"
         ticker = ticker.strip().upper()
-        ticker_suffix = f"_{ticker}" if ticker else ""
-        filename = f"RHTC_Form_8949_{year or 'All'}{ticker_suffix}_{account}.pdf"
-        return Response(build_tax_lot_report(account, year or "All years", report["lots"], ticker=ticker), media_type="application/pdf",
+        if weekly_income:
+            filename = f"RHTC_Weekly_Income_Report_{year or 'All'}_{account}.pdf"
+        else:
+            ticker_suffix = f"_{ticker}" if ticker else ""
+            filename = f"RHTC_Form_8949_{year or 'All'}{ticker_suffix}_{account}.pdf"
+        return Response(build_tax_lot_report(account, year or "All years", report["lots"], ticker=ticker, weekly_income=weekly_income), media_type="application/pdf",
                         headers={"Content-Disposition": f'{disposition}; filename="{filename}"',
                                  "Cache-Control": "private, no-store"})
 
