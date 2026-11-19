@@ -241,3 +241,58 @@ def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False, we
     story.extend([Paragraph("Capital gain/(loss) totals", ParagraphStyle("TaxLotSummaryHeading", parent=body, fontName="Helvetica-Bold", fontSize=10, leading=13, textColor=ink)), totals_table])
     doc.build(story, onFirstPage=decorate, onLaterPages=decorate)
     return output.getvalue()
+
+
+def build_open_tax_lot_report(account, year, lots):
+    """Create a printable inventory of tax lots still open at year end."""
+    output = BytesIO()
+    width, height = landscape(letter)
+    doc = SimpleDocTemplate(output, pagesize=(width, height), leftMargin=34,
+                            rightMargin=34, topMargin=75, bottomMargin=38,
+                            title=f"RHTC Open Tax Lot Report {year}")
+    ink = colors.HexColor("#182229")
+    gold = colors.HexColor("#C6A45C")
+    body = ParagraphStyle("OpenTaxLot", fontName="Helvetica", fontSize=8, leading=10)
+    logo = Path(__file__).parent / "static" / "apple-touch-icon.png"
+
+    def decorate(canvas, document):
+        canvas.saveState()
+        canvas.drawImage(str(logo), 38, height-55, width=34, height=34, mask="auto")
+        canvas.setFillColor(ink)
+        canvas.setFont("Helvetica-Bold", 17)
+        canvas.drawString(82, height-37, "RHTC Open Tax Lot Report")
+        canvas.setFont("Helvetica", 10)
+        canvas.drawString(82, height-52, f"Account {account}   |   As of {year}{' year-end' if str(year).isdigit() else ''}")
+        canvas.setStrokeColor(gold)
+        canvas.line(38, height-64, width-38, height-64)
+        canvas.setFont("Helvetica", 8)
+        canvas.drawRightString(width-38, 20, f"Rocking Horse Trading Co.   |   {document.page}")
+        canvas.restoreState()
+
+    def money(value):
+        return f"${Decimal(value):,.2f}" if value not in (None, "") else "—"
+
+    data = [["Ticker / security", "Side", "Date acquired", "Holding period", "Open quantity", "Basis / proceeds", "Per unit"]]
+    totals = {"Basis": Decimal(0), "Proceeds": Decimal(0)}
+    for lot in lots:
+        data.append([Paragraph(escape(lot["description"]), body), lot["side"].title(),
+                     lot["acquired"], lot["term"].title(), lot["quantity"], money(lot["amount"]),
+                     money(lot["unit_amount"])])
+        if lot.get("amount") not in (None, ""):
+            totals[lot["amount_type"]] += Decimal(lot["amount"])
+    data.append(["Open lot totals", "", "", "", "",
+                 f"Basis {money(totals['Basis'])}   |   Proceeds {money(totals['Proceeds'])}", ""])
+    table = LongTable(data, colWidths=[210, 60, 84, 80, 80, 100, 74], repeatRows=1,
+                      hAlign="LEFT", splitInRow=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), ink), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"), ("ALIGN", (4, 1), (-1, -1), "RIGHT"),
+        ("LINEBELOW", (0, 0), (-1, 0), 1, gold), ("LINEBELOW", (0, 1), (-1, -2), .3, colors.HexColor("#D5DADD")),
+        ("LINEABOVE", (0, -1), (-1, -1), 1, gold), ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("SPAN", (0, -1), (4, -1)),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5), ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    doc.build([table], onFirstPage=decorate, onLaterPages=decorate)
+    return output.getvalue()
