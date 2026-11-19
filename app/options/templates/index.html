@@ -88,7 +88,7 @@
 <label class="youtube-review-label"><input id="youtube-review-confirm" type="checkbox"> I reviewed the full MP3, title, description, and selected artwork.</label>
 <div class="youtube-publish-actions"><button id="youtube-publish-btn" type="button" disabled>▶ Publish to YouTube + X</button><span id="youtube-publish-status" role="status" aria-live="polite"></span></div>
 </section></div></div></div>
-<script src="/options/static/app.js?v=ticker-tax-lot-20261119"></script>
+<script src="/options/static/app.js?v=ticker-tax-lot-dropdown-20261119"></script>
 <style>
 #trade-preview{padding:0;border:0;width:92vw;height:88vh;max-width:none;max-height:none;background:#222;color:white}
 #trade-preview[open]{display:flex;flex-direction:column;position:fixed;inset:0;margin:auto;z-index:10000;box-shadow:0 0 0 100vmax #0009}
@@ -178,7 +178,7 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
 <dialog id="trade-report-dialog" aria-labelledby="trade-title" style="width:min(60rem,94vw);max-height:88vh;box-sizing:border-box;background:#171c21;color:#eef2f5;border:1px solid #847450;border-radius:12px;padding:1rem">
 <div class="trade-toolbar">
 <h2 id="trade-title">Trade Report</h2>
-<form id="trade-filters"><label>Account <select id="trade-account" required></select></label><label id="trade-ticker-filter" hidden>Ticker <input id="trade-ticker" type="text" maxlength="16" autocomplete="off" placeholder="e.g. AAPL"></label><label>Tax year <select id="trade-year" required></select></label><button class="trade-action" id="trade-view-button">View trades</button></form>
+<form id="trade-filters"><label>Account <select id="trade-account" required></select></label><label id="trade-ticker-filter" hidden>Ticker <select id="trade-ticker" required><option value="">Select ticker</option></select></label><label>Tax year <select id="trade-year" required></select></label><button class="trade-action" id="trade-view-button">View trades</button></form>
 <div id="trade-pdf-controls" hidden><button type="button" id="trade-preview-open" class="trade-action">Preview report</button><a id="trade-download" class="trade-action" download>Download PDF</a></div>
 <button type="button" id="trade-close" class="trade-action">Return to dashboard</button>
 </div>
@@ -198,8 +198,18 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
    const content=target.importNode(results,true);content.removeAttribute('id');
    return [logo,title,caption,content];
  }
- function years(){clear();year.replaceChildren(...periods.filter(p=>p[0]===account.value).map(p=>new Option(p[1],p[1])),new Option("All","0"));}
- account.addEventListener('change',years);year.addEventListener('change',clear);
+ async function loadTickers(){
+  tickerInput.replaceChildren(new Option('Select ticker',''));
+  if(reportMode!=='ticker-tax'||!account.value)return;
+  const selectedAccount=account.value,selectedSequence=sequence;
+  try{
+   const data=await request('?'+new URLSearchParams({account:selectedAccount,year:'0'}));
+   if(selectedSequence!==sequence||selectedAccount!==account.value||reportMode!=='ticker-tax')return;
+   tickerInput.replaceChildren(new Option('Select ticker',''),...(data.tickers||[]).map(ticker=>new Option(ticker,ticker)));
+  }catch(error){if(selectedSequence===sequence)status.textContent=error.message;}
+ }
+ function years(){clear();year.replaceChildren(...periods.filter(p=>p[0]===account.value).map(p=>new Option(p[1],p[1])),new Option("All","0"));loadTickers();}
+ account.addEventListener('change',years);year.addEventListener('change',clear);tickerInput.addEventListener('change',clear);
  async function request(query){const route=reportMode==='trade'?'trade-report':'tax-lot-report';const response=await fetch('/options/api/'+route+query,{cache:'no-store'});if(!response.ok)throw Error(response.status===401?'Sign in again to view trades.':'Unable to load transaction history.');return response.json();}
  async function openReport(mode){
   reportMode=mode;get('trade-title').textContent=reportMode==='ticker-tax'?'Ticker Tax Lot Report · Form 8949':reportMode==='tax'?'Tax Lot Report · Form 8949':'Trade Report';
