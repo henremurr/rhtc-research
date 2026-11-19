@@ -131,7 +131,7 @@ def trade_kind(action, symbol, description):
 
 
 CASH_ACTIVITY_TYPES = (
-    "Deposits", "Withdrawals", "Transfers in", "Transfers out",
+    "Deposits", "Withdrawals", "Normal distributions", "Transfers in", "Transfers out",
     "Federal taxes withheld or paid", "Dividends", "Interest", "Fees", "Other activity",
 )
 
@@ -145,6 +145,8 @@ def cash_activity_type(action, symbol, description, amount):
     details = f"{action} {description}"
     if re.search(r"\b(FEDERAL|FED|IRS)\b", details) and re.search(r"\b(TAX\w*|WITHH\w*)\b", details):
         return "Federal taxes withheld or paid"
+    if re.search(r"\bNORMAL\s+DIST(?:R(?:IBUTIONS?)?)?\b", action):
+        return "Normal distributions"
     if re.search(r"\bDIV(?:IDEND)?S?\b", action):
         return "Dividends"
     if re.search(r"\b(INTEREST|INT)\b", action):
