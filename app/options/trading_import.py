@@ -386,7 +386,7 @@ def register(app, database_path):
         disposition = "attachment" if download else "inline"
         ticker = ticker.strip().upper()
         if weekly_income:
-            filename = f"RHTC_Weekly_Income_Report_{year or 'All'}_{account}.pdf"
+            filename = f"RHTC_Weekly_Income_Summary_Report_{year or 'All'}_{account}.pdf"
         else:
             ticker_suffix = f"_{ticker}" if ticker else ""
             filename = f"RHTC_Form_8949_{year or 'All'}{ticker_suffix}_{account}.pdf"
