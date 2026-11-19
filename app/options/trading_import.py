@@ -261,7 +261,7 @@ def tax_lot_rows(db, account, year):
                     basis = Decimal(0)
                 if not year or day[:4] == str(year):
                     completed.append({"description": f"{matched.normalize():f} {'contract' if lot['option'] else 'share'}{'s' if matched != 1 else ''} {security}",
-                                      "ticker": tax_lot_ticker(security), "acquired": lot["date"], "sold": day,
+                                      "ticker": tax_lot_ticker(security), "is_option": lot["option"] or security.startswith("-"), "acquired": lot["date"], "sold": day,
                                       "proceeds": str(proceeds.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)) if proceeds is not None else None,
                                       "basis": str(basis.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)) if basis is not None else None,
                                       "code": "", "adjustment": "",
@@ -287,7 +287,7 @@ def tax_lot_rows(db, account, year):
             if not year or day[:4] == str(year):
                 completed.append({
                     "description": f"{matched.normalize():f} {'contract' if lot['option'] else 'share'}{'s' if matched != 1 else ''} {security}",
-                    "ticker": tax_lot_ticker(security), "acquired": lot["date"], "sold": day,
+                    "ticker": tax_lot_ticker(security), "is_option": lot["option"] or security.startswith("-"), "acquired": lot["date"], "sold": day,
                     "proceeds": str(proceeds.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)) if proceeds is not None else None,
                     "basis": str(basis.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)) if basis is not None else None,
                     "code": "", "adjustment": "",
