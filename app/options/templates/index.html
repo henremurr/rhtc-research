@@ -99,13 +99,15 @@
 a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
 .trade-toolbar{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:.65rem .7rem}
 .trade-toolbar #trade-title{grid-column:1/-1;margin:0;font-size:1.1rem;white-space:normal}
+#trade-filters:not(:has(#trade-ticker-filter:not([hidden]))){grid-template-columns:max-content minmax(9rem,1fr) minmax(5rem,.5fr) max-content}
 #trade-filters{display:grid;grid-template-columns:max-content minmax(12rem,1.3fr) minmax(8rem,.85fr) minmax(6rem,.55fr) max-content;align-items:end;gap:.55rem}
+.trade-toolbar label[hidden]{display:none}
 .trade-toolbar label{display:grid;align-content:start;gap:.25rem;min-width:0;white-space:normal}
 .trade-toolbar .trade-action,#trade-filters select{min-height:2.5rem;font:inherit}
 .trade-toolbar .trade-action{padding:0 .7rem;white-space:nowrap}
 #trade-filters select{box-sizing:border-box;width:100%;min-width:0}
 #trade-view-button,#trade-close{justify-self:start}
-#trade-pdf-controls:not([hidden]){display:flex;align-items:center;gap:.55rem;min-width:0}
+#trade-pdf-controls:not([hidden]){grid-column:1/-1;display:flex;align-items:center;gap:.55rem;min-width:0}
 .trade-toolbar #trade-close{margin-inline-start:0;justify-self:start}
 @media (max-width:600px){
  #trade-report-dialog{width:calc(100vw - 16px)!important;max-height:calc(100dvh - 16px);padding:.85rem!important}
@@ -188,7 +190,7 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
  const dialog=get('trade-report-dialog'),account=get('trade-account'),year=get('trade-year'),status=get('trade-status'),results=get('trade-results');
  let periods=[],sequence=0,reportMode='trade';
  const tickerInput=get('trade-ticker');
- const reportTitle=()=>reportMode==='weekly-income'?'RHTC Weekly Income Report · Form 8949':reportMode==='ticker-tax'?'RHTC Ticker Tax Lot Report · Form 8949':reportMode==='tax'?'RHTC Tax Lot Report · Form 8949 columns':'RHTC Trade Report';
+ const reportTitle=()=>reportMode==='weekly-income'?'RHTC Weekly Income Report':reportMode==='ticker-tax'?'RHTC Ticker Tax Lot Report · Form 8949':reportMode==='tax'?'RHTC Tax Lot Report · Form 8949 columns':'RHTC Trade Report';
  function clear(){printRequest?.abort();printFile=undefined;get('trade-pdf-controls').hidden=true;sequence++;results.replaceChildren();results.scrollTop=0;status.textContent='';}
  function reportContent(target, heading){
    const logo=target.createElement('img');logo.src=new URL('/apple-touch-icon.png',location.href).href;logo.width=44;logo.height=44;logo.alt='RHTC';
@@ -207,11 +209,11 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
    tickerInput.replaceChildren(new Option('Select ticker',''),...(data.tickers||[]).map(ticker=>new Option(ticker,ticker)));
   }catch(error){if(selectedSequence===sequence)status.textContent=error.message;}
  }
- function years(){clear();year.replaceChildren(...periods.filter(p=>p[0]===account.value).map(p=>new Option(p[1],p[1])),new Option("All","0"));loadTickers();}
+ function years(){clear();year.replaceChildren(...periods.filter(p=>p[0]===account.value).map(p=>new Option(p[1],p[1])),...(reportMode==='weekly-income'?[]:[new Option("All","0")]));loadTickers();}
  account.addEventListener('change',years);year.addEventListener('change',clear);tickerInput.addEventListener('change',clear);
  async function request(query){const route=reportMode==='trade'?'trade-report':'tax-lot-report';const response=await fetch('/options/api/'+route+query,{cache:'no-store'});if(!response.ok)throw Error(response.status===401?'Sign in again to view trades.':'Unable to load transaction history.');return response.json();}
  async function openReport(mode){
-  reportMode=mode;get('trade-title').textContent=reportMode==='weekly-income'?'Weekly Income Report · Form 8949':reportMode==='ticker-tax'?'Ticker Tax Lot Report · Form 8949':reportMode==='tax'?'Tax Lot Report · Form 8949':'Trade Report';
+  reportMode=mode;get('trade-title').textContent=reportMode==='weekly-income'?'Weekly Income Report':reportMode==='ticker-tax'?'Ticker Tax Lot Report · Form 8949':reportMode==='tax'?'Tax Lot Report · Form 8949':'Trade Report';
   get('trade-view-button').textContent=reportMode==='weekly-income'?'View weekly income':reportMode==='ticker-tax'?'View ticker tax lots':reportMode==='tax'?'View tax lots':'View trades';
   get('trade-ticker-filter').hidden=reportMode!=='ticker-tax';tickerInput.required=reportMode==='ticker-tax';tickerInput.value='';
   get('guide-menu').hidden=true;get('guide-menu-toggle').setAttribute('aria-expanded','false');
@@ -321,8 +323,45 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
  get('trade-filters').onsubmit=async e=>{
   e.preventDefault();clear();const next=sequence;status.textContent='Loading trades…';
   try{const params={account:account.value,year:year.value};
+   if(reportMode==='weekly-income')params.weekly_income='true';
    if(reportMode==='ticker-tax')params.ticker=tickerInput.value.trim().toUpperCase();
    const data=await request('?'+new URLSearchParams(params));if(next!==sequence)return;
+   if(reportMode==='weekly-income'){
+    const weeks=data.weeks||[];
+    if(!weeks.length){status.textContent='No completed tax lots for this account and tax year.';return;}
+    const dollars=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'});
+    const wrap=document.createElement('div');
+    wrap.style.overflowX='auto';
+    const table=document.createElement('table');
+    table.style.cssText='width:100%;min-width:540px;text-align:left';
+    const header=table.createTHead().insertRow();
+    const labels=['Week','Date range','Closed lots','Proceeds','Cost basis','Net gain/loss'];
+    labels.forEach((label,index)=>{
+     const cell=document.createElement('th');
+     cell.textContent=label;
+     if(index>=2)cell.style.textAlign='right';
+     header.append(cell);
+    });
+    const body=table.createTBody();
+    for(const week of weeks){
+     const row=body.insertRow();
+     const amounts=['proceeds','basis','gain'].map(key=>week[key]==null?'—':dollars.format(Number(week[key])));
+     [week.week,week.dates,week.count,...amounts].forEach((value,index)=>{
+      const cell=row.insertCell();
+      cell.dataset.label=labels[index];
+      cell.textContent=value;
+      if(index>=2)cell.style.textAlign='right';
+     });
+    }
+    wrap.append(table);
+    results.append(wrap);
+    reportDownload.href='/options/api/tax-lot-report/pdf?'+new URLSearchParams({...params,download:'true'});
+    reportDownload.download=pdfFilename();
+    if(canShareFiles&&(appleMobile||!window.showSaveFilePicker))preparePrintFile(reportDownload.href);
+    get('trade-pdf-controls').hidden=false;
+    status.textContent='Weeks 1–'+weeks.length+' by closing date · All tickers';
+    return;
+   }
    if(reportMode!=='trade'){
     const rows=data.lots||[],labels=['(a) Description','(b) Date acquired','(c) Date sold','(d) Proceeds','(e) Cost or other basis','(f) Code','(g) Adjustment','(h) Gain or loss'];
     const dollars=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'});
