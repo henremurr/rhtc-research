@@ -296,3 +296,43 @@ def build_open_tax_lot_report(account, year, lots):
     ]))
     doc.build([table], onFirstPage=decorate, onLaterPages=decorate)
     return output.getvalue()
+
+
+def build_cash_activity_report(broker, account, groups):
+    output = BytesIO()
+    doc = SimpleDocTemplate(output, pagesize=landscape(letter), title="RHTC Cash Activity Report",
+                            leftMargin=34, rightMargin=34, topMargin=32, bottomMargin=32)
+    body = ParagraphStyle("CashActivity", fontName="Helvetica", fontSize=8, leading=11)
+    heading = ParagraphStyle("CashActivityHeading", fontName="Helvetica-Bold", fontSize=12,
+                             leading=15, keepWithNext=True)
+    title = ParagraphStyle("CashActivityTitle", parent=heading, fontSize=17, leading=21)
+    story = [Paragraph("RHTC Cash Activity Report", title),
+             Paragraph(escape(f"{broker} | Account {account} | All dates"), body), Spacer(1, 12)]
+    ink = colors.HexColor("#182229")
+    gold = colors.HexColor("#C6A45C")
+
+    def money(value):
+        return "—" if value is None else f"${Decimal(value):,.2f}"
+
+    for group in groups:
+        story.append(Paragraph(escape(group["type"]), heading))
+        rows = [["Date", "Transaction", "Ticker", "Description", "Amount"]]
+        for row in group["rows"]:
+            rows.append([row["date"] or "—", Paragraph(escape(row["action"] or ""), body),
+                         row["symbol"] or "—", Paragraph(escape(row["description"] or ""), body),
+                         money(row["amount"])])
+        rows.append(["Subtotal", "", "", "", money(group["subtotal"])])
+        table = LongTable(rows, colWidths=[75, 175, 80, 283, 85], repeatRows=1, splitInRow=1)
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), ink),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("ALIGN", (-1, 0), (-1, -1), "RIGHT"),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LINEABOVE", (0, -1), (-1, -1), 1, gold),
+            ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ]))
+        story.extend([table, Spacer(1, 12)])
+    doc.build(story)
+    return output.getvalue()

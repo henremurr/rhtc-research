@@ -12,7 +12,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
-from .trade_pdf import build_report
+from .trade_pdf import build_cash_activity_report, build_report
 from .trade_pdf import build_tax_lot_report, build_open_tax_lot_report, weekly_income_rows, weekly_income_totals
 from starlette.concurrency import run_in_threadpool
 
@@ -128,6 +128,65 @@ def trade_kind(action, symbol, description):
             return "stock_buy"
         if sold:
             return "stock_sell"
+
+
+CASH_ACTIVITY_TYPES = (
+    "Deposits", "Withdrawals", "Transfers in", "Transfers out",
+    "Federal taxes withheld or paid", "Dividends", "Interest", "Fees", "Other activity",
+)
+
+
+def cash_activity_type(action, symbol, description, amount):
+    action = (action or "").upper()
+    description = (description or "").upper()
+    if (trade_kind(action, symbol, description)
+            or re.search(r"\b(BUY|BOUGHT|SELL|SOLD|PURCHASE|PURCHASED|SALE|REINVEST\w*|ASSIGN\w*|EXERCIS\w*|EXPIR\w*|SPLIT|MERGER|SPIN.?OFF|SYMBOL CHANGE|SECURITIES? (?:RECEIVED|DELIVERED)|SHARES? (?:RECEIVED|DELIVERED))\b", action)):
+        return None
+    details = f"{action} {description}"
+    if re.search(r"\b(FEDERAL|FED|IRS)\b", details) and re.search(r"\b(TAX\w*|WITHH\w*)\b", details):
+        return "Federal taxes withheld or paid"
+    if re.search(r"\bDIV(?:IDEND)?S?\b", action):
+        return "Dividends"
+    if re.search(r"\b(INTEREST|INT)\b", action):
+        return "Interest"
+    if re.search(r"\b(FEE|FEES|CHARGE|CHARGES)\b", action):
+        return "Fees"
+    if re.search(r"\b(TRANSFER\w*|JOURNAL\w*|XFER)\b", action):
+        if symbol and not amount:
+            return None
+        if amount is not None and amount != 0:
+            return "Transfers in" if amount > 0 else "Transfers out"
+        if re.search(r"\b(IN|RECEIVED|FROM)\b", action):
+            return "Transfers in"
+        if re.search(r"\b(OUT|SENT|TO)\b", action):
+            return "Transfers out"
+    if re.search(r"\b(DEPOSIT\w*|CONTRIBUTION\w*|DIRECT CREDIT)\b", action):
+        return "Deposits"
+    if re.search(r"\b(WITHDRAW\w*|DIRECT DEBIT|CHECK PAID)\b", action):
+        return "Withdrawals"
+    if re.search(r"\b(ACH|EFT|WIRE)\b", action) and amount:
+        return "Deposits" if amount > 0 else "Withdrawals"
+    if amount is not None or not symbol:
+        return "Other activity"
+    return None
+
+
+def cash_activity_groups(rows):
+    groups = {kind: [] for kind in CASH_ACTIVITY_TYPES}
+    totals = dict.fromkeys(CASH_ACTIVITY_TYPES, Decimal(0))
+    for date, action, symbol, description, raw_amount in rows:
+        amount = Decimal(str(raw_amount)) if raw_amount not in (None, "") else None
+        kind = cash_activity_type(action, symbol, description, amount)
+        if kind is None:
+            continue
+        groups[kind].append({
+            "date": date, "action": action, "symbol": symbol, "description": description,
+            "amount": str(amount) if amount is not None else None,
+        })
+        if amount is not None:
+            totals[kind] += amount
+    return [{"type": kind, "rows": items, "subtotal": str(totals[kind])}
+            for kind, items in groups.items() if items]
 
 
 def order_same_day(entries):
@@ -433,6 +492,38 @@ def register(app, database_path):
         filename = f"RHTC_Open_Tax_Lots_{year or 'Latest'}_{account}.pdf"
         return Response(build_open_tax_lot_report(account, year or "Latest available", report["lots"]), media_type="application/pdf",
                         headers={"Content-Disposition": f'{disposition}; filename="{filename}"',
+                                 "Cache-Control": "private, no-store"})
+
+    @app.get("/api/cash-activity-report")
+    def cash_activity_report(broker: str = "", account: str = ""):
+        if broker and broker not in FORMATS:
+            raise HTTPException(422, "Choose an account type.")
+        with closing(sqlite3.connect(database_path(), timeout=20)) as db:
+            columns = {column[1] for column in db.execute("PRAGMA table_info(trading_transactions)")}
+            if not columns:
+                return {"accounts": [], "groups": []}
+            broker_column = "broker" if "broker" in columns else "'Fidelity'"
+            accounts = db.execute(
+                f"SELECT DISTINCT {broker_column}, account FROM trading_transactions ORDER BY 1, 2"
+            ).fetchall()
+            groups = []
+            if broker and account:
+                rows = db.execute(
+                    "SELECT trade_date, action, symbol, description, amount FROM trading_transactions "
+                    f"WHERE {broker_column}=? AND account=? ORDER BY trade_date, rowid",
+                    (broker, account),
+                )
+                groups = cash_activity_groups(rows)
+            return {"accounts": accounts, "groups": groups}
+
+    @app.get("/api/cash-activity-report/pdf")
+    def cash_activity_pdf(broker: str, account: str, download: bool = False):
+        groups = cash_activity_report(broker, account)["groups"]
+        if not groups:
+            raise HTTPException(404, "No cash activity for this account.")
+        disposition = "attachment" if download else "inline"
+        return Response(build_cash_activity_report(broker, account, groups), media_type="application/pdf",
+                        headers={"Content-Disposition": f'{disposition}; filename="RHTC_Cash_Activity_Report.pdf"',
                                  "Cache-Control": "private, no-store"})
 
     @app.get("/trading-import", response_class=HTMLResponse)
