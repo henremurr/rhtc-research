@@ -215,7 +215,7 @@ def position_summary(entries):
 
 def tax_lot_ticker(symbol):
     """Return the underlying ticker for a share symbol or OCC option symbol."""
-    value = (symbol or "").strip().upper()
+    value = (symbol or "").strip().upper().lstrip("-")
     contract = re.match(r"^([A-Z][A-Z0-9.\-]*)\s*\d{6}[CP]\d", value)
     return contract.group(1) if contract else re.split(r"\s+", value, maxsplit=1)[0]
 
