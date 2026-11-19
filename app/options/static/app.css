@@ -1602,3 +1602,58 @@ body > #ticker-print-report.ticker-report-detached .ticker-report-toolbar button
   :root:not([data-theme="dark"]) .screener-table .income-value.income-high {color:#14643f}
   :root:not([data-theme="dark"]) .screener-table .income-value.income-low {color:#943c37}
 }
+
+@media (min-width: 981px) {
+  .news-view .table-header {
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+  }
+
+  .news-view .table-header > :first-child {
+    flex: none;
+    white-space: nowrap;
+  }
+
+  .news-view .table-header > .table-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1.1fr) minmax(0, 1.7fr) auto;
+    flex: 1;
+    min-width: 0;
+    gap: 7px;
+  }
+
+  .news-view .table-controls > .review-limit-control {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    min-width: 0;
+    gap: 5px;
+  }
+
+  .news-view .table-controls .review-limit-control select {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    padding-inline: 6px;
+  }
+
+  .news-view .news-search-form,
+  .news-view .news-search-form .searchbox,
+  .news-view .news-search-form input {
+    min-width: 0;
+  }
+
+  .news-view .news-search-form .searchbox {
+    flex: 1;
+    width: auto;
+  }
+
+  .news-view .news-search-submit {
+    white-space: nowrap;
+  }
+
+  .news-view .news-summary-action-row {
+    padding: 0;
+  }
+}
