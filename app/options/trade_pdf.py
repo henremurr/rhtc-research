@@ -69,7 +69,7 @@ def build_report(account, year, groups, summaries):
     return output.getvalue()
 
 
-def build_tax_lot_report(account, year, lots, ticker=""):
+def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False):
     """Create a printable Form 8949 style tax lot schedule."""
     output = BytesIO()
     width, height = landscape(letter)
@@ -86,7 +86,8 @@ def build_tax_lot_report(account, year, lots, ticker=""):
         canvas.drawImage(str(logo), 34, height-55, width=34, height=34, mask="auto")
         canvas.setFillColor(ink)
         canvas.setFont("Helvetica-Bold", 17)
-        canvas.drawString(78, height-37, "RHTC Tax Lot Report - Form 8949 columns")
+        title = "RHTC Weekly Income Report - Form 8949" if weekly_income else "RHTC Tax Lot Report - Form 8949 columns"
+        canvas.drawString(78, height-37, title)
         canvas.setFont("Helvetica", 10)
         scope = f"Account {account}   |   Tax year {year}" + (f"   |   Ticker {ticker}" if ticker else "")
         canvas.drawString(78, height-52, scope)
