@@ -1986,7 +1986,7 @@ $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/opti
     reportingToggle.setAttribute('aria-expanded',String(!reportingSubmenu.hidden));requestAnimationFrame(place);
   });
   menu.addEventListener('click',event=>{
-    if(event.target.closest('a')||event.target.closest('#infra-audit-btn')||event.target.closest('#orphaned-tickers-btn')||event.target.closest('#open-trade-report')||event.target.closest('#open-tax-lot-report')||event.target.closest('#open-ticker-tax-lot-report'))close();
+    if(event.target.closest('a')||event.target.closest('#infra-audit-btn')||event.target.closest('#orphaned-tickers-btn')||event.target.closest('#open-trade-report')||event.target.closest('#open-tax-lot-report')||event.target.closest('#open-weekly-income-report')||event.target.closest('#open-ticker-tax-lot-report'))close();
   });
   document.addEventListener('click',event=>{if(!event.target.closest('.guide-menu-wrap'))close()});
   document.addEventListener('keydown',event=>{if(event.key==='Escape'){close();toggle.focus()}});
