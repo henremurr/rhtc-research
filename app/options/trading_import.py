@@ -13,7 +13,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 from .trade_pdf import build_report
-from .trade_pdf import build_tax_lot_report, weekly_income_rows, weekly_income_totals
+from .trade_pdf import build_tax_lot_report, build_open_tax_lot_report, weekly_income_rows, weekly_income_totals
 from starlette.concurrency import run_in_threadpool
 
 HEADERS = ["Run Date", "Action", "Symbol", "Description", "Type", "Price ($)", "Quantity",
@@ -220,7 +220,7 @@ def tax_lot_ticker(symbol):
     return contract.group(1) if contract else re.split(r"\s+", value, maxsplit=1)[0]
 
 
-def tax_lot_rows(db, account, year):
+def tax_lot_rows(db, account, year, open_only=False):
     """Match completed security lots FIFO and return Form 8949 columns."""
     rows = db.execute("""
         SELECT trade_date, action, symbol, description, quantity, amount
@@ -230,6 +230,8 @@ def tax_lot_rows(db, account, year):
     inventory = {}
     completed = []
     for day, action, symbol, description, quantity, amount in rows:
+        if open_only and year and day[:4] > str(year):
+            break
         if not symbol or quantity in (None, ""):
             continue
         expired = bool(re.search(r"\b(expired|expiration)\b", action or "", re.I))
@@ -259,7 +261,7 @@ def tax_lot_rows(db, account, year):
                 else:
                     proceeds = lot["value"] * matched / lot["qty"] if lot["value"] is not None else None
                     basis = Decimal(0)
-                if not year or day[:4] == str(year):
+                if not open_only and (not year or day[:4] == str(year)):
                     completed.append({"description": f"{matched.normalize():f} {'contract' if lot['option'] else 'share'}{'s' if matched != 1 else ''} {security}",
                                       "ticker": tax_lot_ticker(security), "is_option": lot["option"] or security.startswith("-"), "acquired": lot["date"], "sold": day,
                                       "proceeds": str(proceeds.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)) if proceeds is not None else None,
@@ -284,7 +286,7 @@ def tax_lot_rows(db, account, year):
             lot_value = lot["value"] * matched / lot["qty"] if lot["value"] is not None else None
             cash_piece = cash * matched / qty if cash is not None else None
             basis, proceeds = (lot_value, cash_piece) if lot["side"] == "long" else (cash_piece, lot_value)
-            if not year or day[:4] == str(year):
+            if not open_only and (not year or day[:4] == str(year)):
                 completed.append({
                     "description": f"{matched.normalize():f} {'contract' if lot['option'] else 'share'}{'s' if matched != 1 else ''} {security}",
                     "ticker": tax_lot_ticker(security), "is_option": lot["option"] or security.startswith("-"), "acquired": lot["date"], "sold": day,
@@ -304,6 +306,21 @@ def tax_lot_rows(db, account, year):
             opened_cash = cash * remaining / qty if cash is not None else None
             lots.append({"date": day, "qty": remaining, "value": opened_cash,
                          "side": "long" if bought else "short", "option": is_option})
+    if open_only:
+        as_of = f"{year}-12-31" if year else (day if 'day' in locals() else "")
+        result = []
+        for security, open_lots in inventory.items():
+            ticker = tax_lot_ticker(security)
+            for lot in open_lots:
+                qty, value = lot["qty"], lot["value"]
+                amount_value = str(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)) if value is not None else None
+                unit_value = str((value / qty).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)) if value is not None and qty else None
+                result.append({"description": f"{qty.normalize():f} {'contract' if lot['option'] else 'share'}{'s' if qty != 1 else ''} {security}",
+                               "ticker": ticker, "side": lot["side"], "acquired": lot["date"],
+                               "quantity": str(qty.normalize()), "amount": amount_value,
+                               "unit_amount": unit_value, "amount_type": "Basis" if lot["side"] == "long" else "Proceeds",
+                               "term": holding_term(lot["date"], as_of) if as_of else "short"})
+        return sorted(result, key=lambda row: (row["ticker"], row["description"], row["acquired"]))
     return sorted(completed, key=lambda row: (row["sold"], row["description"], row["acquired"]))
 
 
@@ -391,6 +408,28 @@ def register(app, database_path):
             ticker_suffix = f"_{ticker}" if ticker else ""
             filename = f"RHTC_Form_8949_{year or 'All'}{ticker_suffix}_{account}.pdf"
         return Response(build_tax_lot_report(account, year or "All years", report["lots"], ticker=ticker, weekly_income=weekly_income, weekly_detail=weekly_detail), media_type="application/pdf",
+                        headers={"Content-Disposition": f'{disposition}; filename="{filename}"',
+                                 "Cache-Control": "private, no-store"})
+
+    @app.get("/api/open-tax-lot-report")
+    def open_tax_lot_report(account: str = "", year: int = 0):
+        with closing(sqlite3.connect(database_path())) as db:
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='trading_transactions'").fetchone():
+                return {"periods": [], "lots": []}
+            bounds = db.execute("SELECT account, MIN(substr(trade_date,1,4)), MAX(substr(trade_date,1,4)) FROM trading_transactions GROUP BY account ORDER BY account").fetchall()
+            periods = [(account_id, str(period_year)) for account_id, first, last in bounds
+                       for period_year in range(int(last), int(first) - 1, -1)]
+            lots = tax_lot_rows(db, account, year, open_only=True) if account and 0 <= year <= 9998 else []
+            return {"periods": periods, "lots": lots}
+
+    @app.get("/api/open-tax-lot-report/pdf")
+    def open_tax_lot_pdf(account: str, year: int, download: bool = False):
+        report = open_tax_lot_report(account, year)
+        if not report["lots"]:
+            raise HTTPException(404, "No open tax lots for this account as of the selected year end.")
+        disposition = "attachment" if download else "inline"
+        filename = f"RHTC_Open_Tax_Lots_{year or 'Latest'}_{account}.pdf"
+        return Response(build_open_tax_lot_report(account, year or "Latest available", report["lots"]), media_type="application/pdf",
                         headers={"Content-Disposition": f'{disposition}; filename="{filename}"',
                                  "Cache-Control": "private, no-store"})
 
