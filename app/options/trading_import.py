@@ -373,13 +373,15 @@ def register(app, database_path):
                                  "Cache-Control": "private, no-store"})
 
     @app.get("/api/tax-lot-report")
-    def tax_lot_report(account: str = "", year: int = 0, ticker: str = "", weekly_income: bool = False, weekly_detail: bool = False):
+    def tax_lot_report(account: str = "", year: int = 0, ticker: str = "", weekly_income: bool = False, weekly_detail: bool = False, metadata_only: bool = False):
         with closing(sqlite3.connect(database_path())) as db:
             if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='trading_transactions'").fetchone():
                 return {"periods": [], "lots": [], "tickers": [], "summary": tax_lot_summary([])}
             periods = db.execute("SELECT DISTINCT account, substr(trade_date,1,4) FROM trading_transactions ORDER BY account, 2 DESC").fetchall()
             symbols = db.execute("SELECT DISTINCT symbol FROM trading_transactions WHERE account=? AND COALESCE(TRIM(symbol),'')<>''", (account,)).fetchall() if account else []
             tickers = sorted({value for (symbol,) in symbols if (value := tax_lot_ticker(symbol)) and re.fullmatch(r"[A-Z0-9./-]{1,16}", value)})
+            if metadata_only:
+                return {"periods": periods, "tickers": tickers}
             lots = tax_lot_rows(db, account, year) if account and 0 <= year <= 9998 else []
             ticker = ticker.strip().upper()
             if ticker:

@@ -91,10 +91,12 @@
 <script src="/options/static/app.js?v=weekly-income-report-20261119"></script>
 <style>
 #trade-preview{padding:0;border:0;width:92vw;height:88vh;max-width:none;max-height:none;background:#222;color:white}
-#trade-preview[open]{display:flex;flex-direction:column;position:fixed;inset:0;margin:auto;z-index:10000;box-shadow:0 0 0 100vmax #0009}
+#trade-preview[open]{display:flex;flex-direction:column;position:fixed;inset:0;margin:auto;z-index:10000}
 #trade-preview.expanded,#trade-preview:fullscreen{width:100vw;height:100vh;height:100dvh;margin:0}
+#trade-preview::backdrop{background:#0009}
 #trade-preview nav{display:flex;align-items:center;gap:.6rem;padding:.5rem;background:#172229;flex-wrap:wrap}
 .trade-action[hidden]{display:none}
+.trade-action:disabled{opacity:.55;cursor:default}
 .trade-action{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-height:44px;padding:0 .8rem;color:#171717;background:#e2c778;border:0;border-radius:.4rem;font:inherit;text-decoration:none;cursor:pointer}
 a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
 .trade-toolbar{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:.65rem .7rem}
@@ -106,8 +108,7 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
 .trade-toolbar .trade-action,#trade-filters select{min-height:2.5rem;font:inherit}
 .trade-toolbar .trade-action{padding:0 .7rem;white-space:nowrap}
 #trade-filters select{box-sizing:border-box;width:100%;min-width:0}
-#trade-view-button,#trade-close{justify-self:start}
-#trade-pdf-controls:not([hidden]){grid-column:1/-1;display:flex;align-items:center;gap:.55rem;min-width:0}
+#trade-preview-open,#trade-close{justify-self:start}
 .trade-toolbar #trade-close{margin-inline-start:0;justify-self:start}
 @media (max-width:600px){
  #trade-report-dialog{width:calc(100vw - 16px)!important;max-height:calc(100dvh - 16px);padding:.85rem!important}
@@ -115,17 +116,17 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
  .trade-toolbar #trade-title{grid-column:auto;font-size:1.2rem}
  #trade-filters{grid-template-columns:max-content minmax(10rem,1.2fr) minmax(8rem,.9fr) minmax(6rem,.6fr) max-content;gap:.4rem;overflow-x:auto;align-items:end}
  #trade-filters label{font-size:.8rem}
- #trade-view-button,#trade-close{grid-column:auto;justify-self:stretch;padding:0 .4rem;font-size:.8rem}
- #trade-pdf-controls:not([hidden]){display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.5rem}
- #trade-pdf-controls .trade-action{width:100%;min-width:0;padding:0 .45rem;font-size:.9rem}
+ #trade-filters,#trade-filters:not(:has(#trade-ticker-filter:not([hidden]))){display:flex;flex-wrap:wrap;overflow:visible}
+ #trade-filters label{flex:1 1 5rem}
+ #trade-filters label:first-of-type{flex-basis:10rem}
+ #trade-preview-open,#trade-close{padding:0 .55rem;font-size:.85rem}
  .trade-toolbar #trade-close{justify-self:start}
 }
 #trade-status{margin:.45rem 0;font-size:.82rem}
 #trade-status:empty{margin:0}
 #trade-report-dialog[open]{display:flex;flex-direction:column;overflow:hidden}
 #trade-report-dialog > :is(.trade-toolbar,#trade-status){flex:none}
-#trade-results{flex:1 1 auto;min-height:0;overflow:auto;overscroll-behavior:contain}
-:is(#trade-results,#preview-pages) thead th:nth-last-child(-n+2){text-align:right}
+#preview-pages thead th:nth-last-child(-n+2){text-align:right}
 #preview-pages{flex:1;min-height:0;width:100%;border:0}
 /* Dashboard table cells have their own theme colors. Set paper colors on the cells. */
 #preview-pages :is(th,td){color:#111;background:#fff}
@@ -141,7 +142,6 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
  #preview-pages h2{font-size:1.25rem;margin:.45rem 0}
  #preview-pages h3{margin:1rem 0 .4rem}
  #preview-pages p{margin:.35rem 0}
- #preview-pages #trade-results > div{overflow:visible!important}
  #preview-pages table{display:block;width:100%!important;min-width:0!important;border-spacing:0!important}
  #preview-pages :is(thead,tbody,tfoot){display:block}
  #preview-pages thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%)}
@@ -161,7 +161,8 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
 @media print{
  html:has(#trade-preview[open]),body:has(#trade-preview[open]){height:auto!important;overflow:visible!important;background:white!important}
  body:has(#trade-preview[open]) > :not(#trade-preview){display:none!important}
- #trade-preview[open]{position:static;display:block;width:auto;height:auto;margin:0;overflow:visible;background:white;color:#111;box-shadow:none}
+ #trade-preview::backdrop{display:none!important}
+ #trade-preview[open]{position:absolute;inset:0 auto auto 0;display:block;width:auto;height:auto;margin:0;overflow:visible;background:white;color:#111;box-shadow:none}
  #trade-preview nav{display:none}
  #preview-pages,#preview-pages div{overflow:visible!important}
  #preview-pages{padding:0}
@@ -174,52 +175,76 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
  #preview-pages tfoot{display:table-row-group}
 }
 </style>
-<dialog id="trade-preview" aria-modal="true" aria-label="Trade Report preview">
+<dialog id="trade-preview" aria-modal="true" aria-labelledby="preview-title">
 <nav><button type="button" class="trade-action" id="preview-close">Close preview</button><button type="button" id="preview-return" class="trade-action">Return to dashboard</button><button type="button" id="preview-expand" class="trade-action" aria-pressed="false">Full screen</button><button type="button" id="preview-print" class="trade-action">Print report</button><a id="preview-download" class="trade-action" download>Download PDF</a><span id="preview-print-status" role="status"></span></nav>
 <div id="preview-pages" hidden></div></dialog>
 <dialog id="trade-report-dialog" aria-labelledby="trade-title" style="width:min(60rem,94vw);max-height:88vh;box-sizing:border-box;background:#171c21;color:#eef2f5;border:1px solid #847450;border-radius:12px;padding:1rem">
 <div class="trade-toolbar">
 <h2 id="trade-title">Trade Report</h2>
-<form id="trade-filters"><button type="button" id="trade-close" class="trade-action">Return to dashboard</button><label>Account <select id="trade-account" required></select></label><label id="trade-ticker-filter" hidden>Ticker <select id="trade-ticker" required><option value="">Select ticker</option></select></label><label>Tax year <select id="trade-year" required></select></label><button class="trade-action" id="trade-view-button">View trades</button></form>
-<div id="trade-pdf-controls" hidden><button type="button" id="trade-preview-open" class="trade-action">Preview report</button><a id="trade-download" class="trade-action" download>Download PDF</a></div>
+<form id="trade-filters"><button type="button" id="trade-close" class="trade-action">Return to dashboard</button><label>Account <select id="trade-account" required></select></label><label id="trade-ticker-filter" hidden>Ticker <select id="trade-ticker" required><option value="">Select ticker</option></select></label><label>Tax year <select id="trade-year" required></select></label><button class="trade-action" id="trade-preview-open" type="submit" disabled>Preview report</button></form>
 </div>
-<p id="trade-status" role="status"></p><div id="trade-results"></div></dialog>
+<p id="trade-status" role="status"></p></dialog>
 <script>
 (()=>{
  const get=id=>document.getElementById(id);
- const dialog=get('trade-report-dialog'),account=get('trade-account'),year=get('trade-year'),status=get('trade-status'),results=get('trade-results');
+ const dialog=get('trade-report-dialog'),account=get('trade-account'),year=get('trade-year'),status=get('trade-status'),previewButton=get('trade-preview-open');
  let periods=[],sequence=0,reportMode='trade';
  const tickerInput=get('trade-ticker');
  const isWeekly=()=>reportMode==='weekly-income'||reportMode==='weekly-detail';
- const reportTitle=()=>isWeekly()?('RHTC '+(reportMode==='weekly-detail'?'Weekly Income Detail Report':'Weekly Income Summary Report')):reportMode==='open-tax'?'RHTC Open Tax Lot Report':reportMode==='ticker-tax'?'RHTC Ticker Tax Lot Report · Form 8949':reportMode==='tax'?'RHTC Tax Lot Report · Form 8949 columns':'RHTC Trade Report';
- function clear(){printRequest?.abort();printFile=undefined;get('trade-pdf-controls').hidden=true;sequence++;results.replaceChildren();results.scrollTop=0;status.textContent='';}
- function reportContent(target, heading){
-   const logo=target.createElement('img');logo.src=new URL('/apple-touch-icon.png',location.href).href;logo.width=44;logo.height=44;logo.alt='RHTC';
-   const title=target.createElement(heading);title.textContent=reportTitle();
-   const caption=target.createElement('p');caption.textContent='Account '+account.value+' · '+(year.value==='0'?(reportMode==='open-tax'?'Latest available':'All years'):year.value)+(isWeekly()?' · All tickers':reportMode==='ticker-tax'?' · Ticker '+tickerInput.value.trim().toUpperCase():'');
-   const content=target.importNode(results,true);content.removeAttribute('id');
-   return [logo,title,caption,content];
+ const reportTitle=()=>isWeekly()?('RHTC '+(reportMode==='weekly-detail'?'Weekly Income Detail Report':'Weekly Income Summary Report')):reportMode==='open-tax'?'RHTC Open Tax Lot Report':reportMode==='ticker-tax'?'RHTC Ticker Tax Lot Report · Form 8949':reportMode==='tax'?'RHTC Tax Lot Report · Form 8949 columns':'RHTC Transaction Report';
+ function clear(){
+   printRequest?.abort();
+   printRequest=undefined;
+   printFile=undefined;
+   sequence++;
+   status.textContent='';
+ }
+ function updatePreviewButton(){
+   previewButton.disabled=!account.value||!year.value||(tickerInput.required&&!tickerInput.value);
+ }
+ function reportRoute(){return reportMode==='trade'?'trade-report':reportMode==='open-tax'?'open-tax-lot-report':'tax-lot-report';}
+ function showReport(results, params, message, hasRows){
+   const logo=document.createElement('img');logo.src='/apple-touch-icon.png';logo.width=44;logo.height=44;logo.alt='RHTC';
+   const title=document.createElement('h2');title.id='preview-title';title.textContent=reportTitle();
+   const caption=document.createElement('p');caption.textContent='Account '+params.account+' · '+(params.year==='0'?(reportMode==='open-tax'?'Latest available':'All years'):params.year)+(isWeekly()?' · All tickers':params.ticker?' · Ticker '+params.ticker:'');
+   const note=document.createElement('p');note.textContent=message;
+   pages.replaceChildren(logo,title,caption,note,results);
+   pages.hidden=false;
+   previewDownload.hidden=!hasRows;
+   printButton.hidden=combinedPdfAction&&hasRows;
+   if(hasRows){
+     previewDownload.href='/options/api/'+reportRoute()+'/pdf?'+new URLSearchParams({...params,download:'true'});
+     previewDownload.download=pdfFilename();
+     if(canShareFiles&&(appleMobile||!window.showSaveFilePicker))preparePrintFile(previewDownload.href);
+   }else{
+     previewDownload.removeAttribute('href');
+   }
+   status.textContent='';
+   dialog.close();
+   preview.showModal();
+   pages.scrollTop=0;
+   get('preview-close').focus();
  }
  async function loadTickers(){
   tickerInput.replaceChildren(new Option('Select ticker',''));
+  updatePreviewButton();
   if(reportMode!=='ticker-tax'||!account.value)return;
-  const selectedAccount=account.value,selectedSequence=sequence;
+  const selectedAccount=account.value,placeholder=tickerInput.firstElementChild;
   try{
-   const data=await request('?'+new URLSearchParams({account:selectedAccount,year:'0'}));
-   if(selectedSequence!==sequence||selectedAccount!==account.value||reportMode!=='ticker-tax')return;
+   const data=await request('?'+new URLSearchParams({account:selectedAccount,year:'0',metadata_only:'true'}));
+   if(!dialog.open||placeholder!==tickerInput.firstElementChild||reportMode!=='ticker-tax')return;
    tickerInput.replaceChildren(new Option('Select ticker',''),...(data.tickers||[]).map(ticker=>new Option(ticker,ticker)));
-  }catch(error){if(selectedSequence===sequence)status.textContent=error.message;}
+  }catch(error){if(dialog.open&&placeholder===tickerInput.firstElementChild)status.textContent=error.message;}
  }
  function years(){clear();year.replaceChildren(...periods.filter(p=>p[0]===account.value).map(p=>new Option(p[1],p[1])),...(isWeekly()?[]:[new Option("All","0")]));loadTickers();}
- account.addEventListener('change',years);year.addEventListener('change',clear);tickerInput.addEventListener('change',clear);
- async function request(query){const route=reportMode==='trade'?'trade-report':reportMode==='open-tax'?'open-tax-lot-report':'tax-lot-report';const response=await fetch('/options/api/'+route+query,{cache:'no-store'});if(!response.ok)throw Error(response.status===401?'Sign in again to view trades.':'Unable to load transaction history.');return response.json();}
+ account.addEventListener('change',years);for(const field of [year,tickerInput])field.addEventListener('change',()=>{clear();updatePreviewButton();});
+ async function request(query){const response=await fetch('/options/api/'+reportRoute()+query,{cache:'no-store'});if(!response.ok)throw Error(response.status===401?'Sign in again to view trades.':'Unable to load transaction history.');return response.json();}
  async function openReport(mode){
-  reportMode=mode;get('trade-title').textContent=isWeekly()?(reportMode==='weekly-detail'?'Weekly Income Detail Report':'Weekly Income Summary Report'):reportMode==='open-tax'?'Open Tax Lot Report':reportMode==='ticker-tax'?'Ticker Tax Lot Report · Form 8949':reportMode==='tax'?'Tax Lot Report · Form 8949':'Trade Report';
-  get('trade-view-button').textContent=isWeekly()?'View weekly income':reportMode==='open-tax'?'View open lots':reportMode==='ticker-tax'?'View ticker tax lots':reportMode==='tax'?'View tax lots':'View trades';
+  reportMode=mode;get('trade-title').textContent=isWeekly()?(reportMode==='weekly-detail'?'Weekly Income Detail Report':'Weekly Income Summary Report'):reportMode==='open-tax'?'Open Tax Lot Report':reportMode==='ticker-tax'?'Ticker Tax Lot Report · Form 8949':reportMode==='tax'?'Tax Lot Report · Form 8949':'Transaction report';
   get('trade-ticker-filter').hidden=reportMode!=='ticker-tax';tickerInput.required=reportMode==='ticker-tax';tickerInput.value='';
   get('guide-menu').hidden=true;get('guide-menu-toggle').setAttribute('aria-expanded','false');
-  dialog.showModal();clear();account.replaceChildren();year.replaceChildren();periods=[];const next=sequence;status.textContent='Loading accounts…';
-  try{const data=await request('');if(next!==sequence)return;periods=data.periods;account.replaceChildren(...[...new Set(periods.map(p=>p[0]))].map(a=>new Option(a,a)));years();status.textContent=periods.length?'Select an account and year, then choose '+(isWeekly()?'View weekly income':reportMode==='open-tax'?'View open lots':reportMode==='ticker-tax'?'View ticker tax lots':reportMode==='tax'?'View tax lots':'View trades')+'.':'Import trading history to view a report.';}catch(e){if(next===sequence)status.textContent=e.message;}
+  dialog.showModal();clear();account.replaceChildren();year.replaceChildren();periods=[];updatePreviewButton();const next=sequence;status.textContent='Loading accounts…';
+  try{const data=await request('');if(next!==sequence)return;periods=data.periods;account.replaceChildren(...[...new Set(periods.map(p=>p[0]))].map(a=>new Option(a,a)));years();status.textContent=periods.length?'Select your filters, then choose Preview report.':'Import trading history to view a report.';}catch(e){if(next===sequence)status.textContent=e.message;}
  }
  get('open-trade-report').addEventListener('click',()=>openReport('trade'));
  get('open-tax-lot-report').addEventListener('click',()=>openReport('tax'));
@@ -229,14 +254,14 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
  get('open-open-tax-lot-report').addEventListener('click',()=>openReport('open-tax'));
  const preview=get('trade-preview'),expand=get('preview-expand'),pages=get('preview-pages');
  const printButton=get('preview-print'),printStatus=get('preview-print-status');
- const reportDownload=get('trade-download'),previewDownload=get('preview-download');
+ const previewDownload=get('preview-download');
  const appleMobile=/iPad|iPhone|iPod/.test(navigator.userAgent)||
    (navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
  const canShareFiles=Boolean(navigator.share&&navigator.canShare);
  const combinedPdfAction=appleMobile||(canShareFiles&&!window.showSaveFilePicker);
  if(combinedPdfAction){
    printButton.hidden=true;
-   reportDownload.textContent=previewDownload.textContent='Print or save PDF';
+   previewDownload.textContent='Print or save PDF';
  }
  let printRequest,printFile;
  function pdfFilename(){return (reportMode==='trade'?'RHTC_Trade_Report_':reportMode==='open-tax'?'RHTC_Open_Tax_Lots_':isWeekly()?(reportMode==='weekly-detail'?'RHTC_Weekly_Income_Detail_Report_':'RHTC_Weekly_Income_Summary_Report_'):'RHTC_Form_8949_')+(year.value==='0'?'Latest':year.value)+(reportMode==='ticker-tax'?'_'+tickerInput.value.trim().toUpperCase():'')+'.pdf';}
@@ -261,7 +286,7 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
  }
  async function savePdf(event){
    const url=event.currentTarget.href;
-   const feedback=preview.open?printStatus:status;
+   const feedback=printStatus;
    if(!combinedPdfAction&&window.showSaveFilePicker){
      event.preventDefault();
      try{
@@ -291,45 +316,40 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
      feedback.textContent='Preparing the PDF. Try again in a moment.';
    }
  }
- reportDownload.onclick=previewDownload.onclick=savePdf;
+ previewDownload.onclick=savePdf;
  function expanded(active){
    preview.classList.toggle('expanded',active);
    expand.textContent=active?'Exit full screen':'Full screen';
    expand.setAttribute('aria-pressed',String(active));
  }
  expand.onclick=()=>expanded(!preview.classList.contains('expanded'));
- get('trade-preview-open').onclick=()=>{
-   previewDownload.href=reportDownload.href;
-   previewDownload.download=pdfFilename();
-   pages.replaceChildren(...reportContent(document,'h2'));pages.hidden=false;
-   pages.scrollTop=0;
-   preview.show();
-   dialog.close();
-   document.querySelector(".shell").inert=true;
-   get('preview-close').focus();
- };
  printButton.onclick=()=>window.print();
  function closePreview(){
    preview.close();
-   document.querySelector(".shell").inert=false;
    dialog.showModal();
    get('trade-preview-open').focus();
  }
  get('preview-close').onclick=closePreview;
- preview.addEventListener('keydown',event=>{if(event.key==='Escape')closePreview();});
- get('preview-return').onclick=()=>{preview.close();document.querySelector(".shell").inert=false;clear();get('guide-menu-toggle').focus();};
+ preview.addEventListener('cancel',event=>{event.preventDefault();closePreview();});
+ get('preview-return').onclick=()=>{preview.close();clear();get('guide-menu-toggle').focus();};
  preview.addEventListener('close',()=>{
    printStatus.textContent='';
    expanded(false);pages.replaceChildren();pages.hidden=true;
  });
- get('trade-close').onclick=()=>dialog.close();dialog.addEventListener('close',()=>{if(!preview.open&&!dialog.open)clear();});
+ get('trade-close').onclick=()=>{dialog.close();get('guide-menu-toggle').focus();};dialog.addEventListener('close',()=>{if(!preview.open&&!dialog.open)clear();});
  get('trade-filters').onsubmit=async e=>{
-  e.preventDefault();clear();const next=sequence;status.textContent='Loading trades…';
+  e.preventDefault();
+  if(previewButton.disabled)return;
+  clear();
+  const next=sequence;
+  const results=document.createElement('div');
+  previewButton.disabled=true;
+  status.textContent='Loading report…';
   try{const params={account:account.value,year:year.value};
    if(isWeekly())params.weekly_income='true';
    if(reportMode==='weekly-detail')params.weekly_detail='true';
    if(reportMode==='ticker-tax')params.ticker=tickerInput.value.trim().toUpperCase();
-   const data=await request('?'+new URLSearchParams(params));if(next!==sequence)return;
+   const data=await request('?'+new URLSearchParams(params));if(next!==sequence||!dialog.open)return;
    if(reportMode==='open-tax'){
     const rows=data.lots||[],labels=['Ticker / security','Side','Date acquired','Holding period','Open quantity','Basis / proceeds','Per unit'];
     const dollars=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'});
@@ -343,16 +363,12 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
      const basis=rows.filter(lot=>lot.amount_type==='Basis').reduce((sum,lot)=>sum+(Number(lot.amount)||0),0),proceeds=rows.filter(lot=>lot.amount_type==='Proceeds').reduce((sum,lot)=>sum+(Number(lot.amount)||0),0);
      const total=footer.insertCell();total.textContent='Basis '+dollars.format(basis)+' · Proceeds '+dollars.format(proceeds);total.style.textAlign='right';total.style.fontWeight='700';footer.insertCell();
     }
-    const base='/options/api/open-tax-lot-report/pdf?'+new URLSearchParams({account:account.value,year:year.value});
-    reportDownload.href=base+'&download=true';reportDownload.download=pdfFilename();
-    if(rows.length&&canShareFiles&&(appleMobile||!window.showSaveFilePicker))preparePrintFile(reportDownload.href);
-    get('trade-pdf-controls').hidden=!rows.length;
-    status.textContent=rows.length?rows.length+' open lots as of '+(year.value==='0'?'the latest available transaction':year.value+' year-end')+'.':'No open tax lots for this account as of the selected year-end.';
+    showReport(results,params,rows.length?rows.length+' open lots as of '+(params.year==='0'?'the latest available transaction':params.year+' year-end')+'.':'No open tax lots for this account as of the selected year-end.',Boolean(rows.length));
     return;
    }
    if(isWeekly()){
     const weeks=data.weeks||[];
-    if(!weeks.length){status.textContent='No completed tax lots for this account and tax year.';return;}
+    if(!weeks.length){showReport(results,params,'No completed tax lots for this account and tax year.',false);return;}
     const dollars=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'});
     const wrap=document.createElement('div');
     wrap.style.overflowX='auto';
@@ -429,11 +445,7 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
       results.append(heading,container);
      }
     }
-    reportDownload.href='/options/api/tax-lot-report/pdf?'+new URLSearchParams({...params,download:'true'});
-    reportDownload.download=pdfFilename();
-    if(canShareFiles&&(appleMobile||!window.showSaveFilePicker))preparePrintFile(reportDownload.href);
-    get('trade-pdf-controls').hidden=false;
-    status.textContent='Weeks 1–'+weeks.length+' by closing date · All tickers';
+    showReport(results,params,'Weeks 1–'+weeks.length+' by closing date · All tickers',true);
     return;
    }
    if(reportMode!=='trade'){
@@ -442,10 +454,8 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
     const sections=[['short','Part I - Short-term transactions (held 1 year or less)'],['long','Part II - Long-term transactions (held more than 1 year)']];
     for(const [term,titleText] of sections){const termRows=rows.filter(lot=>lot.term===term);if(!termRows.length)continue;const title=document.createElement('h3');title.textContent=titleText;results.append(title);const wrap=document.createElement('div');wrap.style.overflowX='auto';const table=document.createElement('table');table.style.cssText='width:100%;min-width:850px;text-align:left;border-spacing:8px';wrap.append(table);results.append(wrap);const head=table.createTHead().insertRow();for(const label of labels){const th=document.createElement('th');th.textContent=label;head.append(th);}const body=table.createTBody();for(const lot of termRows){const tr=body.insertRow();const values=[lot.description,lot.acquired,lot.sold,lot.proceeds,lot.basis,lot.code,lot.adjustment,lot.gain];values.forEach((value,i)=>{const td=tr.insertCell();td.dataset.label=labels[i];const blankField=(i===5||i===6)&&!value;const dateValue=(i===1||i===2)&&value?value.split('-').slice(1).concat(value.split('-')[0]).join('/'):value;td.textContent=blankField?'':value==null||value===''?'—':i===3||i===4||i===6||i===7?dollars.format(Number(value)):dateValue;if(i>=3)td.style.textAlign='right';});}}
     if(rows.length){const heading=document.createElement('h3');heading.textContent='Capital gain/(loss) totals';results.append(heading);const wrap=document.createElement('div');wrap.style.overflowX='auto';const table=document.createElement('table');table.style.cssText='width:100%;min-width:560px;text-align:left;border-spacing:8px';wrap.append(table);results.append(wrap);const header=table.createTHead().insertRow();for(const label of ['Holding period','Proceeds','Cost or basis','Net gain/(loss)']){const th=document.createElement('th');th.textContent=label;header.append(th);}const body=table.createTBody();for(const [term,label] of [['short','Short-term'],['long','Long-term']]){const values=data.summary?.[term]||{};const tr=body.insertRow();tr.insertCell().textContent=label;for(const key of ['proceeds','basis','gain']){const td=tr.insertCell();td.style.textAlign='right';td.textContent=values[key]==null?'—':dollars.format(Number(values[key]));}}}
-    const pdfParams={account:account.value,year:year.value};
-    if(isWeekly())pdfParams.weekly_income='true';
-    if(reportMode==='ticker-tax')pdfParams.ticker=tickerInput.value.trim().toUpperCase();
-    const base='/options/api/tax-lot-report/pdf?'+new URLSearchParams(pdfParams);reportDownload.href=base+'&download=true';reportDownload.download=pdfFilename();if(rows.length&&canShareFiles&&(appleMobile||!window.showSaveFilePicker))preparePrintFile(reportDownload.href);get('trade-pdf-controls').hidden=!rows.length;status.textContent=rows.length?rows.length+' completed tax lots. Matched FIFO using the full account history; open lots are omitted.':'No completed tax lots for this account, ticker, and tax year.';return;
+    showReport(results,params,rows.length?rows.length+' completed tax lots. Matched FIFO using the full account history; open lots are omitted.':'No completed tax lots match the selected filters.',Boolean(rows.length));
+    return;
    }
    let count=0;for(const [ticker,rows] of Object.entries(data.groups)){
     const title=document.createElement('h3');title.textContent=ticker+' ('+rows.length+')';results.append(title);
@@ -485,15 +495,12 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
     total.style.fontWeight = 'bold';
     total.textContent = amountCount ? dollars.format(totalCents / 100) : '—';
    }
-   if(count){
-     const url='/options/api/trade-report/pdf?'+new URLSearchParams({account:account.value,year:year.value});
-     reportDownload.href=url+'&download=true';
-     reportDownload.download=pdfFilename();
-     if(canShareFiles&&(appleMobile||!window.showSaveFilePicker))preparePrintFile(reportDownload.href);
-     get('trade-pdf-controls').hidden=false;
-   }
-   status.textContent=count?count+' trades, oldest first within each ticker.':'No trades for this account and year.';
-  }catch(error){if(next===sequence)status.textContent=error.message;}
+   showReport(results,params,count?count+' trades, oldest first within each ticker.':'No trades for this account and year.',Boolean(count));
+  }catch(error){
+   if(next===sequence&&dialog.open)status.textContent=error.message;
+  }finally{
+   if(next===sequence)updatePreviewButton();
+  }
  };
 })();
 </script>
