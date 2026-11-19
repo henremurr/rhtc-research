@@ -13,7 +13,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 from .trade_pdf import build_report
-from .trade_pdf import build_tax_lot_report, weekly_income_rows
+from .trade_pdf import build_tax_lot_report, weekly_income_rows, weekly_income_totals
 from starlette.concurrency import run_in_threadpool
 
 HEADERS = ["Run Date", "Action", "Symbol", "Description", "Type", "Price ($)", "Quantity",
@@ -372,7 +372,8 @@ def register(app, database_path):
             if weekly_income and account:
                 if not 1 <= year <= 9998:
                     raise HTTPException(422, "Select a tax year for the weekly report.")
-                return {"periods": periods, "weeks": weekly_income_rows(lots, year)}
+                weeks = weekly_income_rows(lots, year)
+                return {"periods": periods, "weeks": weeks, "totals": weekly_income_totals(weeks)}
             return {"periods": periods, "lots": lots, "tickers": tickers, "summary": tax_lot_summary(lots)}
 
     @app.get("/api/tax-lot-report/pdf")
