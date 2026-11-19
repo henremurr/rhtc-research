@@ -126,7 +126,20 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
 #trade-status:empty{margin:0}
 #trade-report-dialog[open]{display:flex;flex-direction:column;overflow:hidden}
 #trade-report-dialog > :is(.trade-toolbar,#trade-status){flex:none}
-#preview-pages thead th:nth-last-child(-n+2){text-align:right}
+#preview-pages .transaction-columns thead th:nth-child(n+5),
+#preview-pages .open-lot-columns thead th:nth-child(n+5),
+#preview-pages .tax-lot-columns thead th:is(:nth-child(4),:nth-child(5),:nth-child(n+7)),
+#preview-pages .tax-total-columns thead th:nth-child(n+2){text-align:right}
+@media screen and (min-width:601px){
+ #preview-pages table{display:table;table-layout:auto}
+ #preview-pages thead{display:table-header-group}
+ #preview-pages tbody{display:table-row-group}
+ #preview-pages tfoot{display:table-footer-group}
+ #preview-pages tr{display:table-row}
+ #preview-pages :is(th,td){display:table-cell;line-height:1.4;white-space:nowrap;overflow-wrap:normal}
+ #preview-pages tbody td::before{content:none}
+}
+
 #preview-pages{flex:1;min-height:0;width:100%;border:0}
 /* Dashboard table cells have their own theme colors. Set paper colors on the cells. */
 #preview-pages :is(th,td){color:#111;background:#fff}
@@ -355,7 +368,7 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
     const dollars=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'});
     if(rows.length){
      const wrap=document.createElement('div');wrap.style.overflowX='auto';
-     const table=document.createElement('table');table.style.cssText='width:100%;min-width:760px;text-align:left;border-spacing:8px';wrap.append(table);results.append(wrap);
+     const table=document.createElement('table');table.className='open-lot-columns';table.style.cssText='width:100%;min-width:760px;text-align:left;border-spacing:8px';wrap.append(table);results.append(wrap);
      const head=table.createTHead().insertRow();for(const label of labels){const th=document.createElement('th');th.textContent=label;head.append(th);}
      const body=table.createTBody();
      for(const lot of rows){const row=body.insertRow();const values=[lot.ticker+' · '+lot.description,lot.side,lot.acquired,lot.term,lot.quantity,lot.amount,lot.unit_amount];values.forEach((value,index)=>{const cell=row.insertCell();cell.dataset.label=labels[index];cell.textContent=value==null||value===''?'—':index===5||index===6?dollars.format(Number(value)):value;if(index>=4)cell.style.textAlign='right';});}
@@ -452,15 +465,15 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
     const rows=data.lots||[],labels=['(a) Description','(b) Date acquired','(c) Date sold','(d) Proceeds','(e) Cost or other basis','(f) Code','(g) Adjustment','(h) Gain or loss'];
     const dollars=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'});
     const sections=[['short','Part I - Short-term transactions (held 1 year or less)'],['long','Part II - Long-term transactions (held more than 1 year)']];
-    for(const [term,titleText] of sections){const termRows=rows.filter(lot=>lot.term===term);if(!termRows.length)continue;const title=document.createElement('h3');title.textContent=titleText;results.append(title);const wrap=document.createElement('div');wrap.style.overflowX='auto';const table=document.createElement('table');table.style.cssText='width:100%;min-width:850px;text-align:left;border-spacing:8px';wrap.append(table);results.append(wrap);const head=table.createTHead().insertRow();for(const label of labels){const th=document.createElement('th');th.textContent=label;head.append(th);}const body=table.createTBody();for(const lot of termRows){const tr=body.insertRow();const values=[lot.description,lot.acquired,lot.sold,lot.proceeds,lot.basis,lot.code,lot.adjustment,lot.gain];values.forEach((value,i)=>{const td=tr.insertCell();td.dataset.label=labels[i];const blankField=(i===5||i===6)&&!value;const dateValue=(i===1||i===2)&&value?value.split('-').slice(1).concat(value.split('-')[0]).join('/'):value;td.textContent=blankField?'':value==null||value===''?'—':i===3||i===4||i===6||i===7?dollars.format(Number(value)):dateValue;if(i>=3)td.style.textAlign='right';});}}
-    if(rows.length){const heading=document.createElement('h3');heading.textContent='Capital gain/(loss) totals';results.append(heading);const wrap=document.createElement('div');wrap.style.overflowX='auto';const table=document.createElement('table');table.style.cssText='width:100%;min-width:560px;text-align:left;border-spacing:8px';wrap.append(table);results.append(wrap);const header=table.createTHead().insertRow();for(const label of ['Holding period','Proceeds','Cost or basis','Net gain/(loss)']){const th=document.createElement('th');th.textContent=label;header.append(th);}const body=table.createTBody();for(const [term,label] of [['short','Short-term'],['long','Long-term']]){const values=data.summary?.[term]||{};const tr=body.insertRow();tr.insertCell().textContent=label;for(const key of ['proceeds','basis','gain']){const td=tr.insertCell();td.style.textAlign='right';td.textContent=values[key]==null?'—':dollars.format(Number(values[key]));}}}
+    for(const [term,titleText] of sections){const termRows=rows.filter(lot=>lot.term===term);if(!termRows.length)continue;const title=document.createElement('h3');title.textContent=titleText;results.append(title);const wrap=document.createElement('div');wrap.style.overflowX='auto';const table=document.createElement('table');table.className='tax-lot-columns';table.style.cssText='width:100%;min-width:850px;text-align:left;border-spacing:8px';wrap.append(table);results.append(wrap);const head=table.createTHead().insertRow();for(const label of labels){const th=document.createElement('th');th.textContent=label;head.append(th);}const body=table.createTBody();for(const lot of termRows){const tr=body.insertRow();const values=[lot.description,lot.acquired,lot.sold,lot.proceeds,lot.basis,lot.code,lot.adjustment,lot.gain];values.forEach((value,i)=>{const td=tr.insertCell();td.dataset.label=labels[i];const blankField=(i===5||i===6)&&!value;const dateValue=(i===1||i===2)&&value?value.split('-').slice(1).concat(value.split('-')[0]).join('/'):value;td.textContent=blankField?'':value==null||value===''?'—':i===3||i===4||i===6||i===7?dollars.format(Number(value)):dateValue;if(i>=3&&i!==5)td.style.textAlign='right';});}}
+    if(rows.length){const heading=document.createElement('h3');heading.textContent='Capital gain/(loss) totals';results.append(heading);const wrap=document.createElement('div');wrap.style.overflowX='auto';const table=document.createElement('table');table.className='tax-total-columns';table.style.cssText='width:100%;min-width:560px;text-align:left;border-spacing:8px';wrap.append(table);results.append(wrap);const header=table.createTHead().insertRow();for(const label of ['Holding period','Proceeds','Cost or basis','Net gain/(loss)']){const th=document.createElement('th');th.textContent=label;header.append(th);}const body=table.createTBody();for(const [term,label] of [['short','Short-term'],['long','Long-term']]){const values=data.summary?.[term]||{};const tr=body.insertRow();const termCell=tr.insertCell();termCell.textContent=label;termCell.dataset.label='Holding period';for(const [key,column] of [['proceeds','Proceeds'],['basis','Cost or basis'],['gain','Net gain/(loss)']]){const td=tr.insertCell();td.dataset.label=column;td.style.textAlign='right';td.textContent=values[key]==null?'—':dollars.format(Number(values[key]));}}}
     showReport(results,params,rows.length?rows.length+' completed tax lots. Matched FIFO using the full account history; open lots are omitted.':'No completed tax lots match the selected filters.',Boolean(rows.length));
     return;
    }
    let count=0;for(const [ticker,rows] of Object.entries(data.groups)){
     const title=document.createElement('h3');title.textContent=ticker+' ('+rows.length+')';results.append(title);
     for(const line of data.summaries[ticker].filter(line=>line.endsWith(' | OPEN'))){const summary=document.createElement('p');summary.textContent=line;results.append(summary);}
-    const wrap=document.createElement('div');wrap.style.overflowX='auto';const table=document.createElement('table');table.style.cssText='width:100%;min-width:620px;text-align:left;border-spacing:8px';wrap.append(table);results.append(wrap);
+    const wrap=document.createElement('div');wrap.style.overflowX='auto';const table=document.createElement('table');table.className='transaction-columns';table.style.cssText='width:100%;min-width:620px;text-align:left;border-spacing:8px';wrap.append(table);results.append(wrap);
     const header=table.createTHead().insertRow();for(const label of ['Date','Action','Security','Quantity','Price ($)','Amount ($)']){const th=document.createElement('th');th.textContent=label;header.append(th);}
     const body = table.createTBody();
     const dollars = new Intl.NumberFormat('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
