@@ -356,7 +356,7 @@ def register(app, database_path):
                                  "Cache-Control": "private, no-store"})
 
     @app.get("/api/tax-lot-report")
-    def tax_lot_report(account: str = "", year: int = 0, ticker: str = "", weekly_income: bool = False):
+    def tax_lot_report(account: str = "", year: int = 0, ticker: str = "", weekly_income: bool = False, weekly_detail: bool = False):
         with closing(sqlite3.connect(database_path())) as db:
             if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='trading_transactions'").fetchone():
                 return {"periods": [], "lots": [], "tickers": [], "summary": tax_lot_summary([])}
@@ -372,12 +372,12 @@ def register(app, database_path):
             if weekly_income and account:
                 if not 1 <= year <= 9998:
                     raise HTTPException(422, "Select a tax year for the weekly report.")
-                weeks = weekly_income_rows(lots, year)
+                weeks = weekly_income_rows(lots, year, include_details=weekly_detail)
                 return {"periods": periods, "weeks": weeks, "totals": weekly_income_totals(weeks)}
             return {"periods": periods, "lots": lots, "tickers": tickers, "summary": tax_lot_summary(lots)}
 
     @app.get("/api/tax-lot-report/pdf")
-    def tax_lot_pdf(account: str, year: int, ticker: str = "", weekly_income: bool = False, download: bool = False):
+    def tax_lot_pdf(account: str, year: int, ticker: str = "", weekly_income: bool = False, download: bool = False, weekly_detail: bool = False):
         if weekly_income and not 1 <= year <= 9998:
             raise HTTPException(422, "Select a tax year for the weekly report.")
         report = tax_lot_report(account, year, ticker)
@@ -386,11 +386,11 @@ def register(app, database_path):
         disposition = "attachment" if download else "inline"
         ticker = ticker.strip().upper()
         if weekly_income:
-            filename = f"RHTC_Weekly_Income_Summary_Report_{year or 'All'}_{account}.pdf"
+            filename = f"RHTC_Weekly_Income_{'Detail' if weekly_detail else 'Summary'}_Report_{year or 'All'}_{account}.pdf"
         else:
             ticker_suffix = f"_{ticker}" if ticker else ""
             filename = f"RHTC_Form_8949_{year or 'All'}{ticker_suffix}_{account}.pdf"
-        return Response(build_tax_lot_report(account, year or "All years", report["lots"], ticker=ticker, weekly_income=weekly_income), media_type="application/pdf",
+        return Response(build_tax_lot_report(account, year or "All years", report["lots"], ticker=ticker, weekly_income=weekly_income, weekly_detail=weekly_detail), media_type="application/pdf",
                         headers={"Content-Disposition": f'{disposition}; filename="{filename}"',
                                  "Cache-Control": "private, no-store"})
 
