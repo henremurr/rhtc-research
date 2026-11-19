@@ -1681,3 +1681,21 @@ body > #ticker-print-report.ticker-report-detached .ticker-report-toolbar button
     max-width: 100%;
   }
 }
+
+.news-research-title {
+  display: none;
+  margin: 0 0 0 5px;
+  white-space: nowrap;
+}
+
+body.news-mode .news-research-title {
+  display: block;
+}
+
+.news-view .page-head h1 {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  font-size: 18px;
+  white-space: nowrap;
+}
