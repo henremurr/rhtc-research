@@ -213,6 +213,13 @@ def position_summary(entries):
     return lines
 
 
+def tax_lot_ticker(symbol):
+    """Return the underlying ticker for a share symbol or OCC option symbol."""
+    value = (symbol or "").strip().upper()
+    contract = re.match(r"^([A-Z][A-Z0-9.\-]*)\s*\d{6}[CP]\d", value)
+    return contract.group(1) if contract else re.split(r"\s+", value, maxsplit=1)[0]
+
+
 def tax_lot_rows(db, account, year):
     """Match completed security lots FIFO and return Form 8949 columns."""
     rows = db.execute("""
@@ -254,7 +261,7 @@ def tax_lot_rows(db, account, year):
                     basis = Decimal(0)
                 if not year or day[:4] == str(year):
                     completed.append({"description": f"{matched.normalize():f} {'contract' if lot['option'] else 'share'}{'s' if matched != 1 else ''} {security}",
-                                      "acquired": lot["date"], "sold": day,
+                                      "ticker": tax_lot_ticker(security), "acquired": lot["date"], "sold": day,
                                       "proceeds": str(proceeds.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)) if proceeds is not None else None,
                                       "basis": str(basis.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)) if basis is not None else None,
                                       "code": "", "adjustment": "",
@@ -280,7 +287,7 @@ def tax_lot_rows(db, account, year):
             if not year or day[:4] == str(year):
                 completed.append({
                     "description": f"{matched.normalize():f} {'contract' if lot['option'] else 'share'}{'s' if matched != 1 else ''} {security}",
-                    "acquired": lot["date"], "sold": day,
+                    "ticker": tax_lot_ticker(security), "acquired": lot["date"], "sold": day,
                     "proceeds": str(proceeds.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)) if proceeds is not None else None,
                     "basis": str(basis.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)) if basis is not None else None,
                     "code": "", "adjustment": "",
@@ -349,22 +356,29 @@ def register(app, database_path):
                                  "Cache-Control": "private, no-store"})
 
     @app.get("/api/tax-lot-report")
-    def tax_lot_report(account: str = "", year: int = 0):
+    def tax_lot_report(account: str = "", year: int = 0, ticker: str = ""):
         with closing(sqlite3.connect(database_path())) as db:
             if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='trading_transactions'").fetchone():
-                return {"periods": [], "lots": []}
+                return {"periods": [], "lots": [], "summary": tax_lot_summary([])}
             periods = db.execute("SELECT DISTINCT account, substr(trade_date,1,4) FROM trading_transactions ORDER BY account, 2 DESC").fetchall()
             lots = tax_lot_rows(db, account, year) if account and 0 <= year <= 9998 else []
+            ticker = ticker.strip().upper()
+            if ticker:
+                if not re.fullmatch(r"[A-Z0-9.\-]{1,16}", ticker):
+                    raise HTTPException(422, "Enter a valid ticker symbol.")
+                lots = [lot for lot in lots if lot.get("ticker", "").upper() == ticker]
             return {"periods": periods, "lots": lots, "summary": tax_lot_summary(lots)}
 
     @app.get("/api/tax-lot-report/pdf")
-    def tax_lot_pdf(account: str, year: int, download: bool = False):
-        report = tax_lot_report(account, year)
+    def tax_lot_pdf(account: str, year: int, ticker: str = "", download: bool = False):
+        report = tax_lot_report(account, year, ticker)
         if not report["lots"]:
-            raise HTTPException(404, "No completed tax lots for this account and year.")
+            raise HTTPException(404, "No completed tax lots for this account, ticker, and tax year.")
         disposition = "attachment" if download else "inline"
-        filename = f"RHTC_Form_8949_{year or 'All'}_{account}.pdf"
-        return Response(build_tax_lot_report(account, year or "All years", report["lots"]), media_type="application/pdf",
+        ticker = ticker.strip().upper()
+        ticker_suffix = f"_{ticker}" if ticker else ""
+        filename = f"RHTC_Form_8949_{year or 'All'}{ticker_suffix}_{account}.pdf"
+        return Response(build_tax_lot_report(account, year or "All years", report["lots"], ticker=ticker), media_type="application/pdf",
                         headers={"Content-Disposition": f'{disposition}; filename="{filename}"',
                                  "Cache-Control": "private, no-store"})
 
