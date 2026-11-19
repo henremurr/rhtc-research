@@ -1657,3 +1657,27 @@ body > #ticker-print-report.ticker-report-detached .ticker-report-toolbar button
     padding: 0;
   }
 }
+
+.news-view #scan-news {
+  flex: none;
+  white-space: nowrap;
+}
+
+.news-view #scan-news .refresh-icon {
+  display: inline-block;
+  font-size: inherit;
+}
+
+@media (min-width: 981px) {
+  .news-view .page-head {
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px 14px;
+  }
+
+  .news-view .page-head .head-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    max-width: 100%;
+  }
+}
