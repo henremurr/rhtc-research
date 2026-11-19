@@ -13,7 +13,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 from .trade_pdf import build_report
-from .trade_pdf import build_tax_lot_report
+from .trade_pdf import build_tax_lot_report, weekly_income_rows
 from starlette.concurrency import run_in_threadpool
 
 HEADERS = ["Run Date", "Action", "Symbol", "Description", "Type", "Price ($)", "Quantity",
@@ -356,7 +356,7 @@ def register(app, database_path):
                                  "Cache-Control": "private, no-store"})
 
     @app.get("/api/tax-lot-report")
-    def tax_lot_report(account: str = "", year: int = 0, ticker: str = ""):
+    def tax_lot_report(account: str = "", year: int = 0, ticker: str = "", weekly_income: bool = False):
         with closing(sqlite3.connect(database_path())) as db:
             if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='trading_transactions'").fetchone():
                 return {"periods": [], "lots": [], "tickers": [], "summary": tax_lot_summary([])}
@@ -369,10 +369,16 @@ def register(app, database_path):
                 if not re.fullmatch(r"[A-Z0-9.\-]{1,16}", ticker):
                     raise HTTPException(422, "Enter a valid ticker symbol.")
                 lots = [lot for lot in lots if lot.get("ticker", "").upper() == ticker]
+            if weekly_income and account:
+                if not 1 <= year <= 9998:
+                    raise HTTPException(422, "Select a tax year for the weekly report.")
+                return {"periods": periods, "weeks": weekly_income_rows(lots, year)}
             return {"periods": periods, "lots": lots, "tickers": tickers, "summary": tax_lot_summary(lots)}
 
     @app.get("/api/tax-lot-report/pdf")
     def tax_lot_pdf(account: str, year: int, ticker: str = "", weekly_income: bool = False, download: bool = False):
+        if weekly_income and not 1 <= year <= 9998:
+            raise HTTPException(422, "Select a tax year for the weekly report.")
         report = tax_lot_report(account, year, ticker)
         if not report["lots"]:
             raise HTTPException(404, "No completed tax lots for this account, ticker, and tax year.")
