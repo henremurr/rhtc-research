@@ -353,6 +353,24 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
       if(index>=2)cell.style.textAlign='right';
      });
     }
+    const footer=table.createTFoot().insertRow();
+    const totalLabel=document.createElement('th');
+    totalLabel.scope='row';
+    totalLabel.colSpan=2;
+    totalLabel.textContent='Total';
+    footer.append(totalLabel);
+    const totals=data.totals;
+    const amounts=['proceeds','basis','gain'].map(key=>totals[key]==null?'—':dollars.format(Number(totals[key])));
+    [totals.count,...amounts].forEach((value,index)=>{
+     const cell=footer.insertCell();
+     cell.dataset.label=labels[index+2];
+     cell.textContent=value;
+     cell.style.textAlign='right';
+    });
+    for(const cell of footer.cells){
+     cell.style.fontWeight='700';
+     cell.style.borderTop='2px solid #c6a45c';
+    }
     wrap.append(table);
     results.append(wrap);
     reportDownload.href='/options/api/tax-lot-report/pdf?'+new URLSearchParams({...params,download:'true'});

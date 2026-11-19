@@ -94,6 +94,15 @@ def weekly_income_rows(lots, year):
     return rows
 
 
+def weekly_income_totals(weeks):
+    totals = {"count": sum(week["count"] for week in weeks)}
+    for key in ("proceeds", "basis", "gain"):
+        values = [week[key] for week in weeks]
+        totals[key] = None if None in values else str(
+            sum((Decimal(value) for value in values), Decimal("0.00")))
+    return totals
+
+
 def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False):
     """Create a printable Form 8949 style tax lot schedule."""
     output = BytesIO()
@@ -132,14 +141,20 @@ def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False):
     story = []
     if weekly_income:
         data = [["Week", "Date range", "Closed lots", "Proceeds", "Cost basis", "Net gain/loss"]]
-        for row in weekly_income_rows(lots, int(year)):
+        weeks = weekly_income_rows(lots, int(year))
+        for row in weeks:
             data.append([row["week"], row["dates"], row["count"],
                          *(money(row[key]) for key in ("proceeds", "basis", "gain"))])
+        totals = weekly_income_totals(weeks)
+        data.append(["Total", "", totals["count"],
+                     *(money(totals[key]) for key in ("proceeds", "basis", "gain"))])
         table = LongTable(data, repeatRows=1, colWidths=[60, 120, 90, 128, 128, 134])
         table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), ink),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("ALIGN", (2, 0), (-1, -1), "RIGHT"),
+            ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+            ("LINEABOVE", (0, -1), (-1, -1), 1, gold),
             ("LINEBELOW", (0, 0), (-1, 0), 1, gold),
             ("LINEBELOW", (0, 1), (-1, -1), .3, colors.lightgrey),
         ]))
