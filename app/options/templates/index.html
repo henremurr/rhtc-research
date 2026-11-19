@@ -88,7 +88,7 @@
 <label class="youtube-review-label"><input id="youtube-review-confirm" type="checkbox"> I reviewed the full MP3, title, description, and selected artwork.</label>
 <div class="youtube-publish-actions"><button id="youtube-publish-btn" type="button" disabled>▶ Publish to YouTube + X</button><span id="youtube-publish-status" role="status" aria-live="polite"></span></div>
 </section></div></div></div>
-<script src="/options/static/app.js?v=ticker-tax-lot-dropdown-20261119"></script>
+<script src="/options/static/app.js?v=ticker-tax-lot-row-20261119"></script>
 <style>
 #trade-preview{padding:0;border:0;width:92vw;height:88vh;max-width:none;max-height:none;background:#222;color:white}
 #trade-preview[open]{display:flex;flex-direction:column;position:fixed;inset:0;margin:auto;z-index:10000;box-shadow:0 0 0 100vmax #0009}
@@ -99,21 +99,21 @@
 a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
 .trade-toolbar{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:.65rem .7rem}
 .trade-toolbar #trade-title{grid-column:1/-1;margin:0;font-size:1.1rem;white-space:normal}
-#trade-filters{display:grid;grid-template-columns:minmax(12rem,1.3fr) minmax(8rem,.75fr) auto;align-items:end;gap:.55rem}
+#trade-filters{display:grid;grid-template-columns:max-content minmax(12rem,1.3fr) minmax(8rem,.85fr) minmax(6rem,.55fr) max-content;align-items:end;gap:.55rem}
 .trade-toolbar label{display:grid;align-content:start;gap:.25rem;min-width:0;white-space:normal}
 .trade-toolbar .trade-action,#trade-filters select{min-height:2.5rem;font:inherit}
 .trade-toolbar .trade-action{padding:0 .7rem;white-space:nowrap}
 #trade-filters select{box-sizing:border-box;width:100%;min-width:0}
 #trade-view-button,#trade-close{justify-self:start}
 #trade-pdf-controls:not([hidden]){display:flex;align-items:center;gap:.55rem;min-width:0}
-.trade-toolbar #trade-close{margin-inline-start:0;justify-self:end}
+.trade-toolbar #trade-close{margin-inline-start:0;justify-self:start}
 @media (max-width:600px){
  #trade-report-dialog{width:calc(100vw - 16px)!important;max-height:calc(100dvh - 16px);padding:.85rem!important}
  .trade-toolbar{grid-template-columns:minmax(0,1fr);align-items:stretch;gap:.65rem}
  .trade-toolbar #trade-title{grid-column:auto;font-size:1.2rem}
- #trade-filters{grid-template-columns:minmax(0,1fr) minmax(6rem,.62fr);gap:.5rem}
- #trade-filters label{font-size:.92rem}
- #trade-view-button{grid-column:1/-1;justify-self:start}
+ #trade-filters{grid-template-columns:max-content minmax(10rem,1.2fr) minmax(8rem,.9fr) minmax(6rem,.6fr) max-content;gap:.4rem;overflow-x:auto;align-items:end}
+ #trade-filters label{font-size:.8rem}
+ #trade-view-button,#trade-close{grid-column:auto;justify-self:stretch;padding:0 .4rem;font-size:.8rem}
  #trade-pdf-controls:not([hidden]){display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.5rem}
  #trade-pdf-controls .trade-action{width:100%;min-width:0;padding:0 .45rem;font-size:.9rem}
  .trade-toolbar #trade-close{justify-self:start}
@@ -178,9 +178,8 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
 <dialog id="trade-report-dialog" aria-labelledby="trade-title" style="width:min(60rem,94vw);max-height:88vh;box-sizing:border-box;background:#171c21;color:#eef2f5;border:1px solid #847450;border-radius:12px;padding:1rem">
 <div class="trade-toolbar">
 <h2 id="trade-title">Trade Report</h2>
-<form id="trade-filters"><label>Account <select id="trade-account" required></select></label><label id="trade-ticker-filter" hidden>Ticker <select id="trade-ticker" required><option value="">Select ticker</option></select></label><label>Tax year <select id="trade-year" required></select></label><button class="trade-action" id="trade-view-button">View trades</button></form>
+<form id="trade-filters"><button type="button" id="trade-close" class="trade-action">Return to dashboard</button><label>Account <select id="trade-account" required></select></label><label id="trade-ticker-filter" hidden>Ticker <select id="trade-ticker" required><option value="">Select ticker</option></select></label><label>Tax year <select id="trade-year" required></select></label><button class="trade-action" id="trade-view-button">View trades</button></form>
 <div id="trade-pdf-controls" hidden><button type="button" id="trade-preview-open" class="trade-action">Preview report</button><a id="trade-download" class="trade-action" download>Download PDF</a></div>
-<button type="button" id="trade-close" class="trade-action">Return to dashboard</button>
 </div>
 <p id="trade-status" role="status"></p><div id="trade-results"></div></dialog>
 <script>
