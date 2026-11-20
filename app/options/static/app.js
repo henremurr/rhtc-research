@@ -2058,8 +2058,14 @@ $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/opti
   }catch(_){}
  };
  void syncSharedMenu();
- const place=()=>{const rect=toggle.getBoundingClientRect(),width=menu.getBoundingClientRect().width,gap=12;menu.style.left=Math.max(gap,Math.min(rect.right-width,innerWidth-width-gap))+'px';menu.style.top=Math.max(gap,Math.min(rect.bottom+8,innerHeight-menu.offsetHeight-gap))+'px';menu.style.right='auto'};
  const editing=()=>menu.classList.contains('is-editing');
+ const place=()=>{
+  const rect=toggle.getBoundingClientRect(),width=menu.getBoundingClientRect().width,gap=12;
+  menu.style.left=Math.max(gap,Math.min(rect.right-width,innerWidth-width-gap))+'px';
+  const top=editing()?gap:Math.max(gap,Math.min(rect.bottom+8,innerHeight-menu.offsetHeight-gap));
+  menu.style.top=top+'px';
+  menu.style.right='auto';
+ };
  const setEditing=on=>{menu.classList.toggle('is-editing',on);bar.hidden=!on;edit.hidden=on;if(on)entries().forEach(toolsFor);requestAnimationFrame(place)};
  const collapse=()=>menu.querySelectorAll('.guide-menu-parent').forEach(h=>{const b=document.getElementById(h.dataset.menuTarget);if(b)b.hidden=true;h.setAttribute('aria-expanded','false')});
  const close=()=>{menu.hidden=true;toggle.setAttribute('aria-expanded','false');collapse();if(editing())setEditing(false)};
