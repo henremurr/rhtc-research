@@ -1091,6 +1091,33 @@ body.news-mode .workspace-toolbar-heading{gap:8px}
   z-index: 3;
   background: var(--panel, #17202a);
 }
+.guide-menu.is-editing .guide-menu-group-title {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.guide-menu-rename-dialog {
+  width: min(360px, calc(100vw - 24px));
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel, #17202a);
+  color: var(--ink);
+}
+:root:not([data-theme="dark"]) .guide-menu-rename-dialog {background: var(--bg)}
+.guide-menu-rename-dialog::backdrop {background: #0008}
+.guide-menu-rename-dialog form {display: grid; gap: 12px}
+.guide-menu-rename-dialog label {font-weight: 700}
+.guide-menu-rename-dialog input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--muted);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px var(--sans);
+}
+.guide-menu-rename-dialog .guide-menu-editbar-actions {justify-content: flex-end}
 .guide-menu-editbar[hidden],.guide-menu-customize[hidden]{display:none!important}
 .guide-menu-editbar{padding:10px 9px 12px;border-bottom:1px solid var(--line,#526071);margin-bottom:5px}
 .guide-menu-editbar-copy{display:flex;flex-direction:column;gap:3px;margin-bottom:9px}.guide-menu-editbar-copy strong{font-size:13px;color:var(--gold,#d4b66b)}.guide-menu-editbar-copy span{font-size:11px;line-height:1.35;color:var(--muted,#9ba8b7)}
