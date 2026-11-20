@@ -12,12 +12,22 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import LongTable, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 
-def build_report(account, year, groups, summaries):
+def draw_report_title(canvas, x, y, width, title):
+    size = 17
+    text_width = canvas.stringWidth(title, "Helvetica-Bold", size)
+    if text_width > width:
+        size *= width / text_width
+    canvas.setFont("Helvetica-Bold", size)
+    canvas.drawString(x, y, title)
+
+
+def build_report(account, year, groups, summaries, title=""):
+    title = title.strip()[:300] or "Transaction report"
     output = BytesIO()
     width, height = landscape(letter)
     doc = SimpleDocTemplate(output, pagesize=(width, height), leftMargin=32,
                             rightMargin=32, topMargin=75, bottomMargin=38,
-                            title=f"RHTC Trade Report {year}")
+                            title=title)
     ink = colors.HexColor("#182229")
     gold = colors.HexColor("#C6A45C")
     body = ParagraphStyle("Trade", fontName="Helvetica", fontSize=8, leading=10)
@@ -27,8 +37,7 @@ def build_report(account, year, groups, summaries):
         canvas.saveState()
         canvas.drawImage(str(logo), 38, height-55, width=34, height=34, mask="auto")
         canvas.setFillColor(ink)
-        canvas.setFont("Helvetica-Bold", 17)
-        canvas.drawString(82, height-37, "RHTC Trade Report")
+        draw_report_title(canvas, 82, height-37, width-120, title)
         canvas.setFont("Helvetica", 10)
         canvas.drawString(82, height-52, f"Account {account}   |   {year}")
         canvas.setStrokeColor(gold)
@@ -118,13 +127,18 @@ def weekly_income_totals(weeks):
     return totals
 
 
-def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False, weekly_detail=False):
+def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False, weekly_detail=False, title=""):
     """Create a printable Form 8949 style tax lot schedule."""
+    if weekly_income:
+        default_title = "Weekly Income Detail Report" if weekly_detail else "Weekly Income Summary Report"
+    else:
+        default_title = "Ticker tax lot report · Form 8949" if ticker else "Tax lot report · Form 8949"
+    title = title.strip()[:300] or default_title
     output = BytesIO()
     width, height = landscape(letter)
     doc = SimpleDocTemplate(output, pagesize=(width, height), leftMargin=28,
                             rightMargin=28, topMargin=75, bottomMargin=38,
-                            title=f"RHTC Weekly Income {'Detail' if weekly_detail else 'Summary'} Report {year}" if weekly_income else f"RHTC Form 8949 Tax Lot Report {year}")
+                            title=title)
     ink = colors.HexColor("#182229")
     gold = colors.HexColor("#C6A45C")
     body = ParagraphStyle("TaxLot", fontName="Helvetica", fontSize=7, leading=8)
@@ -134,9 +148,7 @@ def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False, we
         canvas.saveState()
         canvas.drawImage(str(logo), 34, height-55, width=34, height=34, mask="auto")
         canvas.setFillColor(ink)
-        canvas.setFont("Helvetica-Bold", 17)
-        title = ("RHTC Weekly Income Detail Report" if weekly_detail else "RHTC Weekly Income Summary Report") if weekly_income else "RHTC Tax Lot Report - Form 8949 columns"
-        canvas.drawString(78, height-37, title)
+        draw_report_title(canvas, 78, height-37, width-112, title)
         canvas.setFont("Helvetica", 10)
         scope = f"Account {account}   |   Tax year {year}" + (f"   |   Ticker {ticker}" if ticker else "")
         canvas.drawString(78, height-52, scope)
@@ -217,11 +229,11 @@ def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False, we
     sections = (("short", "Part I - Short-term transactions (held 1 year or less)"),
                 ("long", "Part II - Long-term transactions (held more than 1 year)"))
     totals = {term: {key: Decimal(0) for key in ("proceeds", "basis", "gain")} for term, _ in sections}
-    for term, title in sections:
+    for term, section_title in sections:
         selected = [lot for lot in lots if lot["term"] == term]
         if not selected:
             continue
-        story.append(Paragraph(escape(title), ParagraphStyle("TaxLotSection", parent=body, fontName="Helvetica-Bold", fontSize=9, leading=12, textColor=ink)))
+        story.append(Paragraph(escape(section_title), ParagraphStyle("TaxLotSection", parent=body, fontName="Helvetica-Bold", fontSize=9, leading=12, textColor=ink)))
         data = [headings]
         for lot in selected:
             data.append([
@@ -262,13 +274,14 @@ def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False, we
     return output.getvalue()
 
 
-def build_open_tax_lot_report(account, year, lots):
+def build_open_tax_lot_report(account, year, lots, title=""):
     """Create a printable inventory of tax lots still open at year end."""
+    title = title.strip()[:300] or "Open tax lot report"
     output = BytesIO()
     width, height = landscape(letter)
     doc = SimpleDocTemplate(output, pagesize=(width, height), leftMargin=34,
                             rightMargin=34, topMargin=75, bottomMargin=38,
-                            title=f"RHTC Open Tax Lot Report {year}")
+                            title=title)
     ink = colors.HexColor("#182229")
     gold = colors.HexColor("#C6A45C")
     body = ParagraphStyle("OpenTaxLot", fontName="Helvetica", fontSize=8, leading=10)
@@ -278,8 +291,7 @@ def build_open_tax_lot_report(account, year, lots):
         canvas.saveState()
         canvas.drawImage(str(logo), 38, height-55, width=34, height=34, mask="auto")
         canvas.setFillColor(ink)
-        canvas.setFont("Helvetica-Bold", 17)
-        canvas.drawString(82, height-37, "RHTC Open Tax Lot Report")
+        draw_report_title(canvas, 82, height-37, width-120, title)
         canvas.setFont("Helvetica", 10)
         canvas.drawString(82, height-52, f"Account {account}   |   As of {year}{' year-end' if str(year).isdigit() else ''}")
         canvas.setStrokeColor(gold)
@@ -317,10 +329,10 @@ def build_open_tax_lot_report(account, year, lots):
     return output.getvalue()
 
 
-def build_cash_activity_report(broker, account, groups):
+def build_cash_activity_report(broker, account, groups, title=""):
     output = BytesIO()
     width, height = landscape(letter)
-    title = "RHTC Cash Activity Report"
+    title = title.strip()[:300] or "Cash Activity Report"
     doc = SimpleDocTemplate(output, pagesize=(width, height), title=title,
                             leftMargin=34, rightMargin=34, topMargin=75, bottomMargin=38)
     body = ParagraphStyle("CashActivity", fontName="Helvetica", fontSize=8, leading=11)
@@ -335,8 +347,7 @@ def build_cash_activity_report(broker, account, groups):
         canvas.saveState()
         canvas.drawImage(str(logo), 38, height-55, width=34, height=34, mask="auto")
         canvas.setFillColor(ink)
-        canvas.setFont("Helvetica-Bold", 17)
-        canvas.drawString(82, height-37, title)
+        draw_report_title(canvas, 82, height-37, width-120, title)
         canvas.setFont("Helvetica", 10)
         canvas.drawString(82, height-52, f"{broker}   |   Account {account}   |   All dates")
         canvas.setStrokeColor(gold)
