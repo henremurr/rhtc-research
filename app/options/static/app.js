@@ -2026,16 +2026,38 @@ $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/opti
   host.append(tools);
  };
  const groupList=()=>[...root.children].filter(n=>n.dataset.menuGroup==='true').map(n=>({key:n.dataset.menuKey,label:n.querySelector('.guide-menu-group-title')?.textContent||n.querySelector('.guide-menu-parent span')?.textContent||'Group',native:!n.classList.contains('guide-menu-custom-group'),children:[...n.querySelector('.guide-submenu').children].map(c=>c.dataset.menuKey)}));
- const save=()=>{try{localStorage.setItem(storageKey,JSON.stringify({root:[...root.children].map(n=>n.dataset.menuKey),groups:groupList()}))}catch(_){}};
- const restore=()=>{let data;try{data=JSON.parse(localStorage.getItem(storageKey)||'null')}catch(_){}if(!data||!Array.isArray(data.root)||!Array.isArray(data.groups))return;
+ const currentMenu=()=>({root:[...root.children].map(n=>n.dataset.menuKey),groups:groupList()});
+ const readLocalMenu=()=>{try{const data=JSON.parse(localStorage.getItem(storageKey)||'null');return data&&Array.isArray(data.root)&&Array.isArray(data.groups)?data:null}catch(_){return null}};
+ let menuSaveQueue=Promise.resolve();
+ const writeSharedMenu=data=>{
+  menuSaveQueue=menuSaveQueue.catch(()=>{}).then(async()=>{
+   const response=await fetch('/options/api/dashboard-menu',{method:'PUT',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+   if(!response.ok)throw new Error('Shared menu save failed');
+  });
+  return menuSaveQueue;
+ };
+ const save=()=>{const data=currentMenu();try{localStorage.setItem(storageKey,JSON.stringify(data))}catch(_){}void writeSharedMenu(data).catch(()=>{})};
+ const restore=data=>{if(!data||!Array.isArray(data.root)||!Array.isArray(data.groups))return false;
   const keys=new Set(data.groups.map(g=>g.key));
   for(const g of [...root.children].filter(n=>n.dataset.menuGroup==='true'))if(!keys.has(g.dataset.menuKey)){for(const c of [...g.querySelector('.guide-submenu').children])root.append(c);g.remove();map.delete(g.dataset.menuKey)}
   for(const g of data.groups)if(g.native===false&&!map.has(g.key))root.append(customGroup(g.key,g.label||'New group'));
   for(const g of data.groups){const target=map.get(g.key)?.querySelector('.guide-submenu');if(target)for(const key of g.children||[]){const child=map.get(key);if(child)target.append(child)}}
   for(const key of data.root){const n=map.get(key);if(n)root.append(n)}
   for(const n of map.values())if(n.parentElement?.classList.contains('guide-submenu')&&!data.groups.some(g=>g.children?.includes(n.dataset.menuKey)))root.append(n);
+  return true;
  };
- restore();
+ restore(readLocalMenu());
+ const syncSharedMenu=async()=>{
+  const localMenu=readLocalMenu();
+  try{
+   const response=await fetch('/options/api/dashboard-menu',{credentials:'same-origin',cache:'no-store'});
+   if(!response.ok)return;
+   const result=await response.json();
+   if(result.menu&&restore(result.menu)){try{localStorage.setItem(storageKey,JSON.stringify(result.menu))}catch(_){}}
+   else if(localMenu)await writeSharedMenu(localMenu);
+  }catch(_){}
+ };
+ void syncSharedMenu();
  const place=()=>{const rect=toggle.getBoundingClientRect(),width=menu.getBoundingClientRect().width,gap=12;menu.style.left=Math.max(gap,Math.min(rect.right-width,innerWidth-width-gap))+'px';menu.style.top=Math.max(gap,Math.min(rect.bottom+8,innerHeight-menu.offsetHeight-gap))+'px';menu.style.right='auto'};
  const editing=()=>menu.classList.contains('is-editing');
  const setEditing=on=>{menu.classList.toggle('is-editing',on);bar.hidden=!on;edit.hidden=on;if(on)entries().forEach(toolsFor);requestAnimationFrame(place)};
