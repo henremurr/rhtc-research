@@ -2,6 +2,7 @@ from datetime import date, timedelta
 """Printable RHTC trade report."""
 from decimal import Decimal, ROUND_HALF_UP
 from io import BytesIO
+from itertools import groupby
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -94,6 +95,16 @@ def weekly_income_rows(lots, year, include_details=False):
             row["lots"] = sorted(entries, key=lambda lot: (
                 lot["sold"], lot["ticker"], not lot["is_option"], lot["acquired"],
             ))
+            row["ticker_groups"] = []
+            for ticker, group in groupby(sorted(row["lots"], key=lambda lot: lot["ticker"]),
+                                         key=lambda lot: lot["ticker"]):
+                ticker_lots = list(group)
+                subtotal = weekly_income_totals([
+                    {"count": 1, **{key: lot[key] if lot[key] != "" else None
+                                    for key in ("proceeds", "basis", "gain")}}
+                    for lot in ticker_lots
+                ])
+                row["ticker_groups"].append({"ticker": ticker, "lots": ticker_lots, **subtotal})
         rows.append(row)
     return rows
 
@@ -174,14 +185,20 @@ def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False, we
                     "WeeklyDetailHeading", parent=body, fontName="Helvetica-Bold",
                     fontSize=9, keepWithNext=True)))
                 detail = [headings]
-                for lot in week["lots"]:
-                    detail.append([
-                        Paragraph(escape(lot["description"]), body),
-                        display_date(lot["acquired"]), display_date(lot["sold"]),
-                        money(lot["proceeds"]), money(lot["basis"]), lot["code"] or "",
-                        money(lot["adjustment"]) if lot["adjustment"] not in (None, "") else "",
-                        money(lot["gain"]),
-                    ])
+                subtotals = []
+                for group in week["ticker_groups"]:
+                    for lot in group["lots"]:
+                        detail.append([
+                            Paragraph(escape(lot["description"]), body),
+                            display_date(lot["acquired"]), display_date(lot["sold"]),
+                            money(lot["proceeds"]), money(lot["basis"]), lot["code"] or "",
+                            money(lot["adjustment"]) if lot["adjustment"] not in (None, "") else "",
+                            money(lot["gain"]),
+                        ])
+                    subtotals.append(len(detail))
+                    detail.append([f'{group["ticker"] or "Unknown ticker"} subtotal', "", "",
+                                   money(group["proceeds"]), money(group["basis"]), "", "",
+                                   money(group["gain"])])
                 lots_table = LongTable(detail, repeatRows=1,
                                        colWidths=[142, 62, 62, 82, 86, 48, 86, 80])
                 lots_table.setStyle(TableStyle([
@@ -190,6 +207,8 @@ def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False, we
                     ("FONTSIZE", (0, 0), (-1, -1), 7),
                     ("ALIGN", (3, 0), (-1, -1), "RIGHT"),
                     ("LINEBELOW", (0, 1), (-1, -1), .3, colors.lightgrey),
+                    *(("FONTNAME", (0, index), (-1, index), "Helvetica-Bold") for index in subtotals),
+                    *(("LINEABOVE", (0, index), (-1, index), .75, gold) for index in subtotals),
                 ]))
                 story.append(lots_table)
         doc.build(story, onFirstPage=decorate, onLaterPages=decorate)

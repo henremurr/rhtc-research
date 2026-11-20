@@ -140,6 +140,7 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
  #preview-pages tbody td::before{content:none}
 }
 
+#preview-pages .weekly-ticker-subtotal td{font-weight:700;border-top:1px solid #c6a45c}
 #preview-pages .cash-activity-columns{width:100%;min-width:640px;text-align:left}
 #preview-pages .cash-activity-columns :is(thead,tbody,tfoot) tr > :last-child{text-align:right}
 #preview-pages .cash-activity-columns tbody td:is(:nth-child(2),:nth-child(4)){white-space:normal;overflow-wrap:anywhere}
@@ -486,8 +487,9 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
        header.append(cell);
       });
       const lotBody=detail.createTBody();
-      for(const lot of week.lots){
+      const addLotRow=(lot,subtotal=false)=>{
        const row=lotBody.insertRow();
+       if(subtotal)row.className='weekly-ticker-subtotal';
        ['description','acquired','sold','proceeds','basis','code','adjustment','gain'].forEach((key,index)=>{
         const cell=row.insertCell();
         const numeric=index>=3 && index!==5;
@@ -495,6 +497,10 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
         cell.textContent=lot[key]==null||lot[key]===''?'—':numeric?dollars.format(Number(lot[key])):lot[key];
         if(numeric)cell.style.textAlign='right';
        });
+      }
+      for(const group of week.ticker_groups){
+       group.lots.forEach(lot=>addLotRow(lot));
+       addLotRow({...group,description:(group.ticker||'Unknown ticker')+' subtotal'},true);
       }
       container.append(detail);
       results.append(heading,container);
