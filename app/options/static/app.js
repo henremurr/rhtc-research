@@ -274,6 +274,7 @@ function applyEarningsInvestmentFilter(){
   void showEarningsReport();
 }
 async function showEarningsReport(){
+  $('#earnings-report-title').textContent=$('#open-earnings-report').textContent.trim();
   const modal=$('#earnings-report-modal'),status=$('#earnings-report-status'),content=$('#earnings-report-content');
   modal.classList.add('open');
   ensureEarningsInvestmentFilter();
@@ -316,7 +317,7 @@ async function printEarningsReport(){
   action.disabled=true;action.textContent='Generating PDF…';status.textContent='Preparing the report PDF…';
   let pdfWindow=null;
   try{pdfWindow=window.open('about:blank','_blank');if(pdfWindow){pdfWindow.document.title='Preparing RHTC Earnings PDF';pdfWindow.document.body.textContent='Preparing your PDF…'}}catch(error){}
-  const title='RHTC Upcoming Earnings Report';
+  const title=$('#earnings-report-title').textContent;
   const generatedAt=new Date().toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'});
   const bodyText=['As of '+($('#earnings-report-meta')?.textContent||''),$('#earnings-report-status')?.textContent||'',reportHtmlToText(content.innerHTML)].filter(Boolean).join('\\n\\n');
   try{
@@ -327,7 +328,7 @@ async function printEarningsReport(){
     earningsReportPdfUrl=URL.createObjectURL(blob);
     if(pdfWindow){
       const viewer=pdfWindow.document;viewer.open();
-      viewer.write('<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+safe(title)+'</title><style>*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;font:16px system-ui,-apple-system,sans-serif;color:#17202a;background:#eef1f4}body{display:flex;flex-direction:column}header{min-height:58px;display:flex;align-items:center;gap:12px;padding:8px 14px;background:#17202a;color:#fff;flex-wrap:wrap}button,a{font:600 14px system-ui,-apple-system,sans-serif;padding:9px 13px;border-radius:6px;border:1px solid #b9944a;background:#f7f3e8;color:#17202a;text-decoration:none}header span{margin-left:auto;font-size:13px}iframe{display:block;flex:1;width:100%;min-height:0;border:0;background:#fff}@media(max-width:520px){header span{margin-left:0}}</style></head><body><header><button id="back" type="button">Back to earnings report</button><button id="print" type="button">Print</button><a id="download">Download PDF</a><span>RHTC · Upcoming earnings</span></header><iframe id="pdf-frame" title="RHTC upcoming earnings report"></iframe></body></html>');
+      viewer.write('<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+safe(title)+'</title><style>*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;font:16px system-ui,-apple-system,sans-serif;color:#17202a;background:#eef1f4}body{display:flex;flex-direction:column}header{min-height:58px;display:flex;align-items:center;gap:12px;padding:8px 14px;background:#17202a;color:#fff;flex-wrap:wrap}button,a{font:600 14px system-ui,-apple-system,sans-serif;padding:9px 13px;border-radius:6px;border:1px solid #b9944a;background:#f7f3e8;color:#17202a;text-decoration:none}header span{margin-left:auto;font-size:13px}iframe{display:block;flex:1;width:100%;min-height:0;border:0;background:#fff}@media(max-width:520px){header span{margin-left:0}}</style></head><body><header><button id="back" type="button">Back to earnings report</button><button id="print" type="button">Print</button><a id="download">Download PDF</a><span>'+safe(title)+'</span></header><iframe id="pdf-frame" title="'+safe(title)+'"></iframe></body></html>');
       viewer.close();
       viewer.getElementById('back').addEventListener('click',()=>{pdfWindow.close();try{window.focus()}catch(error){}});
       viewer.getElementById('print').addEventListener('click',()=>{const frame=viewer.getElementById('pdf-frame');try{frame.contentWindow.focus();frame.contentWindow.print()}catch(error){pdfWindow.print()}});
@@ -346,6 +347,7 @@ async function printEarningsReport(){
 }
 function closeEarningsReport(){$('#earnings-report-modal').classList.remove('open')}
 async function showOrphanedTickers(){
+  $('#orphaned-tickers-title').textContent=$('#orphaned-tickers-btn').textContent.trim();
   const modal=$('#orphaned-tickers-modal'),status=$('#orphaned-tickers-status'),content=$('#orphaned-tickers-content');
   modal.classList.add('open');
   status.textContent='Scanning saved ticker tables…';
@@ -1953,6 +1955,7 @@ async function runInfrastructureInventory(){
   }
 }
 function showInfrastructureInventory(){
+  $('#infra-title').textContent=$('#infra-audit-btn').textContent.trim();
   $('#infra-modal').classList.add('open');
   runInfrastructureInventory();
 }
@@ -2058,6 +2061,9 @@ $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/opti
   if(!item||!itemDefaults.has(key))return;
   const original=itemDefaults.get(key);
   item.textContent=label||original;
+  if(item.getAttribute('href')?.split('?')[0]==='/options/trading-import'){
+   item.href='/options/trading-import?'+new URLSearchParams({title:item.textContent});
+  }
   if(label&&label!==original)itemLabels.set(key,label);
   else itemLabels.delete(key);
  };
@@ -2104,7 +2110,7 @@ $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/opti
  const renameDialog=document.createElement('dialog');
  renameDialog.className='guide-menu-rename-dialog';
  renameDialog.setAttribute('aria-labelledby','guide-menu-rename-title');
- renameDialog.innerHTML='<form method="dialog"><label id="guide-menu-rename-title" for="guide-menu-rename-input">Rename group</label><input id="guide-menu-rename-input" required autofocus><div class="guide-menu-editbar-actions"><button type="button">Cancel</button><button type="submit">Rename</button></div></form>';
+ renameDialog.innerHTML='<form method="dialog"><label id="guide-menu-rename-title" for="guide-menu-rename-input">Rename group</label><input id="guide-menu-rename-input" maxlength="300" required autofocus><div class="guide-menu-editbar-actions"><button type="button">Cancel</button><button type="submit">Rename</button></div></form>';
  menu.append(renameDialog);
  const renameInput=renameDialog.querySelector('input');
  let renameEntry=null;
