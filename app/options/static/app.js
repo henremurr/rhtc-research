@@ -1992,41 +1992,80 @@ $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/opti
 
 // Keep the guide menu fully inside the current viewport, including on narrow phones.
 (()=>{
-  const toggle=document.getElementById('guide-menu-toggle');
-  const menu=document.getElementById('guide-menu');
-  const guideToggle=document.getElementById('guide-submenu-toggle');
-  const guideSubmenu=document.getElementById('guide-submenu');
-  const reportingToggle=document.getElementById('reporting-submenu-toggle');
-  const reportingSubmenu=document.getElementById('reporting-submenu');
-  if(!toggle||!menu||!guideToggle||!guideSubmenu||!reportingToggle||!reportingSubmenu)return;
-  const place=()=>{
-    const rect=toggle.getBoundingClientRect(),width=menu.getBoundingClientRect().width,gap=12;
-    const left=Math.max(gap,Math.min(rect.right-width,window.innerWidth-width-gap));
-    const top=Math.max(gap,Math.min(rect.bottom+8,window.innerHeight-menu.offsetHeight-gap));
-    menu.style.left=left+'px';menu.style.top=top+'px';menu.style.right='auto';
-  };
-  const collapseGuide=()=>{guideSubmenu.hidden=true;guideToggle.setAttribute('aria-expanded','false')};
-  const collapseReporting=()=>{reportingSubmenu.hidden=true;reportingToggle.setAttribute('aria-expanded','false')};
-  const close=()=>{menu.hidden=true;toggle.setAttribute('aria-expanded','false');collapseGuide();collapseReporting()};
-  toggle.addEventListener('click',event=>{
-    event.stopPropagation();const opening=menu.hidden;menu.hidden=!opening;toggle.setAttribute('aria-expanded',String(opening));
-    if(opening){collapseGuide();collapseReporting();requestAnimationFrame(place)}
-  });
-  guideToggle.addEventListener('click',event=>{
-    event.stopPropagation();collapseReporting();guideSubmenu.hidden=!guideSubmenu.hidden;
-    guideToggle.setAttribute('aria-expanded',String(!guideSubmenu.hidden));requestAnimationFrame(place);
-  });
-  reportingToggle.addEventListener('click',event=>{
-    event.stopPropagation();collapseGuide();reportingSubmenu.hidden=!reportingSubmenu.hidden;
-    reportingToggle.setAttribute('aria-expanded',String(!reportingSubmenu.hidden));requestAnimationFrame(place);
-  });
-  menu.addEventListener('click',event=>{
-    if(event.target.closest('#open-earnings-report')){close();void showEarningsReport();return}
-    if(event.target.closest('a')||event.target.closest('#infra-audit-btn')||event.target.closest('#orphaned-tickers-btn')||event.target.closest('#open-trade-report')||event.target.closest('#open-tax-lot-report')||event.target.closest('#open-weekly-income-report')||event.target.closest('#open-ticker-tax-lot-report'))close();
-  });
-  document.addEventListener('click',event=>{if(!event.target.closest('.guide-menu-wrap'))close()});
-  document.addEventListener('keydown',event=>{if(event.key==='Escape'){close();toggle.focus()}});
-  window.addEventListener('resize',()=>{if(!menu.hidden)place()});
+ const toggle=document.getElementById('guide-menu-toggle'),menu=document.getElementById('guide-menu');
+ const guideHead=document.getElementById('guide-submenu-toggle'),guideBody=document.getElementById('guide-submenu');
+ const reportHead=document.getElementById('reporting-submenu-toggle'),reportBody=document.getElementById('reporting-submenu');
+ if(!toggle||!menu||!guideHead||!guideBody||!reportHead||!reportBody)return;
+ const storageKey='rhtc-dashboard-menu-v1',original=[...menu.children],root=document.createElement('div');root.id='guide-menu-items';
+ const bar=document.createElement('div');bar.className='guide-menu-editbar';bar.hidden=true;bar.innerHTML='<div class="guide-menu-editbar-copy"><strong>Customize menu</strong><span id="guide-menu-edit-hint">Select items to group, or drag them to reorder.</span></div><div class="guide-menu-editbar-actions"><button id="guide-menu-group-selected" type="button">Group selected</button><button id="guide-menu-edit-done" type="button">Done</button></div>';
+ const edit=document.createElement('button');edit.id='guide-menu-customize';edit.type='button';edit.className='guide-menu-customize';edit.textContent='Customize menu';edit.setAttribute('role','menuitem');
+ const map=new Map(),native=[{key:'group:reporting',head:reportHead,body:reportBody},{key:'group:documentation',head:guideHead,body:guideBody}],groupHeads=new Set(native.map(g=>g.head)),groupBodies=new Set(native.map(g=>g.body));
+ const keyOf=el=>el.dataset.menuKey||el.id||('link:'+el.getAttribute('href'));
+ const entry=(el,key)=>{const n=document.createElement('div');n.className='guide-menu-entry';n.dataset.menuKey=key||keyOf(el);n.append(el);map.set(n.dataset.menuKey,n);return n};
+ const group=(head,body,key,label,isCustom=false)=>{
+  const n=document.createElement('div');n.className='guide-menu-entry guide-menu-group'+(isCustom?' guide-menu-custom-group':'');n.dataset.menuKey=key;n.dataset.menuGroup='true';
+  for(const child of [...body.children])body.append(entry(child));
+  body.id=body.id||'guide-menu-submenu-'+key.replace(/[^a-z0-9]+/gi,'-');body.classList.add('guide-submenu');body.setAttribute('role','group');head.dataset.menuTarget=body.id;
+  if(isCustom){head.type='button';head.className='guide-menu-parent';head.setAttribute('aria-haspopup','true');head.setAttribute('aria-expanded','false');head.innerHTML='<span class="guide-menu-group-title"></span><span class="guide-menu-chevron" aria-hidden="true">⌄</span>';head.querySelector('.guide-menu-group-title').textContent=label;head.setAttribute('aria-label',label)}
+  n.append(head,body);map.set(key,n);return n;
+ };
+ menu.replaceChildren(bar,root,edit);
+ for(const g of native)root.append(group(g.head,g.body,g.key,g.key));
+ for(const el of original)if(!groupHeads.has(el)&&!groupBodies.has(el))root.append(entry(el));
+ for(const g of native)for(const child of g.body.children)map.set(child.dataset.menuKey,child);
+ const customGroup=(key,label)=>group(document.createElement('button'),document.createElement('div'),key,label,true);
+ const entries=()=>[...menu.querySelectorAll('.guide-menu-entry')];
+ const toolsFor=n=>{
+  if(n.querySelector(':scope > .guide-menu-entry-tools'))return;
+  const host=n;
+  const tools=document.createElement('span');tools.className='guide-menu-entry-tools';
+  const drag=document.createElement('button');drag.type='button';drag.className='guide-menu-drag';drag.textContent='⠿';drag.title='Drag to reorder or move';drag.setAttribute('aria-label','Drag to reorder or move');drag.draggable=true;tools.append(drag);
+  for(const [dir,glyph] of [['up','↑'],['down','↓']]){const b=document.createElement('button');b.type='button';b.className='guide-menu-move';b.textContent=glyph;b.title='Move '+dir;b.setAttribute('aria-label','Move item '+dir);b.dataset.move=dir;tools.append(b)}
+  if(n.dataset.menuGroup==='true'){const b=document.createElement('button');b.type='button';b.className='guide-menu-ungroup';b.textContent='Ungroup';b.setAttribute('aria-label','Ungroup menu');tools.append(b)}
+  else{const c=document.createElement('input');c.type='checkbox';c.className='guide-menu-select';c.setAttribute('aria-label','Select menu item to group');tools.append(c)}
+  host.append(tools);
+ };
+ const groupList=()=>[...root.children].filter(n=>n.dataset.menuGroup==='true').map(n=>({key:n.dataset.menuKey,label:n.querySelector('.guide-menu-group-title')?.textContent||n.querySelector('.guide-menu-parent span')?.textContent||'Group',native:!n.classList.contains('guide-menu-custom-group'),children:[...n.querySelector('.guide-submenu').children].map(c=>c.dataset.menuKey)}));
+ const save=()=>{try{localStorage.setItem(storageKey,JSON.stringify({root:[...root.children].map(n=>n.dataset.menuKey),groups:groupList()}))}catch(_){}};
+ const restore=()=>{let data;try{data=JSON.parse(localStorage.getItem(storageKey)||'null')}catch(_){}if(!data||!Array.isArray(data.root)||!Array.isArray(data.groups))return;
+  const keys=new Set(data.groups.map(g=>g.key));
+  for(const g of [...root.children].filter(n=>n.dataset.menuGroup==='true'))if(!keys.has(g.dataset.menuKey)){for(const c of [...g.querySelector('.guide-submenu').children])root.append(c);g.remove();map.delete(g.dataset.menuKey)}
+  for(const g of data.groups)if(g.native===false&&!map.has(g.key))root.append(customGroup(g.key,g.label||'New group'));
+  for(const g of data.groups){const target=map.get(g.key)?.querySelector('.guide-submenu');if(target)for(const key of g.children||[]){const child=map.get(key);if(child)target.append(child)}}
+  for(const key of data.root){const n=map.get(key);if(n)root.append(n)}
+  for(const n of map.values())if(n.parentElement?.classList.contains('guide-submenu')&&!data.groups.some(g=>g.children?.includes(n.dataset.menuKey)))root.append(n);
+ };
+ restore();
+ const place=()=>{const rect=toggle.getBoundingClientRect(),width=menu.getBoundingClientRect().width,gap=12;menu.style.left=Math.max(gap,Math.min(rect.right-width,innerWidth-width-gap))+'px';menu.style.top=Math.max(gap,Math.min(rect.bottom+8,innerHeight-menu.offsetHeight-gap))+'px';menu.style.right='auto'};
+ const editing=()=>menu.classList.contains('is-editing');
+ const setEditing=on=>{menu.classList.toggle('is-editing',on);bar.hidden=!on;edit.hidden=on;if(on)entries().forEach(toolsFor);requestAnimationFrame(place)};
+ const collapse=()=>menu.querySelectorAll('.guide-menu-parent').forEach(h=>{const b=document.getElementById(h.dataset.menuTarget);if(b)b.hidden=true;h.setAttribute('aria-expanded','false')});
+ const close=()=>{menu.hidden=true;toggle.setAttribute('aria-expanded','false');collapse();if(editing())setEditing(false)};
+ edit.addEventListener('click',e=>{e.stopPropagation();setEditing(true)});
+ document.getElementById('guide-menu-edit-done').addEventListener('click',e=>{e.stopPropagation();setEditing(false);save()});
+ document.getElementById('guide-menu-group-selected').addEventListener('click',e=>{
+  e.stopPropagation();const picked=entries().filter(n=>n.dataset.menuGroup!=='true'&&n.querySelector(':scope > .guide-menu-entry-tools .guide-menu-select')?.checked);
+  if(picked.length<2){document.getElementById('guide-menu-edit-hint').textContent='Select at least two items to create a group.';return}
+  const name=prompt('Name this menu group:');if(!name?.trim())return;const key='group:custom:'+Date.now().toString(36),g=customGroup(key,name.trim()),body=g.querySelector('.guide-submenu');
+  picked.forEach(n=>{n.querySelector('.guide-menu-select').checked=false;body.append(n)});root.append(g);entries().forEach(toolsFor);save();requestAnimationFrame(place);
+ });
+ toggle.addEventListener('click',e=>{e.stopPropagation();const open=menu.hidden;menu.hidden=!open;toggle.setAttribute('aria-expanded',String(open));if(open){collapse();requestAnimationFrame(place)}});
+ menu.addEventListener('click',e=>{
+  const ungroup=e.target.closest('.guide-menu-ungroup');if(ungroup){e.stopPropagation();const g=ungroup.closest('.guide-menu-group'),parent=g.parentElement;for(const child of [...g.querySelector('.guide-submenu').children])parent.insertBefore(child,g);g.remove();map.delete(g.dataset.menuKey);save();requestAnimationFrame(place);return}
+  const move=e.target.closest('.guide-menu-move');if(move){e.stopPropagation();const n=move.closest('.guide-menu-entry'),siblings=[...n.parentElement.children].filter(child=>child.classList.contains('guide-menu-entry')),i=siblings.indexOf(n),target=move.dataset.move==='up'?siblings[i-1]:siblings[i+1];if(target)n.parentElement.insertBefore(n,move.dataset.move==='up'?target:target.nextElementSibling);save();requestAnimationFrame(place);return}
+  const head=e.target.closest('.guide-menu-parent');if(head){e.stopPropagation();if(editing()&&e.target.closest('.guide-menu-entry-tools'))return;const body=document.getElementById(head.dataset.menuTarget);if(!body)return;const open=body.hidden;collapse();body.hidden=!open;head.setAttribute('aria-expanded',String(open));requestAnimationFrame(place);return}
+  if(e.target.closest('#open-earnings-report')){close();void showEarningsReport();return}
+  if(e.target.closest('a')||e.target.closest('#infra-audit-btn')||e.target.closest('#orphaned-tickers-btn')||e.target.closest('#open-trade-report')||e.target.closest('#open-tax-lot-report')||e.target.closest('#open-weekly-income-report')||e.target.closest('#open-ticker-tax-lot-report'))close();
+ });
+ let dragged=null;
+ menu.addEventListener('dragstart',e=>{const h=e.target.closest('.guide-menu-drag');if(!editing()||!h){e.preventDefault();return}dragged=h.closest('.guide-menu-entry');e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',dragged.dataset.menuKey);dragged.classList.add('is-dragging')});
+ menu.addEventListener('dragend',()=>{dragged?.classList.remove('is-dragging');dragged=null;menu.querySelectorAll('.drop-before,.drop-after,.drop-into').forEach(n=>n.classList.remove('drop-before','drop-after','drop-into'))});
+ menu.addEventListener('dragover',e=>{if(!editing()||!dragged)return;const t=e.target.closest('.guide-menu-entry,.guide-submenu,#guide-menu-items');if(!t||t===dragged||dragged.contains(t))return;e.preventDefault();menu.querySelectorAll('.drop-before,.drop-after,.drop-into').forEach(n=>n.classList.remove('drop-before','drop-after','drop-into'));if(t.classList.contains('guide-menu-group')&&e.target.closest('.guide-menu-parent'))t.classList.add('drop-into');else if(t.classList.contains('guide-menu-entry'))t.classList.add(e.clientY<t.getBoundingClientRect().top+t.offsetHeight/2?'drop-before':'drop-after')});
+ menu.addEventListener('drop',e=>{if(!editing()||!dragged)return;const t=e.target.closest('.guide-menu-entry,.guide-submenu,#guide-menu-items');if(!t||t===dragged||dragged.contains(t))return;e.preventDefault();if(t.classList.contains('guide-menu-group')&&dragged.dataset.menuGroup!=='true')t.querySelector('.guide-submenu').append(dragged);else if(t.classList.contains('guide-submenu')||t.id==='guide-menu-items')t.append(dragged);else{const before=e.clientY<t.getBoundingClientRect().top+t.offsetHeight/2?t:(t.nextElementSibling===dragged?dragged.nextElementSibling:t.nextElementSibling);t.parentElement.insertBefore(dragged,before)}save();requestAnimationFrame(place)});
+ menu.addEventListener('change',e=>{if(e.target.matches('.guide-menu-select')){const count=menu.querySelectorAll('.guide-menu-select:checked').length;document.getElementById('guide-menu-edit-hint').textContent=count?count+' selected. Choose “Group selected” to combine them.':'Select items to group. Drag or use arrows to reorder.'}});
+ document.addEventListener('click',e=>{if(!e.target.closest('.guide-menu-wrap'))close()});
+ document.addEventListener('keydown',e=>{if(e.key==='Escape'){close();toggle.focus()}});
+ window.addEventListener('resize',()=>{if(!menu.hidden)place()});
 })();
 
 if(new URLSearchParams(location.search).get("youtube")==="connected"){const notice=document.createElement("div");notice.setAttribute("role","status");notice.style.cssText="padding:16px;background:#174b35;color:white;text-align:center";notice.textContent="YouTube connected. You can now publish a reviewed video from the dashboard.";document.body.prepend(notice);const u=new URL(location.href);u.searchParams.delete("youtube");history.replaceState(null,"",u.pathname+u.search+u.hash);}
