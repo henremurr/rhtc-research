@@ -1439,6 +1439,11 @@ class WatchlistUpdate(BaseModel):
     rows: list[dict[str, Any]] = Field(default_factory=list, max_length=300)
 
 
+class DashboardMenuUpdate(BaseModel):
+    root: list[str] = Field(default_factory=list, max_length=150)
+    groups: list[dict[str, Any]] = Field(default_factory=list, max_length=75)
+
+
 class BuffettScreenInput(BaseModel):
     symbol: str = Field(min_length=1, max_length=10)
 
@@ -1446,6 +1451,28 @@ class BuffettScreenInput(BaseModel):
 @app.get("/api/health")
 async def health():
     return {"ok": True, "provider": data_source(), "watchlist_count": len(read_watchlist())}
+
+
+@app.get("/api/dashboard-menu")
+async def get_dashboard_menu():
+    require_watchlist_storage()
+    with closing(connect_watchlist_db()) as connection:
+        row = connection.execute("SELECT value FROM app_state WHERE key = 'dashboard_menu_v1'").fetchone()
+    menu = json.loads(row["value"]) if row else None
+    return {"menu": menu}
+
+
+@app.put("/api/dashboard-menu")
+async def update_dashboard_menu(data: DashboardMenuUpdate):
+    require_watchlist_storage()
+    menu = {"root": data.root, "groups": data.groups}
+    serialized = json.dumps(menu, ensure_ascii=False, separators=(",", ":"))
+    if len(serialized) > 32000:
+        raise HTTPException(413, "The customized menu is too large.")
+    with closing(connect_watchlist_db()) as connection:
+        connection.execute("INSERT OR REPLACE INTO app_state(key, value) VALUES ('dashboard_menu_v1', ?)", (serialized,))
+        connection.commit()
+    return {"ok": True, "menu": menu}
 
 
 @app.get("/api/infrastructure-inventory")
