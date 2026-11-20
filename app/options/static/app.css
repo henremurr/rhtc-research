@@ -1081,13 +1081,14 @@ body.news-mode .workspace-toolbar-heading{gap:8px}
 .guide-submenu[hidden]{display:none!important}
 .guide-menu.is-editing {
   width: min(560px, calc(100vw - 24px));
-  max-height: calc(100vh - 48px);
-  max-height: calc(100dvh - 48px);
+  height: calc(100vh - 24px);
+  height: calc(100dvh - 24px);
+  max-height: none;
 }
 .guide-menu.is-editing .guide-menu-editbar {
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: 3;
   background: var(--panel, #17202a);
 }
 .guide-menu-editbar[hidden],.guide-menu-customize[hidden]{display:none!important}
