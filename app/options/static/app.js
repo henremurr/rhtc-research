@@ -1997,11 +1997,13 @@ $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/opti
  const reportHead=document.getElementById('reporting-submenu-toggle'),reportBody=document.getElementById('reporting-submenu');
  if(!toggle||!menu||!guideHead||!guideBody||!reportHead||!reportBody)return;
  const storageKey='rhtc-dashboard-menu-v1',original=[...menu.children],root=document.createElement('div');root.id='guide-menu-items';
- const bar=document.createElement('div');bar.className='guide-menu-editbar';bar.hidden=true;bar.innerHTML='<div class="guide-menu-editbar-copy"><strong>Customize menu</strong><span id="guide-menu-edit-hint">Select items to group, drag to reorder, or tap Rename to change a group name.</span></div><div class="guide-menu-editbar-actions"><button id="guide-menu-group-selected" type="button">Group selected</button><button id="guide-menu-edit-done" type="button">Done</button></div>';
+ const bar=document.createElement('div');bar.className='guide-menu-editbar';bar.hidden=true;bar.innerHTML='<div class="guide-menu-editbar-copy"><strong>Customize menu</strong><span id="guide-menu-edit-hint">Select items to group, drag to reorder, or tap Rename to change a name.</span></div><div class="guide-menu-editbar-actions"><button id="guide-menu-group-selected" type="button">Group selected</button><button id="guide-menu-edit-done" type="button">Done</button></div>';
  const edit=document.createElement('button');edit.id='guide-menu-customize';edit.type='button';edit.className='guide-menu-customize';edit.textContent='Customize menu';edit.setAttribute('role','menuitem');
  const map=new Map(),native=[{key:'group:reporting',head:reportHead,body:reportBody},{key:'group:documentation',head:guideHead,body:guideBody}],groupHeads=new Set(native.map(g=>g.head)),groupBodies=new Set(native.map(g=>g.body));
+ const itemDefaults=new Map();
+ const itemLabels=new Map();
  const keyOf=el=>el.dataset.menuKey||el.id||('link:'+el.getAttribute('href'));
- const entry=(el,key)=>{const n=document.createElement('div');n.className='guide-menu-entry';n.dataset.menuKey=key||keyOf(el);n.append(el);map.set(n.dataset.menuKey,n);return n};
+ const entry=(el,key)=>{const n=document.createElement('div');n.className='guide-menu-entry';n.dataset.menuKey=key||keyOf(el);n.append(el);map.set(n.dataset.menuKey,n);itemDefaults.set(n.dataset.menuKey,el.textContent);return n};
  const nameGroup=(head,label)=>{
   head.querySelector('.guide-menu-group-title').textContent=label;
   head.setAttribute('aria-label',label);
@@ -2028,20 +2030,19 @@ $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/opti
   const tools=document.createElement('span');tools.className='guide-menu-entry-tools';
   const drag=document.createElement('button');drag.type='button';drag.className='guide-menu-drag';drag.textContent='⠿';drag.title='Drag to reorder or move';drag.setAttribute('aria-label','Drag to reorder or move');drag.draggable=true;tools.append(drag);
   for(const [dir,glyph] of [['up','↑'],['down','↓']]){const b=document.createElement('button');b.type='button';b.className='guide-menu-move';b.textContent=glyph;b.title='Move '+dir;b.setAttribute('aria-label','Move item '+dir);b.dataset.move=dir;tools.append(b)}
+  const rename=document.createElement('button');
+  rename.type='button';rename.className='guide-menu-rename';rename.textContent='Rename';
+  tools.append(rename);
   if(n.dataset.menuGroup==='true'){
-   for(const action of ['Rename','Ungroup']){
-    const button=document.createElement('button');
-    button.type='button';
-    button.className='guide-menu-'+action.toLowerCase();
-    button.textContent=action;
-    tools.append(button);
-   }
+   const ungroup=document.createElement('button');
+   ungroup.type='button';ungroup.className='guide-menu-ungroup';ungroup.textContent='Ungroup';
+   tools.append(ungroup);
   }
   else{const c=document.createElement('input');c.type='checkbox';c.className='guide-menu-select';c.setAttribute('aria-label','Select menu item to group');tools.append(c)}
   host.append(tools);
  };
  const groupList=()=>[...root.children].filter(n=>n.dataset.menuGroup==='true').map(n=>({key:n.dataset.menuKey,label:n.querySelector('.guide-menu-group-title')?.textContent||n.querySelector('.guide-menu-parent span')?.textContent||'Group',native:!n.classList.contains('guide-menu-custom-group'),children:[...n.querySelector('.guide-submenu').children].map(c=>c.dataset.menuKey)}));
- const currentMenu=()=>({root:[...root.children].map(n=>n.dataset.menuKey),groups:groupList()});
+ const currentMenu=()=>({root:[...root.children].map(n=>n.dataset.menuKey),groups:groupList(),item_labels:Object.fromEntries(itemLabels)});
  const readLocalMenu=()=>{try{const data=JSON.parse(localStorage.getItem(storageKey)||'null');return data&&Array.isArray(data.root)&&Array.isArray(data.groups)?data:null}catch(_){return null}};
  let menuSaveQueue=Promise.resolve();
  const writeSharedMenu=data=>{
@@ -2052,7 +2053,19 @@ $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/opti
   return menuSaveQueue;
  };
  const save=()=>{const data=currentMenu();try{localStorage.setItem(storageKey,JSON.stringify(data))}catch(_){}void writeSharedMenu(data).catch(()=>{})};
+ const nameItem=(key,label)=>{
+  const item=map.get(key)?.firstElementChild;
+  if(!item||!itemDefaults.has(key))return;
+  const original=itemDefaults.get(key);
+  item.textContent=label||original;
+  if(label&&label!==original)itemLabels.set(key,label);
+  else itemLabels.delete(key);
+ };
  const restore=data=>{if(!data||!Array.isArray(data.root)||!Array.isArray(data.groups))return false;
+  for(const key of itemDefaults.keys()){
+   const label=data.item_labels?.[key];
+   if(itemLabels.has(key)||(typeof label==='string'&&label.trim()))nameItem(key,typeof label==='string'?label.trim():'');
+  }
   const keys=new Set(data.groups.map(g=>g.key));
   for(const g of [...root.children].filter(n=>n.dataset.menuGroup==='true'))if(!keys.has(g.dataset.menuKey)){for(const c of [...g.querySelector('.guide-submenu').children])root.append(c);g.remove();map.delete(g.dataset.menuKey)}
   for(const g of data.groups)if(g.native===false&&!map.has(g.key))root.append(customGroup(g.key,g.label||'New group'));
@@ -2094,11 +2107,13 @@ $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/opti
  renameDialog.innerHTML='<form method="dialog"><label id="guide-menu-rename-title" for="guide-menu-rename-input">Rename group</label><input id="guide-menu-rename-input" required autofocus><div class="guide-menu-editbar-actions"><button type="button">Cancel</button><button type="submit">Rename</button></div></form>';
  menu.append(renameDialog);
  const renameInput=renameDialog.querySelector('input');
- let renameHead=null;
- const openRename=title=>{
+ let renameEntry=null;
+ const openRename=entry=>{
   if(renameDialog.open)return;
-  renameHead=title.closest('.guide-menu-parent');
-  renameInput.value=title.textContent;
+  renameEntry=entry;
+  const isGroup=entry.dataset.menuGroup==='true';
+  renameDialog.querySelector('label').textContent=isGroup?'Rename group':'Rename menu item';
+  renameInput.value=isGroup?entry.firstElementChild.querySelector('.guide-menu-group-title').textContent:entry.firstElementChild.textContent;
   renameDialog.showModal();
   renameInput.select();
  };
@@ -2108,7 +2123,8 @@ $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/opti
   e.preventDefault();
   const label=renameInput.value.trim();
   if(!label){renameInput.value='';renameInput.reportValidity();return}
-  nameGroup(renameHead,label);
+  if(renameEntry.dataset.menuGroup==='true')nameGroup(renameEntry.firstElementChild,label);
+  else nameItem(renameEntry.dataset.menuKey,label);
   save();
   renameDialog.close();
  });
@@ -2124,7 +2140,7 @@ $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/opti
  menu.addEventListener('click',e=>{
   const rename=e.target.closest('.guide-menu-rename');
   if(editing()&&rename){
-   openRename(rename.closest('.guide-menu-group').querySelector('.guide-menu-group-title'));
+   openRename(rename.closest('.guide-menu-entry'));
    return;
   }
   const ungroup=e.target.closest('.guide-menu-ungroup');if(ungroup){e.stopPropagation();const g=ungroup.closest('.guide-menu-group'),parent=g.parentElement;for(const child of [...g.querySelector('.guide-submenu').children])parent.insertBefore(child,g);g.remove();map.delete(g.dataset.menuKey);save();requestAnimationFrame(place);return}
@@ -2138,7 +2154,7 @@ $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/opti
  menu.addEventListener('dragend',()=>{dragged?.classList.remove('is-dragging');dragged=null;menu.querySelectorAll('.drop-before,.drop-after,.drop-into').forEach(n=>n.classList.remove('drop-before','drop-after','drop-into'))});
  menu.addEventListener('dragover',e=>{if(!editing()||!dragged)return;const t=e.target.closest('.guide-menu-entry,.guide-submenu,#guide-menu-items');if(!t||t===dragged||dragged.contains(t))return;e.preventDefault();menu.querySelectorAll('.drop-before,.drop-after,.drop-into').forEach(n=>n.classList.remove('drop-before','drop-after','drop-into'));if(t.classList.contains('guide-menu-group')&&e.target.closest('.guide-menu-parent'))t.classList.add('drop-into');else if(t.classList.contains('guide-menu-entry'))t.classList.add(e.clientY<t.getBoundingClientRect().top+t.offsetHeight/2?'drop-before':'drop-after')});
  menu.addEventListener('drop',e=>{if(!editing()||!dragged)return;const t=e.target.closest('.guide-menu-entry,.guide-submenu,#guide-menu-items');if(!t||t===dragged||dragged.contains(t))return;e.preventDefault();if(t.classList.contains('guide-menu-group')&&dragged.dataset.menuGroup!=='true')t.querySelector('.guide-submenu').append(dragged);else if(t.classList.contains('guide-submenu')||t.id==='guide-menu-items')t.append(dragged);else{const before=e.clientY<t.getBoundingClientRect().top+t.offsetHeight/2?t:(t.nextElementSibling===dragged?dragged.nextElementSibling:t.nextElementSibling);t.parentElement.insertBefore(dragged,before)}save();requestAnimationFrame(place)});
- menu.addEventListener('change',e=>{if(e.target.matches('.guide-menu-select')){const count=menu.querySelectorAll('.guide-menu-select:checked').length;document.getElementById('guide-menu-edit-hint').textContent=count?count+' selected. Choose “Group selected” to combine them.':'Select items to group, drag to reorder, or tap Rename to change a group name.'}});
+ menu.addEventListener('change',e=>{if(e.target.matches('.guide-menu-select')){const count=menu.querySelectorAll('.guide-menu-select:checked').length;document.getElementById('guide-menu-edit-hint').textContent=count?count+' selected. Choose “Group selected” to combine them.':'Select items to group, drag to reorder, or tap Rename to change a name.'}});
  document.addEventListener('click',e=>{if(!e.target.closest('.guide-menu-wrap'))close()});
  document.addEventListener('keydown',e=>{if(e.key==='Escape'){close();toggle.focus()}});
  window.addEventListener('resize',()=>{if(!menu.hidden)place()});
