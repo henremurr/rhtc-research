@@ -1997,16 +1997,23 @@ $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/opti
  const reportHead=document.getElementById('reporting-submenu-toggle'),reportBody=document.getElementById('reporting-submenu');
  if(!toggle||!menu||!guideHead||!guideBody||!reportHead||!reportBody)return;
  const storageKey='rhtc-dashboard-menu-v1',original=[...menu.children],root=document.createElement('div');root.id='guide-menu-items';
- const bar=document.createElement('div');bar.className='guide-menu-editbar';bar.hidden=true;bar.innerHTML='<div class="guide-menu-editbar-copy"><strong>Customize menu</strong><span id="guide-menu-edit-hint">Select items to group, or drag them to reorder.</span></div><div class="guide-menu-editbar-actions"><button id="guide-menu-group-selected" type="button">Group selected</button><button id="guide-menu-edit-done" type="button">Done</button></div>';
+ const bar=document.createElement('div');bar.className='guide-menu-editbar';bar.hidden=true;bar.innerHTML='<div class="guide-menu-editbar-copy"><strong>Customize menu</strong><span id="guide-menu-edit-hint">Select items to group, drag to reorder, or hold a group name to rename it.</span></div><div class="guide-menu-editbar-actions"><button id="guide-menu-group-selected" type="button">Group selected</button><button id="guide-menu-edit-done" type="button">Done</button></div>';
  const edit=document.createElement('button');edit.id='guide-menu-customize';edit.type='button';edit.className='guide-menu-customize';edit.textContent='Customize menu';edit.setAttribute('role','menuitem');
  const map=new Map(),native=[{key:'group:reporting',head:reportHead,body:reportBody},{key:'group:documentation',head:guideHead,body:guideBody}],groupHeads=new Set(native.map(g=>g.head)),groupBodies=new Set(native.map(g=>g.body));
  const keyOf=el=>el.dataset.menuKey||el.id||('link:'+el.getAttribute('href'));
  const entry=(el,key)=>{const n=document.createElement('div');n.className='guide-menu-entry';n.dataset.menuKey=key||keyOf(el);n.append(el);map.set(n.dataset.menuKey,n);return n};
+ const nameGroup=(head,label)=>{
+  head.querySelector('.guide-menu-group-title').textContent=label;
+  head.setAttribute('aria-label',label);
+  document.getElementById(head.dataset.menuTarget)?.setAttribute('aria-label',label);
+ };
  const group=(head,body,key,label,isCustom=false)=>{
   const n=document.createElement('div');n.className='guide-menu-entry guide-menu-group'+(isCustom?' guide-menu-custom-group':'');n.dataset.menuKey=key;n.dataset.menuGroup='true';
   for(const child of [...body.children])body.append(entry(child));
   body.id=body.id||'guide-menu-submenu-'+key.replace(/[^a-z0-9]+/gi,'-');body.classList.add('guide-submenu');body.setAttribute('role','group');head.dataset.menuTarget=body.id;
-  if(isCustom){head.type='button';head.className='guide-menu-parent';head.setAttribute('aria-haspopup','true');head.setAttribute('aria-expanded','false');head.innerHTML='<span class="guide-menu-group-title"></span><span class="guide-menu-chevron" aria-hidden="true">⌄</span>';head.querySelector('.guide-menu-group-title').textContent=label;head.setAttribute('aria-label',label)}
+  if(isCustom){head.type='button';head.className='guide-menu-parent';head.setAttribute('aria-haspopup','true');head.setAttribute('aria-expanded','false');head.innerHTML='<span></span><span class="guide-menu-chevron" aria-hidden="true">⌄</span>'}
+  head.firstElementChild.classList.add('guide-menu-group-title');
+  if(isCustom)nameGroup(head,label);
   n.append(head,body);map.set(key,n);return n;
  };
  menu.replaceChildren(bar,root,edit);
@@ -2041,6 +2048,10 @@ $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/opti
   const keys=new Set(data.groups.map(g=>g.key));
   for(const g of [...root.children].filter(n=>n.dataset.menuGroup==='true'))if(!keys.has(g.dataset.menuKey)){for(const c of [...g.querySelector('.guide-submenu').children])root.append(c);g.remove();map.delete(g.dataset.menuKey)}
   for(const g of data.groups)if(g.native===false&&!map.has(g.key))root.append(customGroup(g.key,g.label||'New group'));
+  for(const g of data.groups){
+   const head=map.get(g.key)?.querySelector('.guide-menu-parent');
+   if(head&&typeof g.label==='string'&&g.label.trim())nameGroup(head,g.label);
+  }
   for(const g of data.groups){const target=map.get(g.key)?.querySelector('.guide-submenu');if(target)for(const key of g.children||[]){const child=map.get(key);if(child)target.append(child)}}
   for(const key of data.root){const n=map.get(key);if(n)root.append(n)}
   for(const n of map.values())if(n.parentElement?.classList.contains('guide-submenu')&&!data.groups.some(g=>g.children?.includes(n.dataset.menuKey)))root.append(n);
@@ -2069,6 +2080,56 @@ $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/opti
  const setEditing=on=>{menu.classList.toggle('is-editing',on);bar.hidden=!on;edit.hidden=on;if(on)entries().forEach(toolsFor);requestAnimationFrame(place)};
  const collapse=()=>menu.querySelectorAll('.guide-menu-parent').forEach(h=>{const b=document.getElementById(h.dataset.menuTarget);if(b)b.hidden=true;h.setAttribute('aria-expanded','false')});
  const close=()=>{menu.hidden=true;toggle.setAttribute('aria-expanded','false');collapse();if(editing())setEditing(false)};
+ const renameDialog=document.createElement('dialog');
+ renameDialog.className='guide-menu-rename-dialog';
+ renameDialog.setAttribute('aria-labelledby','guide-menu-rename-title');
+ renameDialog.innerHTML='<form method="dialog"><label id="guide-menu-rename-title" for="guide-menu-rename-input">Rename group</label><input id="guide-menu-rename-input" required autofocus><div class="guide-menu-editbar-actions"><button type="button">Cancel</button><button type="submit">Rename</button></div></form>';
+ menu.append(renameDialog);
+ const renameInput=renameDialog.querySelector('input');
+ let renameHead=null;
+ const openRename=title=>{
+  if(renameDialog.open)return;
+  renameHead=title.closest('.guide-menu-parent');
+  renameInput.value=title.textContent;
+  renameDialog.showModal();
+  renameInput.select();
+ };
+ renameDialog.querySelector('[type="button"]').addEventListener('click',()=>renameDialog.close());
+ renameDialog.addEventListener('keydown',e=>{if(e.key==='Escape')e.stopPropagation()});
+ renameDialog.addEventListener('submit',e=>{
+  e.preventDefault();
+  const label=renameInput.value.trim();
+  if(!label){renameInput.value='';renameInput.reportValidity();return}
+  nameGroup(renameHead,label);
+  save();
+  renameDialog.close();
+ });
+ let pressTimer,pressStart,suppressClick=false;
+ const cancelPress=()=>{clearTimeout(pressTimer);pressStart=null};
+ menu.addEventListener('pointerdown',e=>{
+  cancelPress();
+  suppressClick=false;
+  const title=e.target.closest('.guide-menu-group-title');
+  if(!editing()||!title||!e.isPrimary||e.button!==0)return;
+  pressStart={x:e.clientX,y:e.clientY};
+  pressTimer=setTimeout(()=>{
+   if(menu.hidden||!editing()||!title.isConnected)return;
+   suppressClick=true;
+   openRename(title);
+  },500);
+ });
+ menu.addEventListener('pointermove',e=>{
+  if(pressStart&&Math.hypot(e.clientX-pressStart.x,e.clientY-pressStart.y)>10)cancelPress();
+ });
+ for(const event of ['pointerup','pointercancel','pointerleave'])menu.addEventListener(event,cancelPress);
+ menu.addEventListener('contextmenu',e=>{
+  const title=e.target.closest('.guide-menu-group-title');
+  if(editing()&&title)e.preventDefault();
+ });
+ menu.addEventListener('keydown',e=>{
+  const title=e.target.closest('.guide-menu-parent')?.querySelector('.guide-menu-group-title');
+  if(editing()&&title&&e.key==='F2'){e.preventDefault();openRename(title)}
+ });
  edit.addEventListener('click',e=>{e.stopPropagation();setEditing(true)});
  document.getElementById('guide-menu-edit-done').addEventListener('click',e=>{e.stopPropagation();setEditing(false);save()});
  document.getElementById('guide-menu-group-selected').addEventListener('click',e=>{
@@ -2081,7 +2142,7 @@ $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/opti
  menu.addEventListener('click',e=>{
   const ungroup=e.target.closest('.guide-menu-ungroup');if(ungroup){e.stopPropagation();const g=ungroup.closest('.guide-menu-group'),parent=g.parentElement;for(const child of [...g.querySelector('.guide-submenu').children])parent.insertBefore(child,g);g.remove();map.delete(g.dataset.menuKey);save();requestAnimationFrame(place);return}
   const move=e.target.closest('.guide-menu-move');if(move){e.stopPropagation();const n=move.closest('.guide-menu-entry'),siblings=[...n.parentElement.children].filter(child=>child.classList.contains('guide-menu-entry')),i=siblings.indexOf(n),target=move.dataset.move==='up'?siblings[i-1]:siblings[i+1];if(target)n.parentElement.insertBefore(n,move.dataset.move==='up'?target:target.nextElementSibling);save();requestAnimationFrame(place);return}
-  const head=e.target.closest('.guide-menu-parent');if(head){e.stopPropagation();if(editing()&&e.target.closest('.guide-menu-entry-tools'))return;const body=document.getElementById(head.dataset.menuTarget);if(!body)return;const open=body.hidden;body.hidden=!open;head.setAttribute('aria-expanded',String(open));requestAnimationFrame(place);return}
+  const head=e.target.closest('.guide-menu-parent');if(head){e.stopPropagation();if(suppressClick&&e.detail>0){suppressClick=false;return}if(editing()&&e.target.closest('.guide-menu-entry-tools'))return;const body=document.getElementById(head.dataset.menuTarget);if(!body)return;const open=body.hidden;body.hidden=!open;head.setAttribute('aria-expanded',String(open));requestAnimationFrame(place);return}
   if(e.target.closest('#open-earnings-report')){close();void showEarningsReport();return}
   if(e.target.closest('a')||e.target.closest('#infra-audit-btn')||e.target.closest('#orphaned-tickers-btn')||e.target.closest('#open-trade-report')||e.target.closest('#open-tax-lot-report')||e.target.closest('#open-weekly-income-report')||e.target.closest('#open-ticker-tax-lot-report'))close();
  });
@@ -2090,7 +2151,7 @@ $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/opti
  menu.addEventListener('dragend',()=>{dragged?.classList.remove('is-dragging');dragged=null;menu.querySelectorAll('.drop-before,.drop-after,.drop-into').forEach(n=>n.classList.remove('drop-before','drop-after','drop-into'))});
  menu.addEventListener('dragover',e=>{if(!editing()||!dragged)return;const t=e.target.closest('.guide-menu-entry,.guide-submenu,#guide-menu-items');if(!t||t===dragged||dragged.contains(t))return;e.preventDefault();menu.querySelectorAll('.drop-before,.drop-after,.drop-into').forEach(n=>n.classList.remove('drop-before','drop-after','drop-into'));if(t.classList.contains('guide-menu-group')&&e.target.closest('.guide-menu-parent'))t.classList.add('drop-into');else if(t.classList.contains('guide-menu-entry'))t.classList.add(e.clientY<t.getBoundingClientRect().top+t.offsetHeight/2?'drop-before':'drop-after')});
  menu.addEventListener('drop',e=>{if(!editing()||!dragged)return;const t=e.target.closest('.guide-menu-entry,.guide-submenu,#guide-menu-items');if(!t||t===dragged||dragged.contains(t))return;e.preventDefault();if(t.classList.contains('guide-menu-group')&&dragged.dataset.menuGroup!=='true')t.querySelector('.guide-submenu').append(dragged);else if(t.classList.contains('guide-submenu')||t.id==='guide-menu-items')t.append(dragged);else{const before=e.clientY<t.getBoundingClientRect().top+t.offsetHeight/2?t:(t.nextElementSibling===dragged?dragged.nextElementSibling:t.nextElementSibling);t.parentElement.insertBefore(dragged,before)}save();requestAnimationFrame(place)});
- menu.addEventListener('change',e=>{if(e.target.matches('.guide-menu-select')){const count=menu.querySelectorAll('.guide-menu-select:checked').length;document.getElementById('guide-menu-edit-hint').textContent=count?count+' selected. Choose “Group selected” to combine them.':'Select items to group. Drag or use arrows to reorder.'}});
+ menu.addEventListener('change',e=>{if(e.target.matches('.guide-menu-select')){const count=menu.querySelectorAll('.guide-menu-select:checked').length;document.getElementById('guide-menu-edit-hint').textContent=count?count+' selected. Choose “Group selected” to combine them.':'Select items to group, drag to reorder, or hold a group name to rename it.'}});
  document.addEventListener('click',e=>{if(!e.target.closest('.guide-menu-wrap'))close()});
  document.addEventListener('keydown',e=>{if(e.key==='Escape'){close();toggle.focus()}});
  window.addEventListener('resize',()=>{if(!menu.hidden)place()});
