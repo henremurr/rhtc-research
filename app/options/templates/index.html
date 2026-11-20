@@ -88,7 +88,7 @@
 <label class="youtube-review-label"><input id="youtube-review-confirm" type="checkbox"> I reviewed the full MP3, title, description, and selected artwork.</label>
 <div class="youtube-publish-actions"><button id="youtube-publish-btn" type="button" disabled>▶ Publish to YouTube + X</button><span id="youtube-publish-status" role="status" aria-live="polite"></span></div>
 </section></div></div></div>
-<script src="/options/static/app.js?v=menu-item-rename-20261120"></script>
+<script src="/options/static/app.js?v=menu-report-titles-20261120"></script>
 <style>
 #trade-preview{padding:0;border:0;width:92vw;height:88vh;max-width:none;max-height:none;background:#222;color:white}
 #trade-preview[open]{display:flex;flex-direction:column;position:fixed;inset:0;margin:auto;z-index:10000}
@@ -210,7 +210,7 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
  const tickerInput=get('trade-ticker'),broker=get('trade-broker');
  const isCash=()=>reportMode==='cash';
  const isWeekly=()=>reportMode==='weekly-income'||reportMode==='weekly-detail';
- const reportTitle=()=>isCash()?'RHTC Cash Activity Report':isWeekly()?('RHTC '+(reportMode==='weekly-detail'?'Weekly Income Detail Report':'Weekly Income Summary Report')):reportMode==='open-tax'?'RHTC Open Tax Lot Report':reportMode==='ticker-tax'?'RHTC Ticker Tax Lot Report · Form 8949':reportMode==='tax'?'RHTC Tax Lot Report · Form 8949 columns':'RHTC Transaction Report';
+ const reportTitle=()=>get('trade-title').textContent;
  function clear(){
    printRequest?.abort();
    printRequest=undefined;
@@ -232,7 +232,7 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
    previewDownload.hidden=!hasRows;
    printButton.hidden=combinedPdfAction&&hasRows;
    if(hasRows){
-     previewDownload.href='/options/api/'+reportRoute()+'/pdf?'+new URLSearchParams({...params,download:'true'});
+     previewDownload.href='/options/api/'+reportRoute()+'/pdf?'+new URLSearchParams({...params,title:reportTitle(),download:'true'});
      previewDownload.download=pdfFilename();
      if(canShareFiles&&(appleMobile||!window.showSaveFilePicker))preparePrintFile(previewDownload.href);
    }else{
@@ -264,8 +264,8 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
  broker.addEventListener('change',cashAccounts);
  account.addEventListener('change',()=>{if(isCash()){clear();updatePreviewButton();}else years();});for(const field of [year,tickerInput])field.addEventListener('change',()=>{clear();updatePreviewButton();});
  async function request(query){const response=await fetch('/options/api/'+reportRoute()+query,{cache:'no-store'});if(!response.ok)throw Error(response.status===401?'Sign in again to view trades.':'Unable to load transaction history.');return response.json();}
- async function openReport(mode){
-  reportMode=mode;get('trade-title').textContent=isCash()?'Cash Activity Report':isWeekly()?(reportMode==='weekly-detail'?'Weekly Income Detail Report':'Weekly Income Summary Report'):reportMode==='open-tax'?'Open Tax Lot Report':reportMode==='ticker-tax'?'Ticker Tax Lot Report · Form 8949':reportMode==='tax'?'Tax Lot Report · Form 8949':'Transaction report';
+ async function openReport(mode,title){
+  reportMode=mode;get('trade-title').textContent=title;
   get('trade-broker-filter').hidden=!isCash();broker.required=isCash();broker.replaceChildren();
   get('trade-year-filter').hidden=isCash();year.required=!isCash();
   get('trade-ticker-filter').hidden=reportMode!=='ticker-tax';tickerInput.required=reportMode==='ticker-tax';tickerInput.value='';
@@ -277,13 +277,13 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
    else{account.replaceChildren(...choices);years();}
    status.textContent=periods.length?'Select your filters, then choose Preview report.':'Import trading history to view a report.';}catch(e){if(next===sequence)status.textContent=e.message;}
  }
- get('open-trade-report').addEventListener('click',()=>openReport('trade'));
- get('open-tax-lot-report').addEventListener('click',()=>openReport('tax'));
- get('open-weekly-income-detail').addEventListener('click',()=>openReport('weekly-detail'));
- get('open-weekly-income-report').addEventListener('click',()=>openReport('weekly-income'));
- get('open-ticker-tax-lot-report').addEventListener('click',()=>openReport('ticker-tax'));
- get('open-open-tax-lot-report').addEventListener('click',()=>openReport('open-tax'));
- get('open-cash-activity-report').addEventListener('click',()=>openReport('cash'));
+ get('open-trade-report').addEventListener('click',event=>openReport('trade',event.currentTarget.textContent.trim()));
+ get('open-tax-lot-report').addEventListener('click',event=>openReport('tax',event.currentTarget.textContent.trim()));
+ get('open-weekly-income-detail').addEventListener('click',event=>openReport('weekly-detail',event.currentTarget.textContent.trim()));
+ get('open-weekly-income-report').addEventListener('click',event=>openReport('weekly-income',event.currentTarget.textContent.trim()));
+ get('open-ticker-tax-lot-report').addEventListener('click',event=>openReport('ticker-tax',event.currentTarget.textContent.trim()));
+ get('open-open-tax-lot-report').addEventListener('click',event=>openReport('open-tax',event.currentTarget.textContent.trim()));
+ get('open-cash-activity-report').addEventListener('click',event=>openReport('cash',event.currentTarget.textContent.trim()));
  const preview=get('trade-preview'),expand=get('preview-expand'),pages=get('preview-pages');
  const printButton=get('preview-print'),printStatus=get('preview-print-status');
  const previewDownload=get('preview-download');
