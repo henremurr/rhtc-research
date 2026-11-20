@@ -252,6 +252,9 @@ def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False, we
             ("VALIGN", (0, 0), (-1, -1), "TOP"), ("ALIGN", (3, 1), (-1, -1), "RIGHT"),
             ("BACKGROUND", (0, 1), (-1, -1), colors.white),
             ("LINEBELOW", (0, 0), (-1, 0), 1, gold), ("LINEBELOW", (0, 1), (-1, -1), .3, colors.HexColor("#D5DADD")),
+            *(("LINEBELOW", (0, row), (-1, row), 1.4, ink)
+              for row, (lot, next_lot) in enumerate(zip(selected, selected[1:]), start=1)
+              if lot["sold"] != next_lot["sold"]),
             ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4),
             ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ]))
