@@ -319,16 +319,31 @@ def build_open_tax_lot_report(account, year, lots):
 
 def build_cash_activity_report(broker, account, groups):
     output = BytesIO()
-    doc = SimpleDocTemplate(output, pagesize=landscape(letter), title="RHTC Cash Activity Report",
-                            leftMargin=34, rightMargin=34, topMargin=32, bottomMargin=32)
+    width, height = landscape(letter)
+    title = "RHTC Cash Activity Report"
+    doc = SimpleDocTemplate(output, pagesize=(width, height), title=title,
+                            leftMargin=34, rightMargin=34, topMargin=75, bottomMargin=38)
     body = ParagraphStyle("CashActivity", fontName="Helvetica", fontSize=8, leading=11)
     heading = ParagraphStyle("CashActivityHeading", fontName="Helvetica-Bold", fontSize=12,
                              leading=15, keepWithNext=True)
-    title = ParagraphStyle("CashActivityTitle", parent=heading, fontSize=17, leading=21)
-    story = [Paragraph("RHTC Cash Activity Report", title),
-             Paragraph(escape(f"{broker} | Account {account} | All dates"), body), Spacer(1, 12)]
+    story = []
     ink = colors.HexColor("#182229")
     gold = colors.HexColor("#C6A45C")
+    logo = Path(__file__).parent / "static" / "apple-touch-icon.png"
+
+    def decorate(canvas, document):
+        canvas.saveState()
+        canvas.drawImage(str(logo), 38, height-55, width=34, height=34, mask="auto")
+        canvas.setFillColor(ink)
+        canvas.setFont("Helvetica-Bold", 17)
+        canvas.drawString(82, height-37, title)
+        canvas.setFont("Helvetica", 10)
+        canvas.drawString(82, height-52, f"{broker}   |   Account {account}   |   All dates")
+        canvas.setStrokeColor(gold)
+        canvas.line(38, height-64, width-38, height-64)
+        canvas.setFont("Helvetica", 8)
+        canvas.drawRightString(width-38, 20, f"Rocking Horse Trading Co.   |   {document.page}")
+        canvas.restoreState()
 
     def money(value):
         return "—" if value is None else f"${Decimal(value):,.2f}"
@@ -353,5 +368,5 @@ def build_cash_activity_report(broker, account, groups):
             ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
         ]))
         story.extend([table, Spacer(1, 12)])
-    doc.build(story)
+    doc.build(story, onFirstPage=decorate, onLaterPages=decorate)
     return output.getvalue()
