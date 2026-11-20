@@ -1442,6 +1442,7 @@ class WatchlistUpdate(BaseModel):
 class DashboardMenuUpdate(BaseModel):
     root: list[str] = Field(default_factory=list, max_length=150)
     groups: list[dict[str, Any]] = Field(default_factory=list, max_length=75)
+    item_labels: dict[str, str] = Field(default_factory=dict)
 
 
 class BuffettScreenInput(BaseModel):
@@ -1465,7 +1466,7 @@ async def get_dashboard_menu():
 @app.put("/api/dashboard-menu")
 async def update_dashboard_menu(data: DashboardMenuUpdate):
     require_watchlist_storage()
-    menu = {"root": data.root, "groups": data.groups}
+    menu = {"root": data.root, "groups": data.groups, "item_labels": data.item_labels}
     serialized = json.dumps(menu, ensure_ascii=False, separators=(",", ":"))
     if len(serialized) > 32000:
         raise HTTPException(413, "The customized menu is too large.")
