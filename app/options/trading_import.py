@@ -9,6 +9,7 @@ from collections import Counter
 from contextlib import closing
 from datetime import datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from html import escape
 
 from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
@@ -432,13 +433,13 @@ def register(app, database_path):
             return {"periods": periods, "groups": groups, "summaries": summaries}
 
     @app.get("/api/trade-report/pdf")
-    def trade_pdf(account: str, year: int, download: bool = False):
+    def trade_pdf(account: str, year: int, download: bool = False, title: str = ""):
         report = trade_report(account, year)
         if not report["groups"]:
             raise HTTPException(404, "No trades for this account and year.")
         disposition = "attachment" if download else "inline"
         filename = f"RHTC_Trade_Report_{year or 'All'}_{account}.pdf"
-        return Response(build_report(account, year or "All years", report["groups"], report["summaries"]), media_type="application/pdf",
+        return Response(build_report(account, year or "All years", report["groups"], report["summaries"], title=title), media_type="application/pdf",
                         headers={"Content-Disposition": f'{disposition}; filename="{filename}"',
                                  "Cache-Control": "private, no-store"})
 
@@ -466,7 +467,7 @@ def register(app, database_path):
             return {"periods": periods, "lots": lots, "tickers": tickers, "summary": tax_lot_summary(lots)}
 
     @app.get("/api/tax-lot-report/pdf")
-    def tax_lot_pdf(account: str, year: int, ticker: str = "", weekly_income: bool = False, download: bool = False, weekly_detail: bool = False):
+    def tax_lot_pdf(account: str, year: int, ticker: str = "", weekly_income: bool = False, download: bool = False, weekly_detail: bool = False, title: str = ""):
         if weekly_income and not 1 <= year <= 9998:
             raise HTTPException(422, "Select a tax year for the weekly report.")
         report = tax_lot_report(account, year, ticker)
@@ -479,7 +480,7 @@ def register(app, database_path):
         else:
             ticker_suffix = f"_{ticker}" if ticker else ""
             filename = f"RHTC_Form_8949_{year or 'All'}{ticker_suffix}_{account}.pdf"
-        return Response(build_tax_lot_report(account, year or "All years", report["lots"], ticker=ticker, weekly_income=weekly_income, weekly_detail=weekly_detail), media_type="application/pdf",
+        return Response(build_tax_lot_report(account, year or "All years", report["lots"], ticker=ticker, weekly_income=weekly_income, weekly_detail=weekly_detail, title=title), media_type="application/pdf",
                         headers={"Content-Disposition": f'{disposition}; filename="{filename}"',
                                  "Cache-Control": "private, no-store"})
 
@@ -495,13 +496,13 @@ def register(app, database_path):
             return {"periods": periods, "lots": lots}
 
     @app.get("/api/open-tax-lot-report/pdf")
-    def open_tax_lot_pdf(account: str, year: int, download: bool = False):
+    def open_tax_lot_pdf(account: str, year: int, download: bool = False, title: str = ""):
         report = open_tax_lot_report(account, year)
         if not report["lots"]:
             raise HTTPException(404, "No open tax lots for this account as of the selected year end.")
         disposition = "attachment" if download else "inline"
         filename = f"RHTC_Open_Tax_Lots_{year or 'Latest'}_{account}.pdf"
-        return Response(build_open_tax_lot_report(account, year or "Latest available", report["lots"]), media_type="application/pdf",
+        return Response(build_open_tax_lot_report(account, year or "Latest available", report["lots"], title=title), media_type="application/pdf",
                         headers={"Content-Disposition": f'{disposition}; filename="{filename}"',
                                  "Cache-Control": "private, no-store"})
 
@@ -528,18 +529,18 @@ def register(app, database_path):
             return {"accounts": accounts, "groups": groups}
 
     @app.get("/api/cash-activity-report/pdf")
-    def cash_activity_pdf(broker: str, account: str, download: bool = False):
+    def cash_activity_pdf(broker: str, account: str, download: bool = False, title: str = ""):
         groups = cash_activity_report(broker, account)["groups"]
         if not groups:
             raise HTTPException(404, "No cash activity for this account.")
         disposition = "attachment" if download else "inline"
-        return Response(build_cash_activity_report(broker, account, groups), media_type="application/pdf",
+        return Response(build_cash_activity_report(broker, account, groups, title=title), media_type="application/pdf",
                         headers={"Content-Disposition": f'{disposition}; filename="RHTC_Cash_Activity_Report.pdf"',
                                  "Cache-Control": "private, no-store"})
 
     @app.get("/trading-import", response_class=HTMLResponse)
-    def trading_import_page():
-        return PAGE
+    def trading_import_page(title: str = ""):
+        return PAGE.replace("Import CSV files", escape(title.strip()[:300] or "Import CSV files"))
 
     def transaction_count(db, broker, account):
         if broker not in FORMATS or not re.fullmatch(r"[A-Z0-9_-]{1,40}", account):
@@ -607,8 +608,8 @@ def register(app, database_path):
 
 
 PAGE = """<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Import trading history</title><style>body{color-scheme:dark;background:#11171c;color:#edf1f4;font:16px system-ui;margin:auto;max-width:36rem;padding:2rem 1rem}label,input{display:block;margin:1rem 0}input,button{padding:.65rem;max-width:95%;font:inherit}a{color:#e2c778}button{background:#e2c778;color:#141414;border:0;border-radius:.4rem}</style>
-<a href="/options/">Back to dashboard</a><h1>Import trading history</h1><p>Select the broker that produced your account history CSV. Use the same account ID for future imports.</p>
+<title>Import CSV files</title><style>body{color-scheme:dark;background:#11171c;color:#edf1f4;font:16px system-ui;margin:auto;max-width:36rem;padding:2rem 1rem}label,input{display:block;margin:1rem 0}input,button{padding:.65rem;max-width:95%;font:inherit}a{color:#e2c778}button{background:#e2c778;color:#141414;border:0;border-radius:.4rem}</style>
+<a href="/options/">Back to dashboard</a><h1>Import CSV files</h1><p>Select the broker that produced your account history CSV. Use the same account ID for future imports.</p>
 <form><label>File format<select id="broker" style="display:block;padding:.65rem;font:inherit"><option>Fidelity</option><option>Fidelity IRA</option><option>Schwab</option><option>Vanguard</option></select></label><p id="format-help" aria-live="polite"></p><label>History CSV<input id="file" type="file" accept=".csv,text/csv" required></label><label for="saved-account">Existing account</label><select id="saved-account" style="padding:.65rem;font:inherit;max-width:100%"><option value="">Select an account</option></select><label>Account ID<input id="account" required maxlength="40" pattern="[A-Za-z0-9_\\-]+" autocomplete="off"></label><button>Import transactions</button></form><hr><button type="button" id="purge" style="background:#a32c32;color:white">Purge selected account</button><p role="status"></p>
 <script>const file=document.querySelector('#file'),account=document.querySelector('#account'),statusText=document.querySelector('[role=status]'),button=document.querySelector('button');
 const broker=document.querySelector('#broker'),savedAccount=document.querySelector('#saved-account');
