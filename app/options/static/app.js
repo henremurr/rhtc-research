@@ -309,6 +309,41 @@ async function showEarningsReport(){
     status.textContent=events.length+' of '+total+' upcoming ticker'+(total===1?'':'s')+investmentText+epsText;
   }catch(error){status.textContent=error.message}
 }
+let earningsReportPdfUrl='';
+async function printEarningsReport(){
+  const content=$('#earnings-report-content'),toolbar=document.querySelector('.earnings-report-toolbar'),action=$('#earnings-report-pdf-btn'),status=$('#earnings-report-print-status');
+  if(!content||!toolbar||!action||!content.querySelector('table')){status.textContent='Load the earnings report before creating a PDF.';return}
+  action.disabled=true;action.textContent='Generating PDF…';status.textContent='Preparing the report PDF…';
+  let pdfWindow=null;
+  try{pdfWindow=window.open('about:blank','_blank');if(pdfWindow){pdfWindow.document.title='Preparing RHTC Earnings PDF';pdfWindow.document.body.textContent='Preparing your PDF…'}}catch(error){}
+  const title='RHTC Upcoming Earnings Report';
+  const generatedAt=new Date().toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'});
+  const bodyText=['As of '+($('#earnings-report-meta')?.textContent||''),$('#earnings-report-status')?.textContent||'',reportHtmlToText(content.innerHTML)].filter(Boolean).join('\\n\\n');
+  try{
+    const response=await fetch('/options/api/ticker-report/pdf',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:'RHTC',title,generated_at:generatedAt,sections:[{title:'Upcoming earnings',text:bodyText}]})});
+    if(!response.ok){const error=await response.json().catch(()=>({}));throw Error(error.detail||'PDF generation failed ('+response.status+').')}
+    const blob=await response.blob();
+    if(earningsReportPdfUrl)URL.revokeObjectURL(earningsReportPdfUrl);
+    earningsReportPdfUrl=URL.createObjectURL(blob);
+    if(pdfWindow){
+      const viewer=pdfWindow.document;viewer.open();
+      viewer.write('<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+safe(title)+'</title><style>*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;font:16px system-ui,-apple-system,sans-serif;color:#17202a;background:#eef1f4}body{display:flex;flex-direction:column}header{min-height:58px;display:flex;align-items:center;gap:12px;padding:8px 14px;background:#17202a;color:#fff;flex-wrap:wrap}button,a{font:600 14px system-ui,-apple-system,sans-serif;padding:9px 13px;border-radius:6px;border:1px solid #b9944a;background:#f7f3e8;color:#17202a;text-decoration:none}header span{margin-left:auto;font-size:13px}iframe{display:block;flex:1;width:100%;min-height:0;border:0;background:#fff}@media(max-width:520px){header span{margin-left:0}}</style></head><body><header><button id="back" type="button">Back to earnings report</button><button id="print" type="button">Print</button><a id="download">Download PDF</a><span>RHTC · Upcoming earnings</span></header><iframe id="pdf-frame" title="RHTC upcoming earnings report"></iframe></body></html>');
+      viewer.close();
+      viewer.getElementById('back').addEventListener('click',()=>{pdfWindow.close();try{window.focus()}catch(error){}});
+      viewer.getElementById('print').addEventListener('click',()=>{const frame=viewer.getElementById('pdf-frame');try{frame.contentWindow.focus();frame.contentWindow.print()}catch(error){pdfWindow.print()}});
+      const download=viewer.getElementById('download');download.href=earningsReportPdfUrl;download.download='RHTC_Upcoming_Earnings_Report.pdf';
+      viewer.getElementById('pdf-frame').src=earningsReportPdfUrl;
+    }
+    const open=document.createElement('a');open.className='refresh-btn secondary';open.href=earningsReportPdfUrl;open.target='_blank';open.rel='noopener';open.textContent='Open PDF';
+    const download=document.createElement('a');download.className='refresh-btn ticker-report-pdf-link';download.href=earningsReportPdfUrl;download.download='RHTC_Upcoming_Earnings_Report.pdf';download.textContent='Download PDF';
+    const back=document.createElement('button');back.type='button';back.className='refresh-btn secondary';back.textContent='Back to report';back.onclick=()=>{toolbar.replaceChildren(action,status);action.disabled=false;action.textContent='Generate PDF';status.textContent='PDF ready. Open or download the report above.'};
+    toolbar.replaceChildren(open,download,back,status);
+    status.textContent=pdfWindow?'PDF opened in a separate tab. Use Back to earnings report there to return.':'PDF ready. Open or download the report.';
+  }catch(error){
+    if(pdfWindow&&!pdfWindow.closed)pdfWindow.close();
+    action.disabled=false;action.textContent='Generate PDF';status.textContent='Could not create PDF: '+error.message;
+  }
+}
 function closeEarningsReport(){$('#earnings-report-modal').classList.remove('open')}
 async function showOrphanedTickers(){
   const modal=$('#orphaned-tickers-modal'),status=$('#orphaned-tickers-status'),content=$('#orphaned-tickers-content');
@@ -1986,6 +2021,7 @@ $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/opti
     reportingToggle.setAttribute('aria-expanded',String(!reportingSubmenu.hidden));requestAnimationFrame(place);
   });
   menu.addEventListener('click',event=>{
+    if(event.target.closest('#open-earnings-report')){close();void showEarningsReport();return}
     if(event.target.closest('a')||event.target.closest('#infra-audit-btn')||event.target.closest('#orphaned-tickers-btn')||event.target.closest('#open-trade-report')||event.target.closest('#open-tax-lot-report')||event.target.closest('#open-weekly-income-report')||event.target.closest('#open-ticker-tax-lot-report'))close();
   });
   document.addEventListener('click',event=>{if(!event.target.closest('.guide-menu-wrap'))close()});

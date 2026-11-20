@@ -1382,7 +1382,7 @@ body.news-mode .workspace-toolbar-heading{gap:8px}
   border-radius:10px;
   background:#151e29;
 }
-.ticker-report-toolbar>span { color:#aab5c2; font-size:12px; }
+.ticker-report-toolbar>span { color:#aab5c2; font-size:12px; }\n.earnings-report-toolbar { margin:0 0 12px; }\n.earnings-report-toolbar button { min-height:42px; }
 .ticker-report-toolbar .refresh-btn { min-height:42px; }
 @media(max-width:600px) {
   .detail-modal.report-preview-mode { width:calc(100vw - 16px) !important; max-height:calc(100dvh - 16px) !important; padding:14px !important; }
