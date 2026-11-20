@@ -219,6 +219,7 @@ def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False, we
                     ("FONTSIZE", (0, 0), (-1, -1), 7),
                     ("ALIGN", (3, 0), (-1, -1), "RIGHT"),
                     ("LINEBELOW", (0, 1), (-1, -1), .3, colors.lightgrey),
+                    *(("BACKGROUND", (0, index), (-1, index), colors.HexColor("#F0F2F3")) for index in subtotals),
                     *(("FONTNAME", (0, index), (-1, index), "Helvetica-Bold") for index in subtotals),
                     *(("LINEABOVE", (0, index), (-1, index), .75, gold) for index in subtotals),
                 ]))
