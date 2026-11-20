@@ -1079,6 +1079,17 @@ body.news-mode .workspace-toolbar-heading{gap:8px}
 .guide-submenu{margin:3px 0 5px 12px;padding-left:7px;border-left:1px solid var(--line,#526071)}
 .guide-submenu a{justify-content:flex-start;padding:10px 11px;font-size:13px}
 .guide-submenu[hidden]{display:none!important}
+.guide-menu.is-editing {
+  width: min(560px, calc(100vw - 24px));
+  max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
+}
+.guide-menu.is-editing .guide-menu-editbar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel, #17202a);
+}
 .guide-menu-editbar[hidden],.guide-menu-customize[hidden]{display:none!important}
 .guide-menu-editbar{padding:10px 9px 12px;border-bottom:1px solid var(--line,#526071);margin-bottom:5px}
 .guide-menu-editbar-copy{display:flex;flex-direction:column;gap:3px;margin-bottom:9px}.guide-menu-editbar-copy strong{font-size:13px;color:var(--gold,#d4b66b)}.guide-menu-editbar-copy span{font-size:11px;line-height:1.35;color:var(--muted,#9ba8b7)}
