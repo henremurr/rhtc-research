@@ -1091,11 +1091,6 @@ body.news-mode .workspace-toolbar-heading{gap:8px}
   z-index: 3;
   background: var(--panel, #17202a);
 }
-.guide-menu.is-editing .guide-menu-group-title {
-  -webkit-touch-callout: none;
-  -webkit-user-select: none;
-  user-select: none;
-}
 .guide-menu-rename-dialog {
   width: min(360px, calc(100vw - 24px));
   padding: 18px;
@@ -1772,5 +1767,15 @@ body.news-mode .news-research-title {
   white-space: nowrap;
 }
 /* Keep group editing controls on the header without nesting interactive buttons. */
-.guide-menu.is-editing .guide-menu-group>.guide-menu-parent{padding-right:170px}
-.guide-menu.is-editing .guide-menu-group>.guide-menu-entry-tools{position:absolute;z-index:2;top:7px;right:5px}
+.guide-menu.is-editing .guide-menu-group {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+.guide-menu.is-editing .guide-menu-group > .guide-menu-entry-tools {
+  grid-area: 1 / 2;
+  padding-right: 5px;
+}
+.guide-menu.is-editing .guide-menu-group > .guide-submenu {grid-column: 1 / -1}
+.guide-menu.is-editing .guide-menu-group-title {min-width: 0; overflow-wrap: anywhere}
+.guide-menu-entry-tools .guide-menu-rename {color: var(--gold)}
