@@ -1997,7 +1997,7 @@ $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/opti
  const reportHead=document.getElementById('reporting-submenu-toggle'),reportBody=document.getElementById('reporting-submenu');
  if(!toggle||!menu||!guideHead||!guideBody||!reportHead||!reportBody)return;
  const storageKey='rhtc-dashboard-menu-v1',original=[...menu.children],root=document.createElement('div');root.id='guide-menu-items';
- const bar=document.createElement('div');bar.className='guide-menu-editbar';bar.hidden=true;bar.innerHTML='<div class="guide-menu-editbar-copy"><strong>Customize menu</strong><span id="guide-menu-edit-hint">Select items to group, drag to reorder, or hold a group name to rename it.</span></div><div class="guide-menu-editbar-actions"><button id="guide-menu-group-selected" type="button">Group selected</button><button id="guide-menu-edit-done" type="button">Done</button></div>';
+ const bar=document.createElement('div');bar.className='guide-menu-editbar';bar.hidden=true;bar.innerHTML='<div class="guide-menu-editbar-copy"><strong>Customize menu</strong><span id="guide-menu-edit-hint">Select items to group, drag to reorder, or tap Rename to change a group name.</span></div><div class="guide-menu-editbar-actions"><button id="guide-menu-group-selected" type="button">Group selected</button><button id="guide-menu-edit-done" type="button">Done</button></div>';
  const edit=document.createElement('button');edit.id='guide-menu-customize';edit.type='button';edit.className='guide-menu-customize';edit.textContent='Customize menu';edit.setAttribute('role','menuitem');
  const map=new Map(),native=[{key:'group:reporting',head:reportHead,body:reportBody},{key:'group:documentation',head:guideHead,body:guideBody}],groupHeads=new Set(native.map(g=>g.head)),groupBodies=new Set(native.map(g=>g.body));
  const keyOf=el=>el.dataset.menuKey||el.id||('link:'+el.getAttribute('href'));
@@ -2028,7 +2028,15 @@ $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/opti
   const tools=document.createElement('span');tools.className='guide-menu-entry-tools';
   const drag=document.createElement('button');drag.type='button';drag.className='guide-menu-drag';drag.textContent='⠿';drag.title='Drag to reorder or move';drag.setAttribute('aria-label','Drag to reorder or move');drag.draggable=true;tools.append(drag);
   for(const [dir,glyph] of [['up','↑'],['down','↓']]){const b=document.createElement('button');b.type='button';b.className='guide-menu-move';b.textContent=glyph;b.title='Move '+dir;b.setAttribute('aria-label','Move item '+dir);b.dataset.move=dir;tools.append(b)}
-  if(n.dataset.menuGroup==='true'){const b=document.createElement('button');b.type='button';b.className='guide-menu-ungroup';b.textContent='Ungroup';b.setAttribute('aria-label','Ungroup menu');tools.append(b)}
+  if(n.dataset.menuGroup==='true'){
+   for(const action of ['Rename','Ungroup']){
+    const button=document.createElement('button');
+    button.type='button';
+    button.className='guide-menu-'+action.toLowerCase();
+    button.textContent=action;
+    tools.append(button);
+   }
+  }
   else{const c=document.createElement('input');c.type='checkbox';c.className='guide-menu-select';c.setAttribute('aria-label','Select menu item to group');tools.append(c)}
   host.append(tools);
  };
@@ -2104,32 +2112,6 @@ $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/opti
   save();
   renameDialog.close();
  });
- let pressTimer,pressStart,suppressClick=false;
- const cancelPress=()=>{clearTimeout(pressTimer);pressStart=null};
- menu.addEventListener('pointerdown',e=>{
-  cancelPress();
-  suppressClick=false;
-  const title=e.target.closest('.guide-menu-group-title');
-  if(!editing()||!title||!e.isPrimary||e.button!==0)return;
-  pressStart={x:e.clientX,y:e.clientY};
-  pressTimer=setTimeout(()=>{
-   if(menu.hidden||!editing()||!title.isConnected)return;
-   suppressClick=true;
-   openRename(title);
-  },500);
- });
- menu.addEventListener('pointermove',e=>{
-  if(pressStart&&Math.hypot(e.clientX-pressStart.x,e.clientY-pressStart.y)>10)cancelPress();
- });
- for(const event of ['pointerup','pointercancel','pointerleave'])menu.addEventListener(event,cancelPress);
- menu.addEventListener('contextmenu',e=>{
-  const title=e.target.closest('.guide-menu-group-title');
-  if(editing()&&title)e.preventDefault();
- });
- menu.addEventListener('keydown',e=>{
-  const title=e.target.closest('.guide-menu-parent')?.querySelector('.guide-menu-group-title');
-  if(editing()&&title&&e.key==='F2'){e.preventDefault();openRename(title)}
- });
  edit.addEventListener('click',e=>{e.stopPropagation();setEditing(true)});
  document.getElementById('guide-menu-edit-done').addEventListener('click',e=>{e.stopPropagation();setEditing(false);save()});
  document.getElementById('guide-menu-group-selected').addEventListener('click',e=>{
@@ -2140,9 +2122,14 @@ $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/opti
  });
  toggle.addEventListener('click',e=>{e.stopPropagation();const open=menu.hidden;menu.hidden=!open;toggle.setAttribute('aria-expanded',String(open));if(open){collapse();requestAnimationFrame(place)}});
  menu.addEventListener('click',e=>{
+  const rename=e.target.closest('.guide-menu-rename');
+  if(editing()&&rename){
+   openRename(rename.closest('.guide-menu-group').querySelector('.guide-menu-group-title'));
+   return;
+  }
   const ungroup=e.target.closest('.guide-menu-ungroup');if(ungroup){e.stopPropagation();const g=ungroup.closest('.guide-menu-group'),parent=g.parentElement;for(const child of [...g.querySelector('.guide-submenu').children])parent.insertBefore(child,g);g.remove();map.delete(g.dataset.menuKey);save();requestAnimationFrame(place);return}
   const move=e.target.closest('.guide-menu-move');if(move){e.stopPropagation();const n=move.closest('.guide-menu-entry'),siblings=[...n.parentElement.children].filter(child=>child.classList.contains('guide-menu-entry')),i=siblings.indexOf(n),target=move.dataset.move==='up'?siblings[i-1]:siblings[i+1];if(target)n.parentElement.insertBefore(n,move.dataset.move==='up'?target:target.nextElementSibling);save();requestAnimationFrame(place);return}
-  const head=e.target.closest('.guide-menu-parent');if(head){e.stopPropagation();if(suppressClick&&e.detail>0){suppressClick=false;return}if(editing()&&e.target.closest('.guide-menu-entry-tools'))return;const body=document.getElementById(head.dataset.menuTarget);if(!body)return;const open=body.hidden;body.hidden=!open;head.setAttribute('aria-expanded',String(open));requestAnimationFrame(place);return}
+  const head=e.target.closest('.guide-menu-parent');if(head){e.stopPropagation();if(editing()&&e.target.closest('.guide-menu-entry-tools'))return;const body=document.getElementById(head.dataset.menuTarget);if(!body)return;const open=body.hidden;body.hidden=!open;head.setAttribute('aria-expanded',String(open));requestAnimationFrame(place);return}
   if(e.target.closest('#open-earnings-report')){close();void showEarningsReport();return}
   if(e.target.closest('a')||e.target.closest('#infra-audit-btn')||e.target.closest('#orphaned-tickers-btn')||e.target.closest('#open-trade-report')||e.target.closest('#open-tax-lot-report')||e.target.closest('#open-weekly-income-report')||e.target.closest('#open-ticker-tax-lot-report'))close();
  });
@@ -2151,7 +2138,7 @@ $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/opti
  menu.addEventListener('dragend',()=>{dragged?.classList.remove('is-dragging');dragged=null;menu.querySelectorAll('.drop-before,.drop-after,.drop-into').forEach(n=>n.classList.remove('drop-before','drop-after','drop-into'))});
  menu.addEventListener('dragover',e=>{if(!editing()||!dragged)return;const t=e.target.closest('.guide-menu-entry,.guide-submenu,#guide-menu-items');if(!t||t===dragged||dragged.contains(t))return;e.preventDefault();menu.querySelectorAll('.drop-before,.drop-after,.drop-into').forEach(n=>n.classList.remove('drop-before','drop-after','drop-into'));if(t.classList.contains('guide-menu-group')&&e.target.closest('.guide-menu-parent'))t.classList.add('drop-into');else if(t.classList.contains('guide-menu-entry'))t.classList.add(e.clientY<t.getBoundingClientRect().top+t.offsetHeight/2?'drop-before':'drop-after')});
  menu.addEventListener('drop',e=>{if(!editing()||!dragged)return;const t=e.target.closest('.guide-menu-entry,.guide-submenu,#guide-menu-items');if(!t||t===dragged||dragged.contains(t))return;e.preventDefault();if(t.classList.contains('guide-menu-group')&&dragged.dataset.menuGroup!=='true')t.querySelector('.guide-submenu').append(dragged);else if(t.classList.contains('guide-submenu')||t.id==='guide-menu-items')t.append(dragged);else{const before=e.clientY<t.getBoundingClientRect().top+t.offsetHeight/2?t:(t.nextElementSibling===dragged?dragged.nextElementSibling:t.nextElementSibling);t.parentElement.insertBefore(dragged,before)}save();requestAnimationFrame(place)});
- menu.addEventListener('change',e=>{if(e.target.matches('.guide-menu-select')){const count=menu.querySelectorAll('.guide-menu-select:checked').length;document.getElementById('guide-menu-edit-hint').textContent=count?count+' selected. Choose “Group selected” to combine them.':'Select items to group, drag to reorder, or hold a group name to rename it.'}});
+ menu.addEventListener('change',e=>{if(e.target.matches('.guide-menu-select')){const count=menu.querySelectorAll('.guide-menu-select:checked').length;document.getElementById('guide-menu-edit-hint').textContent=count?count+' selected. Choose “Group selected” to combine them.':'Select items to group, drag to reorder, or tap Rename to change a group name.'}});
  document.addEventListener('click',e=>{if(!e.target.closest('.guide-menu-wrap'))close()});
  document.addEventListener('keydown',e=>{if(e.key==='Escape'){close();toggle.focus()}});
  window.addEventListener('resize',()=>{if(!menu.hidden)place()});
