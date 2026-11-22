@@ -1,9 +1,9 @@
 # RHTC Three Peaks Research Platform — User Guide
 
 **For:** RHTC internal research users<br>
-**Stable release:** v2026.11.15<br>
+**Stable release:** v2026.11.22<br>
 **Last checked:** November 22, 2026
-**Documentation update:** November 22, 2026 (post-baseline workflows; stable release unchanged)<br>
+**Documentation update:** November 22, 2026 (stable release promotion)<br>
 **Application:** Covered Call Screener / Income Engine and RHTC News Feed
 
 ## Table of contents
@@ -47,9 +47,9 @@ The header shows the watchlist universe size, calls to review, median bid yield,
 
 ## Stable release baseline
 
-**v2026.11.15** is the approved stable production baseline. It covers the deployed Income Engine, shared watchlist and saved reports, stock and call scoring, Buffett and CEO-risk reports, earnings and split-aware price scenarios, news analysis, YouTube/X publishing controls, mobile layouts, comprehensive HTML/PDF reports, and the Infrastructure Audit.
+**v2026.11.22** is the current approved stable production baseline. The previous stable release **v2026.11.15** remains preserved for historical comparison. It covers the deployed Income Engine, shared watchlist and saved reports, stock and call scoring, Buffett and CEO-risk reports, earnings and split-aware price scenarios, news analysis, YouTube/X publishing controls, mobile layouts, comprehensive HTML/PDF reports, and the Infrastructure Audit.
 
-The Git reference `stable/v2026.11.15` identifies the exact source baseline. Later changes should be compared with that stable branch before they are promoted as a new stable release. The reporting and menu enhancements documented below were implemented after the stable baseline and **do not** constitute a new approved stable release. Application data remains in the configured persistent Railway volume and is not stored inside the source baseline.
+The Git reference `stable/v2026.11.22` identifies the current stable source baseline, including the reporting and menu enhancements documented below. The historical reference `stable/v2026.11.15` remains unchanged. Future changes should be compared with the current stable branch before promotion. Application data remains outside Git and must be backed up separately. Application data remains in the configured persistent Railway volume and is not stored inside the source baseline.
 
 ## Sign in and navigate
 
@@ -391,4 +391,4 @@ All reporting results are derived from imported CSV records and application calc
 
 ### Release discipline
 
-The historical stable release **v2026.11.15** and Git reference **\`stable/v2026.11.15\`** remain unchanged. Adding these user instructions documents later application functionality; it does **not** authorize an application deployment, create a new stable tag, or change the stable source baseline.
+The current stable release is **v2026.11.22** at Git reference **`stable/v2026.11.22`**. The earlier **v2026.11.15** baseline remains available at **`stable/v2026.11.15`**. Promotion of future code requires a separate release decision and validation.
