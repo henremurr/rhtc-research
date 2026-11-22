@@ -75,7 +75,7 @@ def build_report(account, year, groups, summaries, title=""):
             ("NOSPLIT", (0, -2), (-1, -1)), ("LINEABOVE", (0, -1), (-1, -1), 1, gold),
             ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold")
         ]))
-        story.extend([table, Spacer(1, 12)])
+        story.extend([table, Spacer(1, 4)])
     doc.build(story, onFirstPage=decorate, onLaterPages=decorate)
     return output.getvalue()
 
@@ -344,7 +344,7 @@ def build_cash_activity_report(broker, account, groups, title=""):
                             leftMargin=34, rightMargin=34, topMargin=75, bottomMargin=38)
     body = ParagraphStyle("CashActivity", fontName="Helvetica", fontSize=8, leading=11)
     heading = ParagraphStyle("CashActivityHeading", fontName="Helvetica-Bold", fontSize=12,
-                             leading=15, keepWithNext=True)
+                             leading=15)
     story = []
     ink = colors.HexColor("#182229")
     gold = colors.HexColor("#C6A45C")
