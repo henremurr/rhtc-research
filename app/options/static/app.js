@@ -2085,13 +2085,22 @@ $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/opti
   return true;
  };
  restore(readLocalMenu());
+ const ensureYoutubeEntryVisible=()=>{
+  const youtubeEntry=map.get('link:/options/api/youtube/connect');
+  if(!youtubeEntry)return;
+  const link=youtubeEntry.querySelector('a[href^="/options/api/youtube/connect"]');
+  if(link)link.textContent='Connect to YouTube';
+  const reporting=map.get('group:reporting');
+  root.insertBefore(youtubeEntry,reporting?.nextSibling||null);
+ };
+ ensureYoutubeEntryVisible();
  const syncSharedMenu=async()=>{
   const localMenu=readLocalMenu();
   try{
    const response=await fetch('/options/api/dashboard-menu',{credentials:'same-origin',cache:'no-store'});
    if(!response.ok)return;
    const result=await response.json();
-   if(result.menu&&restore(result.menu)){try{localStorage.setItem(storageKey,JSON.stringify(result.menu))}catch(_){}}
+   if(result.menu&&restore(result.menu)){ensureYoutubeEntryVisible();try{localStorage.setItem(storageKey,JSON.stringify(currentMenu()))}catch(_){}}
    else if(localMenu)await writeSharedMenu(localMenu);
   }catch(_){}
  };
