@@ -404,7 +404,7 @@ def tax_lot_rows(db, account, year, open_only=False):
                 unit_value = str((value / qty).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)) if value is not None and qty else None
                 result.append({"description": f"{qty.normalize():f} {'contract' if lot['option'] else 'share'}{'s' if qty != 1 else ''} {security}",
                                "ticker": ticker, "side": lot["side"], "acquired": lot["date"],
-                               "quantity": str(qty.normalize()), "amount": amount_value,
+                               "quantity": format(qty.normalize(), "f"), "amount": amount_value,
                                "unit_amount": unit_value, "amount_type": "Basis" if lot["side"] == "long" else "Proceeds",
                                "term": holding_term(lot["date"], as_of) if as_of else "short"})
         return sorted(result, key=lambda row: (row["ticker"], row["description"], row["acquired"]))
