@@ -192,10 +192,10 @@ def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False, we
                     continue
                 heading = (f'Week {week["week"]} | {week["dates"]} | '
                            f'Net gain/loss {money(week["gain"])}')
-                story.append(Spacer(1, 10))
+                story.append(Spacer(1, 4))
                 story.append(Paragraph(escape(heading), ParagraphStyle(
                     "WeeklyDetailHeading", parent=body, fontName="Helvetica-Bold",
-                    fontSize=9, leading=13, spaceAfter=6, keepWithNext=True)))
+                    fontSize=9, leading=11, spaceAfter=3)))
                 detail = [headings]
                 subtotals = []
                 for group in week["ticker_groups"]:
@@ -218,8 +218,8 @@ def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False, we
                     ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
                     ("FONTSIZE", (0, 0), (-1, -1), 7),
                     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                    ("TOPPADDING", (0, 0), (-1, -1), 5),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                    ("TOPPADDING", (0, 0), (-1, -1), 3),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
                     ("ALIGN", (3, 0), (-1, -1), "RIGHT"),
                     ("LINEBELOW", (0, 1), (-1, -1), .3, colors.lightgrey),
                     *(("BACKGROUND", (0, index), (-1, index), colors.HexColor("#F0F2F3")) for index in subtotals),
