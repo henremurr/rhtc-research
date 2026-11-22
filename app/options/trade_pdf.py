@@ -308,10 +308,13 @@ def build_open_tax_lot_report(account, year, lots, title=""):
         canvas.restoreState()
 
     def money(value):
-        return f"${Decimal(value):,.2f}" if value not in (None, "") else "—"
+        if value in (None, ""):
+            return "—"
+        amount = Decimal(value)
+        return f"-${abs(amount):,.2f}" if amount < 0 else f"${amount:,.2f}"
 
     data = [["Ticker / security", "Side", "Date acquired", "Holding period", "Open quantity", "Cost/Premium", "Per unit"]]
-    totals = {"Basis": Decimal(0), "Proceeds": Decimal(0)}
+    totals = {"Cost": Decimal(0), "Premium": Decimal(0), "Proceeds": Decimal(0)}
     for lot in lots:
         data.append([Paragraph(escape(lot["description"]), body), lot["side"].title(),
                      lot["acquired"], lot["term"].title(), lot["quantity"], money(lot["amount"]),
@@ -319,7 +322,7 @@ def build_open_tax_lot_report(account, year, lots, title=""):
         if lot.get("amount") not in (None, ""):
             totals[lot["amount_type"]] += Decimal(lot["amount"])
     data.append(["Open lot totals", "", "", "", "",
-                 f"Basis {money(totals['Basis'])}   |   Proceeds {money(totals['Proceeds'])}", ""])
+                 f"Cost {money(totals['Cost'])}   |   Premium {money(totals['Premium'])}   |   Proceeds {money(totals['Proceeds'])}", ""])
     table = LongTable(data, colWidths=[210, 60, 84, 80, 80, 100, 74], repeatRows=1,
                       hAlign="LEFT", splitInRow=1)
     table.setStyle(TableStyle([
