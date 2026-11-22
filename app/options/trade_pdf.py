@@ -347,21 +347,30 @@ def build_open_tax_lot_report(account, year, lots, title=""):
         subtotal_rows.append(len(data) - 1)
 
     subtotal_style = ParagraphStyle("OpenTaxLotSubtotal", parent=body, fontName="Helvetica-Bold")
+    group_row_ranges = []
     active_key = None
     active_lots = []
+    active_start = 1
     for lot in lots:
         key = group_key(lot)
         if key != active_key:
             if active_lots:
+                before_subtotal = len(data)
                 add_subtotal(active_lots)
+                if len(data) > before_subtotal:
+                    group_row_ranges.append((active_start, len(data) - 1))
             active_key, active_lots = key, []
+            active_start = len(data)
         data.append([Paragraph(escape(lot["description"]), body), lot["side"].title(),
                      lot["acquired"], lot["term"].title(), lot["quantity"], money(lot["amount"]),
                      money(lot["unit_amount"])])
         if key is not None:
             active_lots.append(lot)
     if active_lots:
+        before_subtotal = len(data)
         add_subtotal(active_lots)
+        if len(data) > before_subtotal:
+            group_row_ranges.append((active_start, len(data) - 1))
     table = LongTable(data, colWidths=[210, 60, 84, 80, 80, 100, 74], repeatRows=1,
                       hAlign="LEFT", splitInRow=1)
     table.setStyle(TableStyle([
@@ -372,7 +381,8 @@ def build_open_tax_lot_report(account, year, lots, title=""):
         ("LEFTPADDING", (0, 0), (-1, -1), 5), ("RIGHTPADDING", (0, 0), (-1, -1), 5),
         ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
     ] + [("LINEABOVE", (0, row), (-1, row), .75, gold) for row in subtotal_rows]
-        + [("FONTNAME", (0, row), (-1, row), "Helvetica-Bold") for row in subtotal_rows]))
+        + [("FONTNAME", (0, row), (-1, row), "Helvetica-Bold") for row in subtotal_rows]
+        + [("NOSPLIT", (0, start), (-1, end)) for start, end in group_row_ranges]))
     doc.build([table], onFirstPage=decorate, onLaterPages=decorate)
     return output.getvalue()
 
