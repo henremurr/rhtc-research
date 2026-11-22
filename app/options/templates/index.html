@@ -419,7 +419,7 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
      const table=document.createElement('table');table.className='open-lot-columns';table.style.cssText='width:100%;min-width:760px;text-align:left;border-spacing:8px';wrap.append(table);results.append(wrap);
      const head=table.createTHead().insertRow();for(const label of labels){const th=document.createElement('th');th.textContent=label;head.append(th);}
      const body=table.createTBody(),footer=table.createTFoot(),quantityFormat=new Intl.NumberFormat('en-US',{maximumFractionDigits:6});
-     const contractSecurity=lot=>lot.description.split(/\\s+/).slice(2).join(' ');
+     const contractSecurity=lot=>lot.description.split(/\s+/).slice(2).join(' ');
      const groupKey=lot=>lot.amount_type==='Cost'||lot.amount_type==='Proceeds'?'stock:'+lot.ticker:lot.amount_type==='Premium'?'contract:'+lot.ticker+':'+contractSecurity(lot):null;
      const sumQuantity=group=>group.reduce((sum,lot)=>sum+(Number(lot.quantity)||0),0),sumAmount=group=>group.reduce((sum,lot)=>sum+(Number(lot.amount)||0),0);
      const addSubtotal=(group)=>{
@@ -434,7 +434,7 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
       const row=body.insertRow(),values=[lot.ticker+' · '+lot.description,lot.side,lot.acquired,lot.term,lot.quantity,lot.amount,lot.unit_amount];values.forEach((value,index)=>{const cell=row.insertCell();cell.dataset.label=labels[index];cell.textContent=value==null||value===''?'—':index===5||index===6?dollars.format(Number(value)):value;if(index>=4)cell.style.textAlign='right';});
       if(key)activeLots.push(lot);
      }
-     if(activeLots.length)addSubtotal(activeLots);;
+     if(activeLots.length)addSubtotal(activeLots);
     }
     showReport(results,params,rows.length?rows.length+' open lots as of '+(params.year==='0'?'the latest available transaction':params.year+' year-end')+'.':'No open tax lots for this account as of the selected year-end.',Boolean(rows.length));
     return;
