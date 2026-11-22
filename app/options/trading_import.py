@@ -305,12 +305,15 @@ def tax_lot_rows(db, account, year, open_only=False):
             break
         if not symbol or quantity in (None, ""):
             continue
-        expired = bool(re.search(r"\b(expired|expiration)\b", action or "", re.I))
-        if not expired and not re.search(r"\b(buy|bought|sell|sold|sale|purchase|purchased|reinvest\w*)\b", action or "", re.I):
-            continue
         is_option = bool(re.search(r"\d{6}[CP]\d", f"{symbol} {description or ''}", re.I)
                          or re.search(r"\b(call|put)\b", description or "", re.I))
         security = symbol.strip().upper()
+        is_call = bool(re.search(r"\d{6}C\d", f"{security} {description or ''}", re.I)
+                       or re.search(r"\bcall\b", description or "", re.I))
+        expired = bool(re.search(r"\b(expired|expiration)\b", action or "", re.I))
+        assigned_call = bool(open_only and is_call and re.search(r"\b(assigned|assignment)\b", action or "", re.I))
+        if not (expired or assigned_call) and not re.search(r"\b(buy|bought|sell|sold|sale|purchase|purchased|reinvest\w*)\b", action or "", re.I):
+            continue
         try:
             qty = abs(Decimal(str(quantity)))
             cash = abs(Decimal(str(amount))) if amount not in (None, "") else None
@@ -320,9 +323,11 @@ def tax_lot_rows(db, account, year, open_only=False):
             continue
         bought = bool(re.search(r"\b(buy|bought|purchase|purchased|reinvest\w*)\b", action or "", re.I))
         lots = inventory.setdefault(security, [])
-        if expired:
+        if expired or assigned_call:
             remaining = qty
             for lot in list(lots):
+                if assigned_call and lot["side"] != "short":
+                    continue
                 matched = min(remaining, lot["qty"])
                 if matched <= 0:
                     continue
@@ -332,7 +337,7 @@ def tax_lot_rows(db, account, year, open_only=False):
                 else:
                     proceeds = lot["value"] * matched / lot["qty"] if lot["value"] is not None else None
                     basis = Decimal(0)
-                if not open_only and (not year or day[:4] == str(year)):
+                if not open_only and not assigned_call and (not year or day[:4] == str(year)):
                     completed.append({"description": f"{matched.normalize():f} {'contract' if lot['option'] else 'share'}{'s' if matched != 1 else ''} {security}",
                                       "ticker": tax_lot_ticker(security), "is_option": lot["option"] or security.startswith("-"), "acquired": lot["date"], "sold": day,
                                       "proceeds": str(proceeds.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)) if proceeds is not None else None,
@@ -376,13 +381,24 @@ def tax_lot_rows(db, account, year, open_only=False):
         if remaining > 0:
             opened_cash = cash * remaining / qty if cash is not None else None
             lots.append({"date": day, "qty": remaining, "value": opened_cash,
-                         "side": "long" if bought else "short", "option": is_option})
+                         "side": "long" if bought else "short", "option": is_option, "call": is_call})
     if open_only:
         as_of = f"{year}-12-31" if year else (day if 'day' in locals() else "")
+        as_of_date = datetime.strptime(as_of, "%Y-%m-%d").date() if as_of else None
         result = []
         for security, open_lots in inventory.items():
             ticker = tax_lot_ticker(security)
             for lot in open_lots:
+                # Calls whose OCC expiration date has passed are no longer open
+                # positions, even when the broker omits a separate expiry row.
+                expiration = re.search(r"(\d{6})C\d", security)
+                if lot.get("call") and expiration and as_of_date:
+                    try:
+                        expiration_date = datetime.strptime("20" + expiration.group(1), "%Y%m%d").date()
+                    except ValueError:
+                        expiration_date = None
+                    if expiration_date and expiration_date <= as_of_date:
+                        continue
                 qty, value = lot["qty"], lot["value"]
                 amount_value = str(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)) if value is not None else None
                 unit_value = str((value / qty).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)) if value is not None and qty else None
