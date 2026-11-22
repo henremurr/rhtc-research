@@ -366,6 +366,40 @@ def build_cash_activity_report(broker, account, groups, title=""):
     def money(value):
         return "—" if value is None else f"${Decimal(value):,.2f}"
 
+    if groups:
+        summary_style = ParagraphStyle(
+            "CashActivitySummaryHeading", fontName="Helvetica-Bold", fontSize=12,
+            leading=15, textColor=ink, spaceAfter=5,
+        )
+        summary_rows = [["Activity type", "Transactions", "Net amount"]]
+        valid_subtotals = []
+        for group in groups:
+            subtotal = group.get("subtotal")
+            if subtotal is not None:
+                valid_subtotals.append(Decimal(str(subtotal)))
+            summary_rows.append([
+                group["type"], str(len(group["rows"])), money(subtotal),
+            ])
+        total = sum(valid_subtotals, Decimal("0.00")) if len(valid_subtotals) == len(groups) else None
+        summary_rows.append(["Net total", str(sum(len(group["rows"]) for group in groups)), money(total)])
+        summary = Table(summary_rows, colWidths=[365, 100, 130], hAlign="LEFT", repeatRows=1)
+        summary.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), ink),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+            ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#F0F2F3")),
+            ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
+            ("LINEBELOW", (0, 0), (-1, 0), 1, gold),
+            ("LINEABOVE", (0, -1), (-1, -1), 1, gold),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        story.extend([Paragraph("Cash activity summary", summary_style), summary, Spacer(1, 10)])
+
     for group in groups:
         story.append(Paragraph(escape(group["type"]), heading))
         rows = [["Date", "Transaction", "Ticker", "Description", "Amount"]]
