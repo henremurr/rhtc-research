@@ -3620,16 +3620,21 @@ async def create_ticker_report_pdf(data: TickerReportPdfInput):
         "RHTCTableCell", parent=body_style, fontSize=8.1,
         leading=10.2, textColor=ink, spaceAfter=0, wordWrap="CJK",
     )
-    story = [
-        Paragraph("COMPREHENSIVE TICKER REPORT  ·  " + xml_escape(symbol), cover_style),
-        HRFlowable(width="100%", thickness=2, color=gold, spaceAfter=12),
+    is_earnings_calendar = data.title.strip().casefold() == "earnings calendar"
+    story = []
+    if not is_earnings_calendar:
+        story.extend([
+            Paragraph("COMPREHENSIVE TICKER REPORT  ·  " + xml_escape(symbol), cover_style),
+            HRFlowable(width="100%", thickness=2, color=gold, spaceAfter=12),
+        ])
+    story.extend([
         Paragraph(xml_escape(data.title), title_style),
         Paragraph(
             "Prepared " + xml_escape(data.generated_at or datetime.now().astimezone().strftime("%b %d, %Y %I:%M %p %Z"))
             + "  ·  RHTC Three Peaks Research",
             meta_style,
         ),
-    ]
+    ])
 
     quote_fields = [
         "Call bid / ask", "Open interest / volume", "Bid / ask size",
@@ -3791,7 +3796,8 @@ async def create_ticker_report_pdf(data: TickerReportPdfInput):
             render_plain(trailing, section_title)
 
     for section in data.sections:
-        story.append(Paragraph(xml_escape(section.title), section_style))
+        if not (is_earnings_calendar and section.title.strip().casefold() == "upcoming earnings"):
+            story.append(Paragraph(xml_escape(section.title), section_style))
         body = section.text.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\r", "\n")
         body = body.replace("\r\n", "\n").replace("\r", "\n").strip()
         if not body:
@@ -3812,6 +3818,18 @@ async def create_ticker_report_pdf(data: TickerReportPdfInput):
         canvas.setFillColor(muted)
         canvas.setFont("Helvetica-Bold", 7)
         canvas.drawRightString(page_width - document.rightMargin, logo_y + 0.13 * inch, symbol)
+        if document.page > 1:
+            repeated_title = data.title.translate(str.maketrans({
+                "\u2212": "-", "\u2010": "-", "\u2011": "-",
+                "\u2012": "-", "\u2013": "-", "\u2014": "-",
+            })).encode("cp1252", "replace").decode("cp1252")
+            title_size = 8
+            available_width = page_width - document.leftMargin - document.rightMargin
+            while title_size > 6 and canvas.stringWidth(repeated_title, "Helvetica-Bold", title_size) > available_width:
+                title_size -= 0.5
+            canvas.setFillColor(dark_gold)
+            canvas.setFont("Helvetica-Bold", title_size)
+            canvas.drawString(document.leftMargin, page_height - 0.55 * inch, repeated_title)
         canvas.setStrokeColor(gold)
         canvas.setLineWidth(1.1)
         canvas.line(document.leftMargin, page_height - 0.61 * inch, page_width - document.rightMargin, page_height - 0.61 * inch)
