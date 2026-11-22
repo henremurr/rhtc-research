@@ -415,7 +415,7 @@ def tax_lot_rows(db, account, year, open_only=False):
             qty = group["quantity"]
             value = group["amount"] if group["known"] else None
             amount_value = str(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)) if value is not None else None
-            unit_value = str((value / qty).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)) if value is not None and qty else None
+            unit_value = str((value / (qty * 100 if is_option else qty)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)) if value is not None and qty else None
             result.append({"description": f"{format(qty.normalize(), ',f')} {'contract' if is_option else 'share'}{'s' if qty != 1 else ''} {security}",
                            "ticker": ticker, "side": side, "acquired": acquired,
                            "quantity": format(qty.normalize(), "f"), "amount": amount_value,
