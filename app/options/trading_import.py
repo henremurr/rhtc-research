@@ -414,12 +414,13 @@ def tax_lot_rows(db, account, year, open_only=False):
         for (ticker, acquired, security, side, is_option), group in grouped.items():
             qty = group["quantity"]
             value = group["amount"] if group["known"] else None
-            amount_value = str(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)) if value is not None else None
-            unit_value = str((value / (qty * 100 if is_option else qty)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)) if value is not None and qty else None
+            display_value = -value if value is not None and not is_option and side == "long" else value
+            amount_value = str(display_value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)) if display_value is not None else None
+            unit_value = str((display_value / (qty * 100 if is_option else qty)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)) if display_value is not None and qty else None
             result.append({"description": f"{format(qty.normalize(), ',f')} {'contract' if is_option else 'share'}{'s' if qty != 1 else ''} {security}",
                            "ticker": ticker, "side": side, "acquired": acquired,
                            "quantity": format(qty.normalize(), "f"), "amount": amount_value,
-                           "unit_amount": unit_value, "amount_type": "Basis" if side == "long" else "Proceeds",
+                           "unit_amount": unit_value, "amount_type": "Premium" if is_option else ("Cost" if side == "long" else "Proceeds"),
                            "term": holding_term(acquired, as_of) if as_of else "short"})
         return sorted(result, key=lambda row: (row["ticker"], 0 if " share" in row["description"] else 1, row["acquired"], row["description"]))
     return sorted(completed, key=lambda row: (row["sold"], row["description"], row["acquired"]))
