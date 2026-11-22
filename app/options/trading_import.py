@@ -385,7 +385,7 @@ def tax_lot_rows(db, account, year, open_only=False):
     if open_only:
         as_of = f"{year}-12-31" if year else (day if 'day' in locals() else "")
         as_of_date = datetime.strptime(as_of, "%Y-%m-%d").date() if as_of else None
-        result = []
+        grouped = {}
         for security, open_lots in inventory.items():
             ticker = tax_lot_ticker(security)
             if ticker == "FCASH":
@@ -393,7 +393,7 @@ def tax_lot_rows(db, account, year, open_only=False):
             for lot in open_lots:
                 # Calls whose OCC expiration date has passed are no longer open
                 # positions, even when the broker omits a separate expiry row.
-                expiration = re.search(r"(\d{6})C\d", security)
+                expiration = re.search(r"(\\d{6})C\\d", security)
                 if lot.get("call") and expiration and as_of_date:
                     try:
                         expiration_date = datetime.strptime("20" + expiration.group(1), "%Y%m%d").date()
@@ -401,15 +401,27 @@ def tax_lot_rows(db, account, year, open_only=False):
                         expiration_date = None
                     if expiration_date and expiration_date <= as_of_date:
                         continue
-                qty, value = lot["qty"], lot["value"]
-                amount_value = str(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)) if value is not None else None
-                unit_value = str((value / qty).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)) if value is not None and qty else None
-                result.append({"description": f"{qty.normalize():f} {'contract' if lot['option'] else 'share'}{'s' if qty != 1 else ''} {security}",
-                               "ticker": ticker, "side": lot["side"], "acquired": lot["date"],
-                               "quantity": format(qty.normalize(), "f"), "amount": amount_value,
-                               "unit_amount": unit_value, "amount_type": "Basis" if lot["side"] == "long" else "Proceeds",
-                               "term": holding_term(lot["date"], as_of) if as_of else "short"})
-        return sorted(result, key=lambda row: (row["ticker"], row["description"], row["acquired"]))
+                # Keep different option contracts separate, but consolidate
+                # same-security lots acquired on the same date.
+                key = (ticker, lot["date"], security, lot["side"], lot["option"])
+                group = grouped.setdefault(key, {"quantity": Decimal(0), "amount": Decimal(0), "known": True})
+                group["quantity"] += lot["qty"]
+                if lot["value"] is None:
+                    group["known"] = False
+                elif group["known"]:
+                    group["amount"] += lot["value"]
+        result = []
+        for (ticker, acquired, security, side, is_option), group in grouped.items():
+            qty = group["quantity"]
+            value = group["amount"] if group["known"] else None
+            amount_value = str(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)) if value is not None else None
+            unit_value = str((value / qty).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)) if value is not None and qty else None
+            result.append({"description": f"{format(qty.normalize(), ',f')} {'contract' if is_option else 'share'}{'s' if qty != 1 else ''} {security}",
+                           "ticker": ticker, "side": side, "acquired": acquired,
+                           "quantity": format(qty.normalize(), "f"), "amount": amount_value,
+                           "unit_amount": unit_value, "amount_type": "Basis" if side == "long" else "Proceeds",
+                           "term": holding_term(acquired, as_of) if as_of else "short"})
+        return sorted(result, key=lambda row: (row["ticker"], row["acquired"], row["description"]))
     return sorted(completed, key=lambda row: (row["sold"], row["description"], row["acquired"]))
 
 
