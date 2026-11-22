@@ -976,6 +976,7 @@ async def get_news(
     publication: str | None = None,
     topic: str | None = Query(default=None, max_length=120),
     relevance: str | None = Query(default=None, max_length=20),
+    story_range: str = Query(default="all", max_length=20),
 ):
     query = """SELECT url,title,source,published_at,snippet,peak,topic,relevance_score,youtube_series,first_seen_at,last_seen_at,youtube_published,youtube_video_id,youtube_url,youtube_published_at,youtube_privacy_status,x_published,x_post_id,x_post_url,x_published_at FROM news_items"""
     count_query = """SELECT
@@ -987,6 +988,19 @@ async def get_news(
         FROM news_items"""
     filters: list[str] = []
     params: list[Any] = []
+    # Use the publication date when available; otherwise the date first retrieved.
+    # Do not use last_seen_at: a rescan must not make an old article appear new.
+    today = now_pacific().date()
+    range_days = {"today": 1, "3d": 3, "7d": 7, "14d": 14, "30d": 30, "3m": 90, "6m": 180}
+    if story_range in range_days:
+        cutoff = today - timedelta(days=range_days[story_range] - 1)
+        filters.append("date(COALESCE(NULLIF(published_at, ''), first_seen_at)) >= date(?)")
+        params.append(cutoff.isoformat())
+    elif story_range == "year":
+        filters.append("date(COALESCE(NULLIF(published_at, ''), first_seen_at)) >= date(?)")
+        params.append(today.replace(month=1, day=1).isoformat())
+    elif story_range != "all":
+        raise HTTPException(400, "Choose a valid story range.")
     if peak and peak not in {"All", "All Peaks"}:
         filters.append("peak = ?")
         params.append(peak)
