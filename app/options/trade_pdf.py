@@ -314,33 +314,65 @@ def build_open_tax_lot_report(account, year, lots, title=""):
         return f"-${abs(amount):,.2f}" if amount < 0 else f"${amount:,.2f}"
 
     data = [["Ticker / security", "Side", "Date acquired", "Holding period", "Open quantity", "Cost/Premium", "Per unit"]]
-    totals = {"Cost": Decimal(0), "Premium": Decimal(0), "Proceeds": Decimal(0)}
+    subtotal_rows = []
+
+    def group_key(lot):
+        if lot.get("amount_type") in ("Cost", "Proceeds"):
+            return ("stock", lot["ticker"])
+        if lot.get("amount_type") == "Premium":
+            security = lot["description"].split(" ", 2)[-1]
+            return ("contract", lot["ticker"], security)
+        return None
+
+    def add_subtotal(group):
+        if group[0].get("amount_type") in ("Cost", "Proceeds"):
+            summary_lots = [lot for lot in group if lot.get("amount_type") == "Cost"]
+            if not summary_lots:
+                return
+            label = f"Total Long · {group[0]['ticker']}"
+            quantity = sum((Decimal(lot["quantity"]) for lot in summary_lots), Decimal(0))
+            amount = sum((Decimal(lot["amount"]) for lot in summary_lots if lot.get("amount") not in (None, "")), Decimal(0))
+            unit = amount / quantity if quantity else None
+        else:
+            summary_lots = [lot for lot in group if lot.get("amount_type") == "Premium" and lot.get("side") == "short"]
+            if not summary_lots:
+                return
+            security = summary_lots[0]["description"].split(" ", 2)[-1]
+            label = f"Total Short · {summary_lots[0]['ticker']} · {security}"
+            quantity = sum((Decimal(lot["quantity"]) for lot in summary_lots), Decimal(0))
+            amount = sum((Decimal(lot["amount"]) for lot in summary_lots if lot.get("amount") not in (None, "")), Decimal(0))
+            unit = amount / (quantity * 100) if quantity else None
+        data.append([Paragraph(escape(label), subtotal_style), "", "", "",
+                     format(quantity.normalize(), ",f"), money(amount), money(unit) if unit is not None else "—"])
+        subtotal_rows.append(len(data) - 1)
+
+    subtotal_style = ParagraphStyle("OpenTaxLotSubtotal", parent=body, fontName="Helvetica-Bold")
+    active_key = None
+    active_lots = []
     for lot in lots:
+        key = group_key(lot)
+        if key != active_key:
+            if active_lots:
+                add_subtotal(active_lots)
+            active_key, active_lots = key, []
         data.append([Paragraph(escape(lot["description"]), body), lot["side"].title(),
                      lot["acquired"], lot["term"].title(), lot["quantity"], money(lot["amount"]),
                      money(lot["unit_amount"])])
-        if lot.get("amount") not in (None, ""):
-            totals[lot["amount_type"]] += Decimal(lot["amount"])
-    long_shares = sum((Decimal(lot["quantity"]) for lot in lots if lot.get("amount_type") == "Cost"), Decimal(0))
-    short_contracts = sum((Decimal(lot["quantity"]) for lot in lots if lot.get("amount_type") == "Premium"), Decimal(0))
-    long_cost = totals["Cost"]
-    short_premium = totals["Premium"]
-    data.append(["Total Long", "", "", "", format(long_shares.normalize(), ",f"),
-                 money(long_cost), money(long_cost / long_shares) if long_shares else "—"])
-    data.append(["Total Short", "", "", "", format(short_contracts.normalize(), ",f"),
-                 money(short_premium), money(short_premium / (short_contracts * 100)) if short_contracts else "—"])
+        if key is not None:
+            active_lots.append(lot)
+    if active_lots:
+        add_subtotal(active_lots)
     table = LongTable(data, colWidths=[210, 60, 84, 80, 80, 100, 74], repeatRows=1,
                       hAlign="LEFT", splitInRow=1)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), ink), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 8),
         ("VALIGN", (0, 0), (-1, -1), "TOP"), ("ALIGN", (4, 1), (-1, -1), "RIGHT"),
-        ("LINEBELOW", (0, 0), (-1, 0), 1, gold), ("LINEBELOW", (0, 1), (-1, -2), .3, colors.HexColor("#D5DADD")),
-        ("LINEABOVE", (0, -2), (-1, -2), 1, gold), ("LINEABOVE", (0, -1), (-1, -1), .5, gold),
-        ("FONTNAME", (0, -2), (-1, -1), "Helvetica-Bold"),
+        ("LINEBELOW", (0, 0), (-1, 0), 1, gold), ("LINEBELOW", (0, 1), (-1, -1), .3, colors.HexColor("#D5DADD")),
         ("LEFTPADDING", (0, 0), (-1, -1), 5), ("RIGHTPADDING", (0, 0), (-1, -1), 5),
         ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-    ]))
+    ] + [("LINEABOVE", (0, row), (-1, row), .75, gold) for row in subtotal_rows]
+        + [("FONTNAME", (0, row), (-1, row), "Helvetica-Bold") for row in subtotal_rows]))
     doc.build([table], onFirstPage=decorate, onLaterPages=decorate)
     return output.getvalue()
 
