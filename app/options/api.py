@@ -3842,6 +3842,11 @@ async def get_earnings_report(
     eps_sign: str = Query(default="all", pattern="^(all|negative|nonnegative)$"),
 ):
     today = date.today()
+    holding_symbols = {
+        str(row.get("symbol") or "").strip().upper()
+        for row in read_watchlist()
+        if parse_number(row.get("quantity")) > 0
+    }
     with closing(connect_watchlist_db()) as connection:
         records = connection.execute(
             "SELECT symbol, next_json, updated_at FROM ticker_earnings WHERE next_json IS NOT NULL"
@@ -3855,7 +3860,9 @@ async def get_earnings_report(
             continue
         if event_date < today:
             continue
-        events.append({"symbol": record["symbol"], **event, "updated_at": record["updated_at"]})
+        symbol = str(record["symbol"] or "").strip().upper()
+        events.append({"symbol": symbol, **event, "updated_at": record["updated_at"],
+                       "is_holding": symbol in holding_symbols})
     total_before_filter = len(events)
     if eps_sign != "all":
         filtered_events = []

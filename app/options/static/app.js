@@ -316,7 +316,8 @@ async function showEarningsReport(){
       const positionCost=lastAvailable?'$'+(last*100).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}):'Unavailable';
       const ticker=String(event.symbol||'');
       const tickerButton='<button type="button" class="earnings-stock-quote-btn" data-stock-symbol="'+safe(ticker)+'" aria-label="Open stock quote for '+safe(ticker)+'" title="Open stock quote">'+safe(ticker)+'</button>';
-      return weekHeading+'<tr><td>'+safe(eventDate)+'</td><td data-label="Ticker">'+tickerButton+'</td><td data-label="EPS estimate" style="color:'+epsColor+'">'+safe(eps)+'</td><td data-label="Last">'+safe(lastText)+'</td><td data-label="100 shares">'+safe(positionCost)+'</td></tr>';
+      const holdingMarker=event.is_holding?'<span class="earnings-holding-marker"> (holding)</span>':'';
+      return weekHeading+'<tr><td>'+safe(eventDate)+'</td><td data-label="Ticker">'+tickerButton+holdingMarker+'</td><td data-label="EPS estimate" style="color:'+epsColor+'">'+safe(eps)+'</td><td data-label="Last">'+safe(lastText)+'</td><td data-label="100 shares">'+safe(positionCost)+'</td></tr>';
     }).join('');
   content.innerHTML=events.length?'<div class="earnings-report-table-wrap"><table class="earnings-report-table"><thead><tr><th>Next earnings</th><th>Ticker</th><th>EPS estimate</th><th>Last</th><th>100 shares</th></tr></thead><tbody>'+earningsRows+'</tbody></table></div>':'<p class="earnings-report-empty">No upcoming earnings have been saved yet. Run Analyze Stock on tickers to populate the report.</p>';
     const total=Number(data.total_before_filter)||events.length;
