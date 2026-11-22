@@ -310,7 +310,7 @@ def build_open_tax_lot_report(account, year, lots, title=""):
     def money(value):
         return f"${Decimal(value):,.2f}" if value not in (None, "") else "—"
 
-    data = [["Ticker / security", "Side", "Date acquired", "Holding period", "Open quantity", "Basis / proceeds", "Per unit"]]
+    data = [["Ticker / security", "Side", "Date acquired", "Holding period", "Open quantity", "Cost/Premium", "Per unit"]]
     totals = {"Basis": Decimal(0), "Proceeds": Decimal(0)}
     for lot in lots:
         data.append([Paragraph(escape(lot["description"]), body), lot["side"].title(),
