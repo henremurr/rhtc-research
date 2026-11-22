@@ -3664,8 +3664,12 @@ async def create_ticker_report_pdf(data: TickerReportPdfInput):
         width_count = max(len(row) for row in normalized)
         normalized = [row + [""] * (width_count - len(row)) for row in normalized]
         cell_data = []
+        grouped_rows = []
         for row_index, row in enumerate(normalized):
             style = table_header_style if header and row_index == 0 else table_cell_style
+            if row[0].startswith("@@RHTC_GROUP@@"):
+                grouped_rows.append(row_index)
+                row[0] = row[0][len("@@RHTC_GROUP@@"):]
             cell_data.append([paragraph(str(cell), style) for cell in row])
         table = Table(
             cell_data, colWidths=[(letter[0] - left - right) / width_count] * width_count,
@@ -3691,6 +3695,14 @@ async def create_ticker_report_pdf(data: TickerReportPdfInput):
             for row_index in range(len(normalized)):
                 if row_index % 2:
                     commands.append(("BACKGROUND", (0, row_index), (-1, row_index), pale_ink))
+        for row_index in grouped_rows:
+            commands.extend([
+                ("SPAN", (0, row_index), (-1, row_index)),
+                ("BACKGROUND", (0, row_index), (-1, row_index), pale_ink),
+                ("LINEABOVE", (0, row_index), (-1, row_index), 1.1, gold),
+                ("TEXTCOLOR", (0, row_index), (-1, row_index), dark_gold),
+                ("FONTNAME", (0, row_index), (-1, row_index), "Helvetica-Bold"),
+            ])
         table.setStyle(TableStyle(commands))
         story.extend([Spacer(1, 3), table, Spacer(1, 7)])
 

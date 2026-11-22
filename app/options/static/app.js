@@ -288,10 +288,24 @@ async function showEarningsReport(){
     const response=await fetch('/options/api/earnings-report?'+params.toString(),{credentials:'same-origin',cache:'no-store'});
     const data=await response.json();
     if(!response.ok)throw Error(data.detail||'Could not load the earnings report.');
-    const events=Array.isArray(data.events)?data.events:[];
+    const events=(Array.isArray(data.events)?data.events:[]).slice().sort((a,b)=>String(a.date||'').localeCompare(String(b.date||''))||String(a.symbol||'').localeCompare(String(b.symbol||'')));
     $('#earnings-report-meta').textContent='Future scheduled dates · as of '+(data.as_of||new Date().toISOString().slice(0,10));
     content.onclick=event=>{const button=event.target.closest('[data-stock-symbol]');if(button)viewChain(button.dataset.stockSymbol)};
-  content.innerHTML=events.length?'<div class="earnings-report-table-wrap"><table class="earnings-report-table"><thead><tr><th>Next earnings</th><th>Ticker</th><th>EPS estimate</th><th>Last</th><th>100 shares</th></tr></thead><tbody>'+events.map(event=>{
+  const groupedEvents=[];
+  for(const event of events){
+    const date=event.date?new Date(event.date+'T00:00:00Z'):null;
+    if(!date||Number.isNaN(date.getTime())){groupedEvents.push({event,weekKey:'unknown',weekLabel:'Date unavailable'});continue}
+    const monday=new Date(date);const day=(monday.getUTCDay()+6)%7;monday.setUTCDate(monday.getUTCDate()-day);
+    const sunday=new Date(monday);sunday.setUTCDate(sunday.getUTCDate()+6);
+    const fmt=(value,options)=>value.toLocaleDateString('en-US',{...options,timeZone:'UTC'});
+    const startMonth=fmt(monday,{month:'short'}),endMonth=fmt(sunday,{month:'short'});
+    const range=startMonth===endMonth?startMonth+' '+monday.getUTCDate()+'–'+sunday.getUTCDate():startMonth+' '+monday.getUTCDate()+'–'+endMonth+' '+sunday.getUTCDate();
+    groupedEvents.push({event,weekKey:monday.toISOString().slice(0,10),weekLabel:'Week of '+range+', '+monday.getUTCFullYear()});
+  }
+  const earningsRows=groupedEvents.map((group,index)=>{
+      const event=group.event;
+      const prior=groupedEvents[index-1];
+      const weekHeading=!prior||prior.weekKey!==group.weekKey?'<tr class="earnings-week-heading" data-report-group="week"><th colspan="5" scope="rowgroup">'+safe(group.weekLabel)+'</th></tr>':'';
       const eventDate=event.date?new Date(event.date+'T00:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',timeZone:'UTC'}):'—';
       const epsValue=Number(event.eps_estimate);
       const epsAvailable=event.eps_estimate!==null&&event.eps_estimate!==undefined&&Number.isFinite(epsValue);
@@ -302,8 +316,9 @@ async function showEarningsReport(){
       const positionCost=lastAvailable?'$'+(last*100).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}):'Unavailable';
       const ticker=String(event.symbol||'');
       const tickerButton='<button type="button" class="earnings-stock-quote-btn" data-stock-symbol="'+safe(ticker)+'" aria-label="Open stock quote for '+safe(ticker)+'" title="Open stock quote">'+safe(ticker)+'</button>';
-      return '<tr><td>'+safe(eventDate)+'</td><td data-label="Ticker">'+tickerButton+'</td><td data-label="EPS estimate" style="color:'+epsColor+'">'+safe(eps)+'</td><td data-label="Last">'+safe(lastText)+'</td><td data-label="100 shares">'+safe(positionCost)+'</td></tr>';
-    }).join('')+'</tbody></table></div>':'<p class="earnings-report-empty">No upcoming earnings have been saved yet. Run Analyze Stock on tickers to populate the report.</p>';
+      return weekHeading+'<tr><td>'+safe(eventDate)+'</td><td data-label="Ticker">'+tickerButton+'</td><td data-label="EPS estimate" style="color:'+epsColor+'">'+safe(eps)+'</td><td data-label="Last">'+safe(lastText)+'</td><td data-label="100 shares">'+safe(positionCost)+'</td></tr>';
+    }).join('');
+  content.innerHTML=events.length?'<div class="earnings-report-table-wrap"><table class="earnings-report-table"><thead><tr><th>Next earnings</th><th>Ticker</th><th>EPS estimate</th><th>Last</th><th>100 shares</th></tr></thead><tbody>'+earningsRows+'</tbody></table></div>':'<p class="earnings-report-empty">No upcoming earnings have been saved yet. Run Analyze Stock on tickers to populate the report.</p>';
     const total=Number(data.total_before_filter)||events.length;
     const investmentText=Number.isFinite(investment)&&investment>0?' fitting '+formatMaxSpend(investment)+' for 100 shares':'';
     const epsText=epsSign==='negative'?' · negative EPS':epsSign==='nonnegative'?' · EPS not negative':'';
@@ -636,7 +651,11 @@ function reportHtmlToText(markup){
     const tag=node.tagName;
     if(tag==='BR')return '\n';
     if(tag==='TABLE'){
-      const rows=Array.from(node.querySelectorAll('tr')).map(tr=>Array.from(tr.children).map(cell=>(cell.innerText||cell.textContent||'').replace(/\s+/g,' ').trim()).join('\t')).filter(row=>row.replace(/\t/g,'').trim());
+      const rows=Array.from(node.querySelectorAll('tr')).map(tr=>{
+        const cells=Array.from(tr.children).map(cell=>(cell.innerText||cell.textContent||'').replace(/\s+/g,' ').trim());
+        if(tr.dataset.reportGroup==='week')cells[0]='@@RHTC_GROUP@@'+(cells[0]||'');
+        return cells.join('\t');
+      }).filter(row=>row.replace(/\t/g,'').trim());
       if(!rows.length)return '';
       const firstRow=node.querySelector('tr');
       const hasHeader=!!(firstRow&&firstRow.querySelector('th'));
