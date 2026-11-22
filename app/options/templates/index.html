@@ -268,4 +268,307 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
  }
  broker.addEventListener('change',cashAccounts);
  account.addEventListener('change',()=>{if(isCash()){clear();updatePreviewButton();}else years();});for(const field of [year,tickerInput])field.addEventListener('change',()=>{clear();updatePreviewButton();});
- async function request(query){const response=await fetch('/options/api/'+reportRoute()+query,{cache:'no-store'});if(!response.ok)throw Error(response.st
+ async function request(query){const response=await fetch('/options/api/'+reportRoute()+query,{cache:'no-store'});if(!response.ok)throw Error(response.status===401?'Sign in again to view trades.':'Unable to load transaction history.');return response.json();}
+ async function openReport(mode,title){
+  reportMode=mode;get('trade-title').textContent=title;
+  get('trade-broker-filter').hidden=!isCash();broker.required=isCash();broker.replaceChildren();
+  get('trade-year-filter').hidden=isCash();year.required=!isCash();
+  get('trade-ticker-filter').hidden=reportMode!=='ticker-tax';tickerInput.required=reportMode==='ticker-tax';tickerInput.value='';
+  get('guide-menu').hidden=true;get('guide-menu-toggle').setAttribute('aria-expanded','false');
+  dialog.showModal();clear();account.replaceChildren();year.replaceChildren();periods=[];updatePreviewButton();const next=sequence;status.textContent='Loading accounts…';
+  try{const data=await request('');if(next!==sequence)return;periods=isCash()?data.accounts:data.periods;
+   const choices=[...new Set(periods.map(p=>p[0]))].map(value=>new Option(value,value));
+   if(isCash()){broker.replaceChildren(...choices);cashAccounts();}
+   else{account.replaceChildren(...choices);years();}
+   status.textContent=periods.length?'Select your filters, then choose Preview report.':'Import trading history to view a report.';}catch(e){if(next===sequence)status.textContent=e.message;}
+ }
+ get('open-trade-report').addEventListener('click',event=>openReport('trade',event.currentTarget.textContent.trim()));
+ get('open-tax-lot-report').addEventListener('click',event=>openReport('tax',event.currentTarget.textContent.trim()));
+ get('open-weekly-income-detail').addEventListener('click',event=>openReport('weekly-detail',event.currentTarget.textContent.trim()));
+ get('open-weekly-income-report').addEventListener('click',event=>openReport('weekly-income',event.currentTarget.textContent.trim()));
+ get('open-ticker-tax-lot-report').addEventListener('click',event=>openReport('ticker-tax',event.currentTarget.textContent.trim()));
+ get('open-open-tax-lot-report').addEventListener('click',event=>openReport('open-tax',event.currentTarget.textContent.trim()));
+ get('open-cash-activity-report').addEventListener('click',event=>openReport('cash',event.currentTarget.textContent.trim()));
+ const preview=get('trade-preview'),expand=get('preview-expand'),pages=get('preview-pages');
+ const printButton=get('preview-print'),printStatus=get('preview-print-status');
+ const previewDownload=get('preview-download');
+ const appleMobile=/iPad|iPhone|iPod/.test(navigator.userAgent)||
+   (navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+ const canShareFiles=Boolean(navigator.share&&navigator.canShare);
+ const combinedPdfAction=appleMobile||(canShareFiles&&!window.showSaveFilePicker);
+ if(combinedPdfAction){
+   printButton.hidden=true;
+   previewDownload.textContent='Print or save PDF';
+ }
+ let printRequest,printFile;
+ function pdfFilename(){if(isCash())return 'RHTC_Cash_Activity_Report.pdf';return (reportMode==='trade'?'RHTC_Trade_Report_':reportMode==='open-tax'?'RHTC_Open_Tax_Lots_':isWeekly()?(reportMode==='weekly-detail'?'RHTC_Weekly_Income_Detail_Report_':'RHTC_Weekly_Income_Summary_Report_'):'RHTC_Form_8949_')+(year.value==='0'?'Latest':year.value)+(reportMode==='ticker-tax'?'_'+tickerInput.value.trim().toUpperCase():'')+'.pdf';}
+ async function fetchPdf(url,signal){
+   const response=await fetch(url,{signal,cache:'no-store'});
+   if(!response.ok||!response.headers.get('Content-Type')?.includes('application/pdf'))throw Error('PDF unavailable');
+   return response.blob();
+ }
+ async function preparePrintFile(url){
+   const request=new AbortController();
+   printRequest=request;
+   try{
+     const blob=await fetchPdf(url,request.signal);
+     if(!request.signal.aborted)printFile=new File([blob],pdfFilename(),{type:'application/pdf'});
+   }catch{
+     // The download link remains available if preparing the shareable file fails.
+   }finally{
+     if(!request.signal.aborted){
+       printRequest=undefined;
+     }
+   }
+ }
+ async function savePdf(event){
+   const url=event.currentTarget.href;
+   const feedback=printStatus;
+   if(!combinedPdfAction&&window.showSaveFilePicker){
+     event.preventDefault();
+     try{
+       const handle=await window.showSaveFilePicker({
+         suggestedName:pdfFilename(),
+         types:[{description:'PDF document',accept:{'application/pdf':['.pdf']}}]
+       });
+       const blob=printFile||await fetchPdf(url);
+       const writer=await handle.createWritable();
+       await writer.write(blob);
+       await writer.close();
+       feedback.textContent='PDF saved.';
+     }catch(error){
+       if(error.name!=='AbortError')feedback.textContent='Could not save the PDF. Please try again.';
+     }
+     return;
+   }
+   if(printFile&&navigator.canShare?.({files:[printFile]})){
+     event.preventDefault();
+     feedback.textContent='Choose Print or Save to Files.';
+     try{await navigator.share({files:[printFile]});}
+     catch(error){
+       if(error.name!=='AbortError')feedback.textContent='Could not open PDF options. Please try again.';
+     }
+   }else if(printRequest&&!printRequest.signal.aborted){
+     event.preventDefault();
+     feedback.textContent='Preparing the PDF. Try again in a moment.';
+   }
+ }
+ previewDownload.onclick=savePdf;
+ function expanded(active){
+   preview.classList.toggle('expanded',active);
+   expand.textContent=active?'Exit full screen':'Full screen';
+   expand.setAttribute('aria-pressed',String(active));
+ }
+ expand.onclick=()=>expanded(!preview.classList.contains('expanded'));
+ printButton.onclick=()=>window.print();
+ function closePreview(){
+   preview.close();
+   dialog.showModal();
+   get('trade-preview-open').focus();
+ }
+ get('preview-close').onclick=closePreview;
+ preview.addEventListener('cancel',event=>{event.preventDefault();closePreview();});
+ get('preview-return').onclick=()=>{preview.close();clear();get('guide-menu-toggle').focus();};
+ preview.addEventListener('close',()=>{
+   printStatus.textContent='';
+   expanded(false);pages.replaceChildren();pages.hidden=true;
+ });
+ get('trade-close').onclick=()=>{dialog.close();get('guide-menu-toggle').focus();};dialog.addEventListener('close',()=>{if(!preview.open&&!dialog.open)clear();});
+ get('trade-filters').onsubmit=async e=>{
+  e.preventDefault();
+  if(previewButton.disabled)return;
+  clear();
+  const next=sequence;
+  const results=document.createElement('div');
+  previewButton.disabled=true;
+  status.textContent='Loading report…';
+  try{const params=isCash()?{account:account.value,broker:broker.value}:{account:account.value,year:year.value};
+   if(isWeekly())params.weekly_income='true';
+   if(reportMode==='weekly-detail')params.weekly_detail='true';
+   if(reportMode==='ticker-tax')params.ticker=tickerInput.value.trim().toUpperCase();
+   const data=await request('?'+new URLSearchParams(params));if(next!==sequence||!dialog.open)return;
+   if(isCash()){
+    const labels=['Date','Transaction','Ticker','Description','Amount'];
+    const dollars=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'});
+    for(const group of data.groups){
+     const heading=document.createElement('h3');heading.textContent=group.type;
+     const wrap=document.createElement('div');wrap.style.overflowX='auto';
+     const table=document.createElement('table');table.className='cash-activity-columns';
+     const head=table.createTHead().insertRow();
+     for(const label of labels){const th=document.createElement('th');th.scope='col';th.textContent=label;head.append(th);}
+     const body=table.createTBody();
+     for(const entry of group.rows){
+      const row=body.insertRow();
+      [entry.date,entry.action,entry.symbol,entry.description,entry.amount===null?'—':dollars.format(Number(entry.amount))].forEach((value,index)=>{
+       const cell=row.insertCell();cell.dataset.label=labels[index];cell.textContent=value||'—';
+      });
+     }
+     const footer=table.createTFoot().insertRow();
+     const label=document.createElement('th');label.colSpan=4;label.scope='row';label.textContent='Subtotal';
+     footer.append(label);footer.insertCell().textContent=dollars.format(Number(group.subtotal));
+     wrap.append(table);results.append(heading,wrap);
+    }
+    showReport(results,params,data.groups.length?'Activity grouped by type, oldest date first.':'No cash activity for this account.',Boolean(data.groups.length));
+    return;
+   }
+   if(reportMode==='open-tax'){
+    const rows=data.lots||[],labels=['Ticker / security','Side','Date acquired','Holding period','Open quantity','Basis / proceeds','Per unit'];
+    const dollars=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'});
+    if(rows.length){
+     const wrap=document.createElement('div');wrap.style.overflowX='auto';
+     const table=document.createElement('table');table.className='open-lot-columns';table.style.cssText='width:100%;min-width:760px;text-align:left;border-spacing:8px';wrap.append(table);results.append(wrap);
+     const head=table.createTHead().insertRow();for(const label of labels){const th=document.createElement('th');th.textContent=label;head.append(th);}
+     const body=table.createTBody();
+     for(const lot of rows){const row=body.insertRow();const values=[lot.ticker+' · '+lot.description,lot.side,lot.acquired,lot.term,lot.quantity,lot.amount,lot.unit_amount];values.forEach((value,index)=>{const cell=row.insertCell();cell.dataset.label=labels[index];cell.textContent=value==null||value===''?'—':index===5||index===6?dollars.format(Number(value)):value;if(index>=4)cell.style.textAlign='right';});}
+     const footer=table.createTFoot().insertRow(),label=footer.insertCell();label.colSpan=5;label.textContent='Open lot totals';label.style.fontWeight='700';
+     const basis=rows.filter(lot=>lot.amount_type==='Basis').reduce((sum,lot)=>sum+(Number(lot.amount)||0),0),proceeds=rows.filter(lot=>lot.amount_type==='Proceeds').reduce((sum,lot)=>sum+(Number(lot.amount)||0),0);
+     const total=footer.insertCell();total.textContent='Basis '+dollars.format(basis)+' · Proceeds '+dollars.format(proceeds);total.style.textAlign='right';total.style.fontWeight='700';footer.insertCell();
+    }
+    showReport(results,params,rows.length?rows.length+' open lots as of '+(params.year==='0'?'the latest available transaction':params.year+' year-end')+'.':'No open tax lots for this account as of the selected year-end.',Boolean(rows.length));
+    return;
+   }
+   if(isWeekly()){
+    const weeks=data.weeks||[];
+    if(!weeks.length){showReport(results,params,'No completed tax lots for this account and tax year.',false);return;}
+    const dollars=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'});
+    const wrap=document.createElement('div');
+    wrap.style.overflowX='auto';
+    const table=document.createElement('table');
+    table.style.cssText='width:100%;min-width:540px;text-align:left';
+    const header=table.createTHead().insertRow();
+    const labels=['Week','Date range','Closed lots','Proceeds','Cost basis','Net gain/loss'];
+    labels.forEach((label,index)=>{
+     const cell=document.createElement('th');
+     cell.textContent=label;
+     if(index>=2)cell.style.textAlign='right';
+     header.append(cell);
+    });
+    const body=table.createTBody();
+    for(const week of weeks){
+     const row=body.insertRow();
+     const amounts=['proceeds','basis','gain'].map(key=>week[key]==null?'—':dollars.format(Number(week[key])));
+     [week.week,week.dates,week.count,...amounts].forEach((value,index)=>{
+      const cell=row.insertCell();
+      cell.dataset.label=labels[index];
+      cell.textContent=value;
+      if(index>=2)cell.style.textAlign='right';
+     });
+    }
+    const footer=table.createTFoot().insertRow();
+    const totalLabel=document.createElement('th');
+    totalLabel.scope='row';
+    totalLabel.colSpan=2;
+    totalLabel.textContent='Total';
+    footer.append(totalLabel);
+    const totals=data.totals;
+    const amounts=['proceeds','basis','gain'].map(key=>totals[key]==null?'—':dollars.format(Number(totals[key])));
+    [totals.count,...amounts].forEach((value,index)=>{
+     const cell=footer.insertCell();
+     cell.dataset.label=labels[index+2];
+     cell.textContent=value;
+     cell.style.textAlign='right';
+    });
+    for(const cell of footer.cells){
+     cell.style.fontWeight='700';
+     cell.style.borderTop='2px solid #c6a45c';
+    }
+    wrap.append(table);
+    results.append(wrap);
+    if(reportMode==='weekly-detail'){
+     const columns=['Description','Acquired','Sold','Proceeds','Cost basis','Code','Adjustment','Net gain/loss'];
+     for(const week of weeks){
+      if(!week.lots?.length)continue;
+      const heading=document.createElement('h3');
+      heading.textContent='Week '+week.week+' · '+week.dates+' · Net gain/loss '+(week.gain==null?'—':dollars.format(Number(week.gain)));
+      const container=document.createElement('div');
+      container.style.overflowX='auto';
+      const detail=document.createElement('table');
+      detail.style.cssText='width:100%;min-width:760px';
+      const header=detail.createTHead().insertRow();
+      columns.forEach((label,index)=>{
+       const cell=document.createElement('th');
+       cell.textContent=label;
+       if(index>=3 && index!==5)cell.style.textAlign='right';
+       header.append(cell);
+      });
+      const lotBody=detail.createTBody();
+      const addLotRow=(lot,subtotal=false)=>{
+       const row=lotBody.insertRow();
+       if(subtotal)row.className='weekly-ticker-subtotal';
+       ['description','acquired','sold','proceeds','basis','code','adjustment','gain'].forEach((key,index)=>{
+        const cell=row.insertCell();
+        const numeric=index>=3 && index!==5;
+        cell.dataset.label=columns[index];
+        cell.textContent=lot[key]==null||lot[key]===''?'—':numeric?dollars.format(Number(lot[key])):lot[key];
+        if(numeric)cell.style.textAlign='right';
+       });
+      }
+      for(const group of week.ticker_groups){
+       group.lots.forEach(lot=>addLotRow(lot));
+       addLotRow({...group,description:(group.ticker||'Unknown ticker')+' subtotal'},true);
+      }
+      container.append(detail);
+      results.append(heading,container);
+     }
+    }
+    showReport(results,params,'Weeks 1–'+weeks.length+' by closing date · All tickers',true);
+    return;
+   }
+   if(reportMode!=='trade'){
+    const rows=data.lots||[],labels=['(a) Description','(b) Date acquired','(c) Date sold','(d) Proceeds','(e) Cost or other basis','(f) Code','(g) Adjustment','(h) Gain or loss'];
+    const dollars=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'});
+    const sections=[['short','Part I - Short-term transactions (held 1 year or less)'],['long','Part II - Long-term transactions (held more than 1 year)']];
+    for(const [term,titleText] of sections){const termRows=rows.filter(lot=>lot.term===term);if(!termRows.length)continue;const title=document.createElement('h3');title.textContent=titleText;results.append(title);const wrap=document.createElement('div');wrap.style.overflowX='auto';const table=document.createElement('table');table.className='tax-lot-columns';table.style.cssText='width:100%;min-width:850px;text-align:left;border-spacing:8px';wrap.append(table);results.append(wrap);const head=table.createTHead().insertRow();for(const label of labels){const th=document.createElement('th');th.textContent=label;head.append(th);}const body=table.createTBody();for(const [index,lot] of termRows.entries()){const tr=body.insertRow();const nextLot=termRows[index+1];if(nextLot&&lot.sold!==nextLot.sold)tr.classList.add('tax-date-divider');const values=[lot.description,lot.acquired,lot.sold,lot.proceeds,lot.basis,lot.code,lot.adjustment,lot.gain];values.forEach((value,i)=>{const td=tr.insertCell();td.dataset.label=labels[i];const blankField=(i===5||i===6)&&!value;const dateValue=(i===1||i===2)&&value?value.split('-').slice(1).concat(value.split('-')[0]).join('/'):value;td.textContent=blankField?'':value==null||value===''?'—':i===3||i===4||i===6||i===7?dollars.format(Number(value)):dateValue;if(i>=3&&i!==5)td.style.textAlign='right';});}}
+    if(rows.length){const heading=document.createElement('h3');heading.textContent='Capital gain/(loss) totals';results.append(heading);const wrap=document.createElement('div');wrap.style.overflowX='auto';const table=document.createElement('table');table.className='tax-total-columns';table.style.cssText='width:100%;min-width:560px;text-align:left;border-spacing:8px';wrap.append(table);results.append(wrap);const header=table.createTHead().insertRow();for(const label of ['Holding period','Proceeds','Cost or basis','Net gain/(loss)']){const th=document.createElement('th');th.textContent=label;header.append(th);}const body=table.createTBody();for(const [term,label] of [['short','Short-term'],['long','Long-term']]){const values=data.summary?.[term]||{};const tr=body.insertRow();const termCell=tr.insertCell();termCell.textContent=label;termCell.dataset.label='Holding period';for(const [key,column] of [['proceeds','Proceeds'],['basis','Cost or basis'],['gain','Net gain/(loss)']]){const td=tr.insertCell();td.dataset.label=column;td.style.textAlign='right';td.textContent=values[key]==null?'—':dollars.format(Number(values[key]));}}}
+    showReport(results,params,rows.length?rows.length+' completed tax lots. Matched FIFO using the full account history; open lots are omitted.':'No completed tax lots match the selected filters.',Boolean(rows.length));
+    return;
+   }
+   let count=0;for(const [ticker,rows] of Object.entries(data.groups)){
+    const title=document.createElement('h3');title.textContent=ticker+' ('+rows.length+')';results.append(title);
+    for(const line of data.summaries[ticker].filter(line=>line.endsWith(' | OPEN'))){const summary=document.createElement('p');summary.textContent=line;results.append(summary);}
+    const wrap=document.createElement('div');wrap.style.overflowX='auto';const table=document.createElement('table');table.className='transaction-columns';table.style.cssText='width:100%;min-width:620px;text-align:left;border-spacing:8px';wrap.append(table);results.append(wrap);
+    const header=table.createTHead().insertRow();for(const label of ['Date','Action','Security','Quantity','Price ($)','Amount ($)']){const th=document.createElement('th');th.textContent=label;header.append(th);}
+    const body = table.createTBody();
+    const dollars = new Intl.NumberFormat('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+    let totalCents = 0;
+    let amountCount = 0;
+    for (const values of rows) {
+      count++;
+      const row = body.insertRow();
+      const labels = ['Date','Action','Security','Quantity','Price ($)','Amount ($)'];
+      values.forEach((value, index) => {
+        const cell = row.insertCell();
+        cell.dataset.label = labels[index];
+        const missing = value == null || value === '';
+        const monetary = index === 4 || index === 5;
+        cell.textContent = missing ? '—' : monetary ? dollars.format(value) : value;
+        if (monetary) cell.style.textAlign = 'right';
+        if (index === 5 && !missing) {
+          const amount = Number(value);
+          totalCents += Math.sign(amount) * Math.round((Math.abs(amount) + Number.EPSILON) * 100);
+          amountCount++;
+        }
+      });
+    }
+    const subtotal = table.createTFoot().insertRow();
+    const label = document.createElement('th');
+    label.colSpan = 5;
+    label.scope = 'row';
+    label.textContent = ticker + ' net amount total ($)';
+    subtotal.append(label);
+    const total = subtotal.insertCell();
+    total.style.textAlign = 'right';
+    total.style.fontWeight = 'bold';
+    total.textContent = amountCount ? dollars.format(totalCents / 100) : '—';
+   }
+   showReport(results,params,count?count+' trades, oldest first within each ticker.':'No trades for this account and year.',Boolean(count));
+  }catch(error){
+   if(next===sequence&&dialog.open)status.textContent=error.message;
+  }finally{
+   if(next===sequence)updatePreviewButton();
+  }
+ };
+})();
+</script>
+</body>
+</html>

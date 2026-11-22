@@ -1644,4 +1644,555 @@ async function publishNewsStory(card,button){
     if(!mp3.size)throw Error('The MP3 file was empty.');
 
     stage='MP4 creation and YouTube upload';
-    status.textContent='M
+    status.textContent='MP3 ready. Creating the themed MP4 and uploading to YouTube as Public…';
+    const form=new FormData();
+    form.append('audio',mp3,'RHTC_'+podcastFileSlug(story.title)+'_YouTube.mp3');
+    form.append('title',videoTitle);
+    form.append('description',youtubeDescription(transcript,story,analysisData.citations||[],scriptData.validated_links||[]));
+    form.append('series',story.artwork_theme);
+    form.append('privacy_status','public');
+    form.append('story_url',story.url);
+    const uploadResponse=await fetch('/options/api/youtube/publish',{method:'POST',body:form});
+    if(!uploadResponse.ok)throw Error(await readApiError(uploadResponse,'YouTube upload failed.'));
+    const uploadData=await uploadResponse.json();
+    if(!uploadData.url||!uploadData.video_id)throw Error('YouTube did not return a confirmed video link.');
+    uploadSucceeded=true;
+    stage='Save YouTube publication status';
+    const publishedResponse=await fetch('/options/api/news/published',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:story.url,video_id:uploadData.video_id,video_url:uploadData.url,privacy_status:uploadData.privacy_status||'private'})});
+    if(!publishedResponse.ok)throw Error(await readApiError(publishedResponse,'The upload succeeded, but its status could not be saved to the feed.'));
+    const actualPrivacy=String(uploadData.privacy_status||'private').toLowerCase();
+    const check=card.querySelector('.news-workflow-check');
+    card.dataset.newsYoutubePublished='true';card.dataset.newsYoutubeUrl=uploadData.url;card.dataset.newsYoutubePrivacy=actualPrivacy;updateNewsPublishControl(card);
+    if(actualPrivacy==='public'||actualPrivacy==='unlisted'){
+      status.hidden=false;status.textContent='YouTube upload complete. Posting the RHTC video link to X…';
+      await publishNewsStoryToX(card,button);
+      if(card.dataset.newsXPublished==='true')toast('Published to YouTube and X.');
+    }else{
+      status.innerHTML='YouTube upload completed as '+safe(actualPrivacy)+'. Change the video to Public or Unlisted before X can link to it. <a href="'+safe(uploadData.url)+'" target="_blank" rel="noopener noreferrer">Open on YouTube</a>';
+      status.hidden=false;updateNewsPublishControl(card);
+    }
+  }catch(error){
+    if(stage==='MP4 creation and YouTube upload'||stage==='Save YouTube publication status'){
+      // The upload route records its video ID server-side before responding.
+      // Re-read that record before offering another upload; if it exists,
+      // resume the X step using the refreshed card instead of uploading twice.
+      try{
+        await loadNews({quiet:true});
+        const refreshed=[...document.querySelectorAll('.news-item')].find(item=>item.dataset.newsUrl===story.url);
+        if(refreshed?.dataset.newsYoutubePublished==='true'){
+          const refreshedButton=refreshed.querySelector('.news-publish-btn');
+          if(refreshed.dataset.newsXPublished!=='true'&&refreshedButton&&!refreshedButton.disabled){
+            await publishNewsStoryToX(refreshed,refreshedButton);
+          }else if(refreshed.dataset.newsXPublished==='true'){
+            toast('YouTube and X publication records confirmed.');
+          }
+          return;
+        }
+      }catch{}
+    }
+    status.textContent=stage+' failed: '+(error.message||'Try again.');
+    if(stage==='MP4 creation and YouTube upload')status.textContent+=' Check YouTube Studio before retrying if the upload result is unclear.';
+    status.hidden=false;
+    button.disabled=uploadSucceeded;
+    button.textContent=uploadSucceeded?'▶ Publish':'↻ Retry Publish';
+    if(uploadSucceeded)status.textContent='YouTube upload succeeded, but the feed could not save its published checkmark. Check YouTube Studio before retrying.';
+  }
+}
+
+async function translateNewsStory(card,button){
+  const panel=card.querySelector(".news-translation");
+  if(!panel)return;
+  if(!panel.hidden){panel.hidden=true;button.textContent="Translate to English";return}
+  if(panel.textContent){panel.hidden=false;button.textContent="Hide translation";return}
+  const original=button.textContent;
+  button.disabled=true;button.textContent="Translating…";
+  try{
+    const response=await fetch("/options/api/news/translate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({title:card.dataset.newsTitle||"",snippet:card.dataset.newsSnippet||""})});
+    const data=await response.json();if(!response.ok)throw Error(data.detail||"Translation failed.");
+    panel.textContent=data.translation||"No translation was returned.";panel.hidden=false;button.textContent="Hide translation";
+  }catch(error){toast(error.message);button.textContent=original}
+  finally{button.disabled=false}
+}
+function updateNewsTopicOptions(topics){newsTopicChoices=topics||[];const select=$('#news-topic');const current=select.value;const options=(topics||[]).map(item=>`<option value="${safe(item.topic)}">${safe(item.topic)} (${Number(item.count)||0})</option>`).join('');select.innerHTML='<option value="All topics">All topics</option>'+options;if((topics||[]).some(item=>item.topic===current))select.value=current}
+function updateNewsRelevanceOptions(counts={}){const select=$('#news-relevance');const current=select.value;const levels=[['High','high'],['Medium','medium'],['Low','low'],['Not ranked','not_ranked']];for(const [label,key] of levels){const option=select.querySelector(`option[value="${label}"]`);if(!option)continue;const count=Number(counts[key])||0;option.textContent=`${label} · ${count} ${count===1?'story':'stories'}`}select.value=current}
+async function loadNews({quiet=false}={}){try{const params=new URLSearchParams({peak:$('#news-peak').value,publication:$('#news-publication').value,topic:$('#news-topic').value,relevance:$('#news-relevance').value,q:$('#news-search').value.trim()});const response=await fetch(`/options/api/news?${params}`);if(!response.ok)throw Error('News feed is unavailable.');const data=await response.json();updateNewsTopicOptions(data.topics||[]);updateNewsRelevanceOptions(data.relevance_counts||{});renderNews(data.items||[]);const stamp=data.last_scan_at?new Intl.DateTimeFormat('en-US',{timeZone:'America/Los_Angeles',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}).format(new Date(data.last_scan_at))+' PT':'Not scanned yet';$('#news-last-scanned').textContent=data.configured?`LAST SCAN · ${stamp}`:'PERPLEXITY KEY NOT CONFIGURED';if(!data.configured)$('#news-count').textContent='Add PERPLEXITY_API_KEY in Railway Variables to enable scanning.'}catch(error){if(!quiet){$('#news-items').innerHTML=`<p class="news-empty">${safe(error.message)}</p>`;toast('Could not load the RHTC news feed.')}}}
+async function rankNewsRelevance(){const button=$('#rank-news-relevance');button.disabled=true;const label=button.textContent;button.textContent='Ranking stories…';try{const response=await fetch('/options/api/news/relevance/scan',{method:'POST',credentials:'same-origin'});const data=await response.json();if(!response.ok)throw Error(data.detail||'Could not rank news relevance.');if(Number(data.unranked||0)>0)throw Error(`${data.unranked} stories still have no saved relevance score.`);$('#news-relevance').value='All relevance';await loadNews({quiet:true});const counts=data.counts||{};toast(`Saved relevance scores for ${data.ranked||0} stories · ${counts.high||0} high · ${counts.medium||0} medium · ${counts.low||0} low.`)}catch(error){toast(error.message||'Could not rank news relevance.')}finally{button.disabled=false;button.textContent=label}}
+async function buildNewsTopicFilters(){const button=$('#build-topic-filters');button.disabled=true;const label=button.textContent;button.textContent='Scanning stories…';try{const response=await fetch('/options/api/news/topics/scan',{method:'POST',credentials:'same-origin'});const data=await response.json();if(!response.ok)throw Error(data.detail||'Could not build topic filters.');$('#news-topic').value='All topics';await loadNews({quiet:true});toast(`Scanned ${data.scanned||0} stories and built ${data.topic_count||0} topic filters.`)}catch(error){toast(error.message||'Could not build topic filters.')}finally{button.disabled=false;button.textContent=label}}
+async function scanNews(query=''){const button=$('#scan-news'),submit=$('#news-search-submit');button.disabled=true;if(submit)submit.disabled=true;button.querySelector('.refresh-icon').classList.add('spin');try{const params=new URLSearchParams();if(query)params.set('q',query);const response=await fetch(`/options/api/news/scan${params.size?'?'+params.toString():''}`,{method:'POST'});const data=await response.json();if(!response.ok)throw Error(data.detail||'News scan failed.');await loadNews({quiet:true});toast(`${data.added||0} new · ${data.retrieved||0} retrieved · ${data.total||0} stories stored.`)}catch(error){toast(error.message)}finally{button.disabled=false;if(submit)submit.disabled=false;button.querySelector('.refresh-icon').classList.remove('spin')}}
+function openPasteNewsModal(){
+  const form=$('#paste-news-form');
+  form.reset();
+  $('#paste-news-status').textContent='';
+  const backdrop=$('#paste-news-modal');
+  openFullscreenModal(backdrop,backdrop.querySelector('.paste-news-modal'));
+  setTimeout(()=>$('#pasted-news-content').focus(),0);
+}
+function closePasteNewsModal(){
+  const backdrop=$('#paste-news-modal');
+  resetFullscreenModal(backdrop,backdrop.querySelector('.paste-news-modal'));
+}
+window.closePasteNewsModal=closePasteNewsModal;
+async function submitPastedNews(event){
+  event.preventDefault();
+  const content=$('#pasted-news-content').value.trim();
+  if(content.length<20){$('#paste-news-status').textContent='Paste at least 20 characters of story content.';return}
+  const button=$('#submit-pasted-news');
+  const status=$('#paste-news-status');
+  button.disabled=true;
+  button.textContent='Adding…';
+  status.textContent='Reading and categorizing the story…';
+  try{
+    const response=await fetch('/options/api/news/add-content',{
+      method:'POST',
+      credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        content,
+        title:$('#pasted-news-title').value.trim(),
+        source:$('#pasted-news-source').value.trim(),
+        published_at:$('#pasted-news-date').value,
+        url:$('#pasted-news-url').value.trim()
+      })
+    });
+    const data=await response.json();
+    if(!response.ok)throw Error(data.detail||'Could not add the pasted story.');
+    $('#news-peak').value='All';
+    $('#news-publication').value='All';
+    $('#news-search').value='';
+    closePasteNewsModal();
+    await loadNews({quiet:true});
+    toast(data.added?'Pasted story added to the feed.':'This pasted story already existed and was refreshed.');
+  }catch(error){status.textContent=error.message||'Could not add the pasted story.'}
+  finally{button.disabled=false;button.textContent='Add story to feed'}
+}
+async function addNewsUrl(){
+  const value=window.prompt('Paste the full news story URL:','');
+  if(value===null)return;
+  const url=value.trim();
+  if(!/^https?:\/\//i.test(url)){toast('Paste a complete http:// or https:// news URL.');return}
+  const button=$('#add-news-url');
+  const label=button.textContent;
+  button.disabled=true;
+  button.textContent='Adding…';
+  try{
+    const response=await fetch('/options/api/news/add-url',{
+      method:'POST',
+      credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({url})
+    });
+    const data=await response.json();
+    if(!response.ok)throw Error(data.detail||'Could not add the news story.');
+    $('#news-peak').value='All';
+    $('#news-publication').value='All';
+    $('#news-search').value='';
+    await loadNews({quiet:true});
+    toast(data.added?'News story added to the feed.':'Story already existed and was refreshed.');
+  }catch(error){toast(error.message||'Could not add the news story.')}
+  finally{button.disabled=false;button.textContent=label}
+}
+async function deduplicateNews(){
+  const button=$('#dedupe-news');
+  if(!window.confirm('Compare story titles and content across all saved news. Remove reports about the same event even when outlets rewrite the headline or publish several days apart; common sector terms alone are not enough. The most complete copy is kept, along with its publication records.'))return;
+  button.disabled=true;
+  const label=button.textContent;
+  button.textContent='Removing…';
+  try{
+    const response=await fetch('/options/api/news/deduplicate',{method:'POST',credentials:'same-origin'});
+    const data=await response.json();
+    if(!response.ok)throw Error(data.detail||'Could not remove duplicate stories.');
+    await loadNews({quiet:true});
+    toast(data.removed?'Removed '+data.removed+' duplicate '+(data.removed===1?'story':'stories')+'; '+data.remaining+' stories remain.':'No duplicate stories found.');
+  }catch(error){toast(error.message||'Could not remove duplicate stories.')}
+  finally{button.disabled=false;button.textContent=label}
+}
+function setMode(mode){state.mode=mode;const isNews=mode==='news';document.body.classList.toggle('news-mode',isNews);if(!isNews)stopNewsSpeech();$('#options-view').hidden=isNews;$('#news-view').hidden=!isNews;$('#options-toolbar-filters').hidden=isNews;$('#main-pager').hidden=mode==='history';document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.filter===mode||(!n.dataset.filter&&mode==='overview')));if(isNews){loadNews()}else if(mode==='history'){renderRows();toast('Snapshots are saved in this browser.')}else if(mode==='holdings'){state.selectedOnly=true;state.peak='All Peaks';document.querySelectorAll('.peak-item').forEach(n=>n.classList.toggle('selected',n.dataset.peak==='All Peaks'));loadRows({ai:false,snapshot:false})}else{state.selectedOnly=false;renderRows()}}
+function pageMain(delta){const next=state.expirationSet+delta;if(next<1||next>11)return;state.expirationSet=next;$('#main-page').textContent=DTE_WINDOWS[next-1];$('#main-prev').disabled=next===1;$('#main-next').disabled=next===11;loadRows({ai:false,snapshot:false})}
+async function saveServerWatchlist(rows){if(!state.editingEnabled)throw Error('Shared editing is not enabled yet. Configure the Railway Volume shown above.');const response=await fetch('/options/api/watchlist',{method:'PUT',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows})});if(!response.ok){let detail='Could not save the shared symbol list.';try{detail=(await response.json()).detail||detail}catch(e){}throw Error(detail)}return (await response.json()).rows}
+async function saveSymbolList(rows){setSymbolError('Saving to the shared RHTC list…');try{state.watchlist=await saveServerWatchlist(rows);state.migrationOpen=false;state.legacyWatchlist=null;localStorage.removeItem(WATCHLIST_KEY);updateWatchlistCounts();updateStorageNote();renderSymbolList();renderRows();setSymbolError('Saved for every browser.');loadRows({ai:false,snapshot:false});return true}catch(e){setSymbolError(e.message);return false}}
+async function deleteTickerFromWatchlist(symbol){
+  setSymbolError('Deleting '+symbol+' and its saved ticker data…');
+  try{
+    const response=await fetch('/options/api/watchlist/'+encodeURIComponent(symbol),{method:'DELETE',credentials:'same-origin'});
+    let data={};
+    try{data=await response.json()}catch(e){}
+    if(!response.ok)throw Error(data.detail||'Could not delete '+symbol+' and its saved ticker data.');
+    state.watchlist=state.watchlist.filter(item=>item.symbol!==symbol);
+    state.rows=state.rows.filter(item=>item.symbol!==symbol);
+    state.editingSymbol=null;
+    state.migrationOpen=false;
+    state.legacyWatchlist=null;
+    localStorage.removeItem(WATCHLIST_KEY);
+    updateWatchlistCounts();
+    updateStorageNote();
+    renderSymbolList();
+    renderRows();
+    setSymbolError(symbol+' and saved ticker data deleted. Shared news stories are not linked to individual tickers.');
+    toast(symbol+' and saved ticker data deleted.');
+    loadRows({ai:false,snapshot:false});
+    return true;
+  }catch(error){
+    setSymbolError(error.message);
+    return false;
+  }
+}
+function validTicker(symbol){return /^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol)}
+function clearNewSymbolForm(){['#new-symbol','#new-share-price','#new-quantity','#new-lt-call','#new-lt-expy','#new-lt-qty','#new-lt-premium','#new-pg'].forEach(selector=>$(selector).value='');$('#new-peak').value='';$('#new-account').value='';setSymbolError();$('#new-symbol').focus()}
+async function addSymbol(){const symbol=$('#new-symbol').value.trim().toUpperCase();const peak=$('#new-peak').value;const account=$('#new-account').value||null;if(!validTicker(symbol)){setSymbolError('Enter a valid ticker (letters, numbers, dots, or dashes).');return}if(state.watchlist.some(r=>r.symbol===symbol&&(r.account||'')===(account||''))){setSymbolError(`${symbol} is already on the list for this account.`);return}const lt_qty=optionalInteger($('#new-lt-qty'));if(Number.isNaN(lt_qty)){setSymbolError('LT-Qty must be a non-negative whole number.');return}const added={symbol,peak,share_price:optionalNumber($('#new-share-price')),quantity:optionalNumber($('#new-quantity')),account,lt_call:$('#new-lt-call').value.trim(),lt_expy:$('#new-lt-expy').value.trim(),lt_qty,lt_premium:optionalNumber($('#new-lt-premium')),pg:$('#new-pg').value.trim()};if(await saveSymbolList([added,...state.watchlist])){$('#new-symbol').value='';$('#new-share-price').value='';$('#new-quantity').value='';$('#new-account').value='';$('#new-lt-call').value='';$('#new-lt-expy').value='';$('#new-lt-qty').value='';$('#new-lt-premium').value='';$('#new-pg').value='';$('#new-peak').value='';renderSymbolList()}}
+async function saveEditedSymbol(row){const oldSymbol=row.dataset.symbol;const oldAccount=row.dataset.account||'';const symbol=row.querySelector('.symbol-edit-ticker').value.trim().toUpperCase();const peak=row.querySelector('.symbol-edit-peak').value;const account=row.querySelector('.symbol-edit-account').value||null;if(!validTicker(symbol)){setSymbolError('Enter a valid ticker (letters, numbers, dots, or dashes).');return}if(state.watchlist.some(r=>!(r.symbol===oldSymbol&&(r.account||'')===oldAccount)&&r.symbol===symbol&&(r.account||'')===(account||''))){setSymbolError(`${symbol} is already on the list for this account.`);return}const share_price=optionalNumber(row.querySelector('.symbol-edit-price'));const quantity=optionalNumber(row.querySelector('.symbol-edit-quantity'));const lt_call=row.querySelector('.symbol-edit-lt-call').value.trim();const lt_expy=row.querySelector('.symbol-edit-lt-expy').value.trim();const lt_qty=optionalInteger(row.querySelector('.symbol-edit-lt-qty'));if(Number.isNaN(lt_qty)){setSymbolError('LT-Qty must be a non-negative whole number.');return}const lt_premium=optionalNumber(row.querySelector('.symbol-edit-lt-premium'));const pg=row.querySelector('.symbol-edit-pg').value.trim();const updated=state.watchlist.map(r=>r.symbol===oldSymbol&&(r.account||'')===oldAccount?{symbol,peak,share_price,quantity,account,lt_call,lt_expy,lt_qty,lt_premium,pg}:r);if(await saveSymbolList(updated)){state.editingSymbol=null;renderSymbolList()}}
+window.showSettings=()=>{const backdrop=$('#settings-modal');openFullscreenModal(backdrop,backdrop.querySelector('.modal'))};window.hideSettings=()=>{const backdrop=$('#settings-modal');resetFullscreenModal(backdrop,backdrop.querySelector('.modal'))};window.hideDetail=()=>{const backdrop=$('#detail-modal'),modal=backdrop.querySelector('.detail-modal'),button=$('#detail-fullscreen-toggle');resetFullscreenModal(backdrop,modal,button)};window.hideSymbols=()=>{const backdrop=$('#symbols-modal');resetFullscreenModal(backdrop,backdrop.querySelector('.modal'))};window.hideSymbolAnalysis=()=>{const backdrop=$('#symbol-analysis-modal'),modal=backdrop.querySelector('.analysis-modal'),button=$('#analysis-fullscreen-toggle');stopAnalysisSpeech();resetFullscreenModal(backdrop,modal,button)};window.viewChain=viewChain;window.analyzeSymbol=analyzeSymbol;
+$('#analysis-fullscreen-toggle').addEventListener('click',()=>{const backdrop=$('#symbol-analysis-modal'),modal=backdrop.querySelector('.analysis-modal'),button=$('#analysis-fullscreen-toggle'),active=!modal.classList.contains('is-fullscreen');modal.classList.toggle('is-fullscreen',active);backdrop.classList.toggle('is-fullscreen',active);button.setAttribute('aria-label',active?'Exit full screen':'Enter full screen');button.title=active?'Exit full screen':'Enter full screen';button.setAttribute('aria-pressed',String(active))});$('#detail-fullscreen-toggle').addEventListener('click',()=>{const backdrop=$('#detail-modal'),modal=backdrop.querySelector('.detail-modal'),button=$('#detail-fullscreen-toggle'),active=!modal.classList.contains('is-fullscreen');modal.classList.toggle('is-fullscreen',active);backdrop.classList.toggle('is-fullscreen',active);button.setAttribute('aria-label',active?'Exit full screen':'Enter full screen');button.title=active?'Exit full screen':'Enter full screen';button.setAttribute('aria-pressed',String(active))});$('#manage-symbols').addEventListener('click',()=>openSymbols());$('#buffett-screen-btn').addEventListener('click',runBuffettScreen);$('#buffett-purge-btn').addEventListener('click',purgeAllBuffettReports);$('#ceo-risk-screen-btn').addEventListener('click',runCeoRiskScreen);$('#ceo-risk-purge-btn').addEventListener('click',purgeAllCeoRiskReports);$('#clear-symbol-form').addEventListener('click',clearNewSymbolForm);$('#add-symbol').addEventListener('click',addSymbol);$('#new-symbol').addEventListener('keydown',e=>{if(e.key==='Enter')addSymbol()});$('#symbol-filter').addEventListener('input',renderSymbolList);$('#symbol-peak-filter').addEventListener('change',renderSymbolList);$('#symbol-order-by').addEventListener('change',renderSymbolList);$('#import-browser-list').addEventListener('click',()=>{if(state.legacyWatchlist)saveSymbolList(state.legacyWatchlist)});
+$('#symbol-list').addEventListener('click',async e=>{const button=e.target.closest('button[data-action]');if(!button)return;const row=button.closest('.symbol-entry');if(!row)return;const action=button.dataset.action;setSymbolError();if(action==='stock-report'){viewStockReports(row.dataset.symbol);return}else if(action==='buffett-report'){viewBuffettReports(row.dataset.symbol);return}else if(action==='ceo-risk-report'){viewCeoRiskReports(row.dataset.symbol);return}else if(action==='edit'){state.editingSymbol=symbolAccountKey(row.dataset.symbol,row.dataset.account);renderSymbolList()}else if(action==='cancel'){state.editingSymbol=null;renderSymbolList()}else if(action==='save'){saveEditedSymbol(row)}else if(action==='delete'){const symbol=row.dataset.symbol;if(!window.confirm(`Permanently remove ${symbol} from every watchlist account and delete all saved ticker data and reports? This cannot be undone.`))return;await deleteTickerFromWatchlist(symbol)}});
+
+const infrastructureProducts=[
+  {group:'Hosting & delivery',name:'Railway',sub:'Application hosting, deployment, variables, persistent volume',api:'Railway platform / GitHub-connected deploy',version:'Production service · app runtime checked live',credentials:[],optional:true,owner:'Railway operates the platform; the Railway project owner manages billing and service settings.',cost:'Free trial: $5 credit for 30 days; Free: $1/month credit; Hobby: $5 minimum with $5 usage included. Usage above included credits is billed.',risk:'Usage can exceed included credits. Verify volume backups and service plan in Railway billing.',links:[['Pricing & trial','https://railway.com/pricing'],['Trial details','https://docs.railway.com/pricing/free-trial']]},
+  {group:'Hosting & delivery',name:'GitHub',sub:'Source repository and deployment trigger',api:'GitHub repository + Railway integration',version:'henremurr/rhtc-research · main branch',credentials:[],owner:'GitHub repository owner controls source access; Railway deploys connected commits.',cost:'No separate app charge identified. Repository and account plan are not visible to the app.',risk:'Deployment depends on the GitHub connection and main-branch build. No GitHub Actions workflow was found in the reviewed app.',links:[['Repository','https://github.com/henremurr/rhtc-research'],['Plans','https://github.com/pricing']]},
+  {group:'Hosting & delivery',name:'Python application stack',sub:'Web framework and runtime dependencies',api:'FastAPI · Uvicorn · HTTPX · Pydantic · ReportLab · OpenAI SDK · langdetect · imageio-ffmpeg · python-multipart',version:'Python 3.11+ expected; exact production runtime and installed package versions are checked live above.',credentials:[],owner:'RHTC maintains application code and dependency pins; Railway supplies the production runtime.',cost:'Open-source packages; no package subscription identified.',risk:'Requirements pin several packages, but Python minor version is not pinned. Review dependency updates and test before upgrading.',links:[['Requirements file','https://github.com/henremurr/rhtc-research/blob/main/requirements.txt']]},
+  {group:'Hosting & delivery',name:'SQLite',sub:'Watchlist and application data storage',api:'Python standard-library sqlite3',version:'Database file under configured RHTC data directory / Railway volume',credentials:[],owner:'RHTC app writes the database; Railway hosts the persistent volume.',cost:'No separate database subscription. Storage and backup are part of hosting operations.',risk:'Recovery depends on the Railway volume and backups. This is a single-file database, not a managed database cluster.',links:[]},
+  {group:'Market data',name:'Tradier',sub:'Quotes, option expirations, option chains',api:'Brokerage API v1',version:'Sandbox default; current base URL is checked live above',credentials:['TRADIER_API_TOKEN'],owner:'Tradier issues production and sandbox tokens; the brokerage account owner manages them.',cost:'Sandbox is for development/paper trading and delayed quotes. Account-linked data access; check Tradier account terms for exact costs.',risk:'Current default points to sandbox, with delayed data and lower request limits. Production requires the live token and production base URL; this dashboard does not place orders.',links:[['API guide','https://docs.tradier.com/docs/getting-started'],['Environments','https://docs.tradier.com/docs/endpoints'],['Rate limits','https://docs.tradier.com/docs/rate-limiting']]},
+  {group:'Market data',name:'Finnhub',sub:'Company profile, fundamentals, earnings, estimates, insider sentiment, and stock splits',api:'REST endpoints: profile2, metric, profile, insider-sentiment, earnings calendar/history, EPS estimates, splits',version:'REST API; optional integration',credentials:['FINNHUB_API_KEY'],owner:'Finnhub account owner manages API key and plan.',cost:'Free and paid plans are offered; exact plan, quota, and billing are account-specific and not visible to the app.',risk:'Optional fields and price scenarios are unavailable when the key is absent, required inputs are missing, or a plan/rate limit blocks an endpoint. The app does not infer a target from incomplete inputs.',links:[['Plans','https://finnhub.io/pricing'],['API docs','https://finnhub.io/docs/api']]},
+  {group:'AI & research',name:'OpenAI API',sub:'Research notes, ticker analysis, podcast scripts, speech',api:'OpenAI API · Python SDK',version:'SDK version checked live; defaults: gpt-5-mini and gpt-4o-mini-tts',credentials:['OPENAI_API_KEY'],owner:'OpenAI Platform project owner manages API key, limits, and billing.',cost:'Usage-based API billing, separate from ChatGPT. At the Oct. 4, 2026 check: GPT-5 Mini $0.25/M input and $2/M output tokens; GPT-4o Mini TTS $0.60/M text input and $12/M audio output tokens.',risk:'High: OpenAI currently marks GPT-5 Mini and GPT-4o Mini TTS deprecated. The dated GPT-5 Mini snapshot is scheduled for removal Dec. 11, 2026, and dated GPT-4o Mini TTS snapshots Jan. 6, 2027. Confirm active aliases and migrate/test before removal.',links:[['API pricing','https://developers.openai.com/api/docs/pricing'],['Model deprecations','https://developers.openai.com/api/docs/deprecations']]},
+  {group:'AI & research',name:'Perplexity API',sub:'Current-news search and cited analysis',api:'Search API POST /search · Sonar POST /v1/sonar',version:'Fast Search · sonar / sonar-pro model names',credentials:['PERPLEXITY_API_KEY'],owner:'Perplexity API project owner manages API credits, key, and usage tier.',cost:'API billed separately from consumer plans. Fast Search: $1 per 1,000 successful requests; regular Search: $5 per 1,000. Sonar analysis is usage/model-priced.',risk:'Search request billing is per request (up to five queries per request); model and endpoint lifecycle can change. No official retirement notice for /v1/sonar was found in the current changelog check.',links:[['API pricing','https://docs.perplexity.ai/docs/getting-started/pricing'],['API changelog','https://docs.perplexity.ai/docs/resources/changelog']]},
+  {group:'Publishing',name:'Google Cloud OAuth + YouTube',sub:'Uploads generated episodes to the RHTC YouTube channel',api:'YouTube Data API v3 · OAuth 2.0 web application · resumable video upload',version:'YouTube quota and upload API; Google OAuth refresh flow',credentials:['YOUTUBE_CLIENT_ID','YOUTUBE_CLIENT_SECRET','YOUTUBE_REFRESH_TOKEN'],owner:'Google Cloud project owner controls OAuth consent/API quota; channel owner controls publishing.',cost:'Default quota includes 100 video uploads/day and 10,000 units/day for other API calls. No separate app fee identified; quota may be extended after review.',risk:'High: OAuth external app left in Testing can issue refresh tokens that expire after 7 days. Tokens can also be revoked or invalidated. Unverified projects may be restricted to private uploads.',links:[['YouTube API quota','https://developers.google.com/youtube/v3/getting-started'],['OAuth token expiration','https://developers.google.com/identity/protocols/oauth2']]},
+  {group:'Publishing',name:'X Developer Platform',sub:'Publishes selected RHTC news articles as Posts on X',api:'X API v2 · POST /2/tweets · OAuth 1.0a user context',version:'Pay-per-use X Developer Platform',credentials:['X_API_KEY','X_API_SECRET','X_ACCESS_TOKEN','X_ACCESS_TOKEN_SECRET'],owner:'The RHTC X account owner controls the X Developer app, API credits, and write authorization.',cost:'Pay per use. Charges draw from credits funded in the X Developer Console.',risk:'Medium: write access or funded credits can be removed; changing app permissions requires regenerating the access token and secret.',links:[['X Developer Console','https://developer.x.com/'],['Create a Post','https://docs.x.com/x-api/posts/manage-tweets/quickstart']]},
+  {group:'Browser assets',name:'Google Fonts',sub:'DM Mono, DM Sans, and Manrope typography',api:'Google Fonts CSS and font delivery',version:'Browser-loaded web fonts',credentials:[],owner:'Google serves fonts; RHTC controls the font references in the page.',cost:'No separate app subscription identified.',risk:'If the external font service is unavailable, the browser falls back to local font families.',links:[['Google Fonts','https://fonts.google.com/']]}
+];
+function infraCredentialLabel(names,data){
+  if(!names.length)return 'No secret required';
+  if(!data)return 'Not checked · '+names.join(', ');
+  const status=data?.credential_status||{};
+  const present=names.filter(name=>status[name]).length;
+  const missing=names.filter(name=>!status[name]);
+  if(present===names.length)return 'Configured · '+names.join(', ');
+  if(present===0)return 'Not detected · '+names.join(', ');
+  return 'Partially configured · present: '+names.filter(name=>status[name]).join(', ')+' · missing: '+missing.join(', ');
+}
+function infraPackageVersion(data,name){
+  return data?.packages?.[name]||'not reported';
+}
+function infraProductState(item,data){
+  if(item.optional&&!item.credentials.length)return {label:'Available',cls:''};
+  if(!item.credentials.length)return {label:'Inventory',cls:''};
+  if(!data)return {label:'Unverified',cls:'partial'};
+  const status=data?.credential_status||{};
+  const configured=item.credentials.filter(name=>status[name]).length;
+  if(configured===item.credentials.length)return {label:'Configured',cls:'ready'};
+  if(configured>0)return {label:'Partial',cls:'partial'};
+  return {label:'Not detected',cls:''};
+}
+function renderInfraSnippet(source){
+  const clean=String(source||'')
+    .replace(/\r/g,'')
+    .replace(/\\n/g,'\n')
+    .replace(/<\/?[a-z][^>]*>/gi,' ')
+    .replace(/[ \t]+/g,' ')
+    .trim();
+  if(!clean)return '';
+  const lines=clean.split('\n').map(line=>line.trim()).filter(Boolean);
+  const inline=value=>analysisInline(value)
+    .replace(/(^|\s)_([^_]+)_(?=$|\s)/g,'$1<em>$2</em>');
+  const out=[];
+  for(let i=0;i<lines.length;){
+    const line=lines[i];
+    if(line.includes('|')&&i+1<lines.length&&/^\s*\|?\s*:?-{3,}/.test(lines[i+1])){
+      const cells=value=>value.replace(/^\s*\|/,'').replace(/\|\s*$/,'').split('|').map(cell=>cell.trim());
+      const headers=cells(line);
+      i+=2;
+      const rows=[];
+      while(i<lines.length&&lines[i].includes('|')){rows.push(cells(lines[i]));i++}
+      out.push('<div class="infra-table-wrap"><table class="infra-source-table"><thead><tr>'+headers.map(cell=>'<th>'+inline(cell)+'</th>').join('')+'</tr></thead><tbody>'+rows.map(row=>'<tr>'+headers.map((_,index)=>'<td>'+inline(row[index]||'')+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>');
+      continue;
+    }
+    const heading=line.match(/^#{1,4}\s+(.+)$/);
+    if(heading){out.push('<h4>'+inline(heading[1].replace(/#+$/,'').trim())+'</h4>');i++;continue}
+    if(/^[-*]\s+/.test(line)){
+      const items=[];
+      while(i<lines.length&&/^[-*]\s+/.test(lines[i]))items.push('<li>'+inline(lines[i++].replace(/^[-*]\s+/,''))+'</li>');
+      out.push('<ul>'+items.join('')+'</ul>');continue;
+    }
+    const paragraph=[line];i++;
+    while(i<lines.length&&!/^#{1,4}\s+/.test(lines[i])&&!/^[-*]\s+/.test(lines[i])&&!(lines[i].includes('|')&&i+1<lines.length&&/^\s*\|?\s*:?-{3,}/.test(lines[i+1])))paragraph.push(lines[i++]);
+    out.push('<p>'+paragraph.map(inline).join(' ')+'</p>');
+  }
+  return out.join('');
+}
+function infrastructureInventoryMarkup(data){
+  const credentials=data?.credential_status||{};
+  const credentialNames=Object.keys(credentials);
+  const present=credentialNames.filter(name=>credentials[name]).length;
+  const runtime=data?.python_version||'Not reported';
+  const release=data?.release||{};
+  const releaseVersion=release.version||'Not reported';
+  const releaseStatus=release.status||'unverified';
+  const releaseCommit=release.commit?String(release.commit).slice(0,7):'commit not reported';
+  const generated=data?.generated_at?new Intl.DateTimeFormat('en-US',{timeZone:'America/Los_Angeles',dateStyle:'medium',timeStyle:'short'}).format(new Date(data.generated_at))+' PT':'Not checked';
+  const source=data?.data_source==='tradier_sandbox'?'Tradier sandbox':data?.data_source==='tradier'?'Tradier production':'Demo / no Tradier token';
+  const packageRows=[
+    ['FastAPI','FastAPI'],['Uvicorn','Uvicorn'],['HTTPX','HTTPX'],['Pydantic','Pydantic'],['ReportLab','ReportLab'],['OpenAI SDK','OpenAI Python SDK'],['langdetect','langdetect'],['imageio-ffmpeg','imageio-ffmpeg'],['python-multipart','python-multipart']
+  ].map(([label,key])=>'<span>'+safe(label)+' <b>'+safe(infraPackageVersion(data,key))+'</b></span>').join('');
+  const groups=[...new Set(infrastructureProducts.map(item=>item.group))];
+  const products=groups.map(group=>{
+    const cards=infrastructureProducts.filter(item=>item.group===group).map(item=>{
+      const status=infraProductState(item,data);
+      let version=item.version;
+      if(item.name==='Python application stack')version='Python '+runtime+' · installed packages below';
+      if(item.name==='Tradier')version='Base URL: '+(data?.tradier_base_url||'https://sandbox.tradier.com/v1');
+      if(item.name==='OpenAI API'){
+        const models=data?.models||{};
+        version='SDK '+infraPackageVersion(data,'OpenAI Python SDK')+' · '+(models.OPENAI_MODEL||'gpt-5-mini')+' · '+(models.OPENAI_TTS_MODEL||'gpt-4o-mini-tts');
+      }
+      const links=item.links.map(([label,url])=>'<a href="'+safe(url)+'" target="_blank" rel="noopener noreferrer">'+safe(label)+' ↗</a>').join('');
+      const extras=item.name==='Python application stack'?'<div class="infra-package-list">'+packageRows+'</div>':'';
+      return '<article class="infra-product"><div class="infra-product-head"><div><div class="infra-product-name">'+safe(item.name)+'</div><div class="infra-product-sub">'+safe(item.sub)+'</div></div><span class="infra-state '+status.cls+'">'+safe(status.label)+'</span></div><div class="infra-details"><div class="infra-detail"><b>API / version</b> · '+safe(item.api)+'<br><code>'+safe(version)+'</code></div><div class="infra-detail"><b>Credentials</b> · '+safe(infraCredentialLabel(item.credentials,data))+'</div><div class="infra-detail"><b>Managed by</b> · '+safe(item.owner)+'</div><div class="infra-detail"><b>Plan / cost</b> · '+safe(item.cost)+'</div><div class="infra-detail"><b>Lifecycle risk</b> · '+safe(item.risk)+'</div></div>'+extras+(links?'<div class="infra-links">'+links+'</div>':'')+'</article>';
+    }).join('');
+    return '<section class="infra-group"><h3 class="infra-group-title">'+safe(group)+'</h3><div class="infra-product-grid">'+cards+'</div></section>';
+  }).join('');
+  const location=data?.data_dir||data?.railway_volume_mount_path||'Not reported';
+  const checks=data?.source_checks||{status:'not_requested',results:[]};
+  const freshSources=(checks.results||[]).map(item=>'<article class="infra-source"><a href="'+safe(item.url)+'" target="_blank" rel="noopener noreferrer">'+safe(item.title)+' ↗</a>'+(item.date?'<time>'+safe(item.date)+'</time>':'')+(item.snippet?'<div class="infra-source-snippet">'+renderInfraSnippet(item.snippet)+'</div>':'')+'</article>').join('');
+  const sourceSection='<section class="infra-fresh-checks"><div class="infra-results-head"><h3>Fresh provider documentation check</h3><span>'+(checks.status==='complete'?(checks.results||[]).length+' sources returned':checks.status==='not_configured'?'Perplexity key not detected':checks.status==='unavailable'?'Search temporarily unavailable':'Not run')+'</span></div><p>Each audit sends five current pricing, API, quota, and deprecation queries in one Perplexity Fast Search request. Current listed rate: about $0.001 per successful audit request; no token fee.</p>'+(freshSources||'<div class="infra-source-empty">No current source results are available. Use the official documentation links in each product card.</div>')+'</section>';
+  return '<div class="infra-stats"><article class="infra-stat"><div class="infra-stat-label">Stable release</div><div class="infra-stat-value">'+safe(releaseVersion)+'</div><div class="infra-stat-note">'+safe(releaseStatus)+' · '+safe(release.released_on||'date not reported')+' · '+safe(releaseCommit)+'</div></article><article class="infra-stat"><div class="infra-stat-label">Products inventoried</div><div class="infra-stat-value">'+infrastructureProducts.length+'</div><div class="infra-stat-note">Application and external services</div></article><article class="infra-stat"><div class="infra-stat-label">Core credentials</div><div class="infra-stat-value">'+present+' / '+credentialNames.length+'</div><div class="infra-stat-note">Presence only · secret values never returned</div></article><article class="infra-stat"><div class="infra-stat-label">Production runtime</div><div class="infra-stat-value">Python '+safe(runtime)+'</div><div class="infra-stat-note">'+safe(source)+'</div></article><article class="infra-stat"><div class="infra-stat-label">Last inventory check</div><div class="infra-stat-value">'+safe(generated)+'</div><div class="infra-stat-note">Storage: '+safe(location)+'</div></article></div>'+products+sourceSection+'<div class="infra-note"><b>Stable baseline:</b> '+safe(releaseVersion)+' is the approved production baseline. The short commit shown above identifies the deployed Railway build when the platform supplies it. <b>Account and billing visibility:</b> the app can confirm runtime versions and whether named secrets exist, but it cannot read provider account owners, billing plans, trial status, balances, or invoices. Pricing and lifecycle notes above were reviewed October 4, 2026; use the linked official product pages to confirm later changes. <b>API tokens are never displayed.</b></div>';
+}
+async function runInfrastructureInventory(){
+  const button=$('#infra-refresh');
+  const status=$('#infra-status');
+  const results=$('#infra-inventory-results');
+  button.disabled=true;button.textContent='↻ Checking…';
+  status.dataset.kind='';status.textContent='Inspecting the deployed runtime and configured variable names. Secret values are not read or returned.';
+  try{
+    const response=await fetch('/options/api/infrastructure-inventory?include_sources=true',{credentials:'same-origin',cache:'no-store'});
+    const payload=await response.json();
+    if(!response.ok)throw new Error(payload.detail||'Inventory check failed ('+response.status+').');
+    results.innerHTML=infrastructureInventoryMarkup(payload);
+    status.dataset.kind='ok';
+    status.textContent='Deployment and documentation check completed '+new Intl.DateTimeFormat('en-US',{timeZone:'America/Los_Angeles',dateStyle:'medium',timeStyle:'short'}).format(new Date(payload.generated_at))+' PT. '+(payload.source_checks?.status==='complete'?'Fresh official-source search completed; estimated search charge ≈ $0.001.':'Live source search was not completed; see report status.');
+  }catch(error){
+    results.innerHTML=infrastructureInventoryMarkup(null);
+    status.dataset.kind='warn';
+    status.textContent='Live deployment check unavailable: '+(error?.message||'request failed')+' The product reference inventory is still shown below.';
+  }finally{
+    button.disabled=false;button.textContent='↻ Recheck deployment';
+  }
+}
+function showInfrastructureInventory(){
+  $('#infra-title').textContent=$('#infra-audit-btn').textContent.trim();
+  $('#infra-modal').classList.add('open');
+  runInfrastructureInventory();
+}
+function hideInfrastructureInventory(){
+  $('#infra-modal').classList.remove('open');
+}
+
+$('#infra-audit-btn').addEventListener('click',showInfrastructureInventory);$('#infra-refresh').addEventListener('click',runInfrastructureInventory);
+$('#theme-toggle').addEventListener('click',()=>setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark'));
+$('#chain-prev').addEventListener('click',()=>pageChain(-1));$('#chain-next').addEventListener('click',()=>pageChain(1));$('#analyze-displayed-btn').addEventListener('click',analyzeDisplayedSymbols);$('#analyze-displayed-stocks-btn').addEventListener('click',analyzeDisplayedStocks);
+$('#main-prev').addEventListener('click',()=>pageMain(-1));$('#main-next').addEventListener('click',()=>pageMain(1));$('#main-prev').disabled=true;
+document.querySelectorAll('.peak-item').forEach(el=>el.addEventListener('click',()=>{const holdings=el.dataset.peak==='Holdings';state.costOnly=holdings;state.accountFilter='all';state.peak=holdings?'All Peaks':el.dataset.peak;$('#peak-filter').value=holdings?'Holdings':state.peak;state.mode='overview';state.selectedOnly=false;document.querySelectorAll('.peak-item').forEach(n=>n.classList.toggle('selected',n===el));setMode('overview');loadRows({ai:false,snapshot:false})}));
+$('#peak-filter').addEventListener('change',e=>{const selection=e.target.value,accountSelection=selection.startsWith('account:'),holdings=selection==='Holdings';state.accountFilter=accountSelection?selection.slice(8):'all';state.costOnly=holdings;state.peak=holdings||accountSelection?'All Peaks':selection;state.mode='overview';state.selectedOnly=false;setMode('overview');loadRows({ai:false,snapshot:false})});
+function updateScoreMissingFilters(){state.stockScoreFilter=$('#stock-score-filter').value;state.callScoreFilter=$('#call-score-filter').value;state.mode='overview';state.selectedOnly=false;setMode('overview');loadRows({ai:false,snapshot:false})}
+$('#stock-score-filter').addEventListener('change',updateScoreMissingFilters);$('#call-score-filter').addEventListener('change',updateScoreMissingFilters);
+document.querySelectorAll('.nav-item').forEach(el=>el.addEventListener('click',()=>{const wasCostOnly=state.costOnly;state.costOnly=false;setMode(el.dataset.filter||'overview');if(wasCostOnly)loadRows({ai:false,snapshot:false})}));
+$('#summarize-news').addEventListener('click',summarizeFilteredNews);$('#scan-news').addEventListener('click',()=>scanNews());$('#add-news-url').addEventListener('click',addNewsUrl);$('#paste-news-content').addEventListener('click',openPasteNewsModal);$('#paste-news-form').addEventListener('submit',submitPastedNews);$('#dedupe-news').addEventListener('click',deduplicateNews);$('#build-topic-filters').addEventListener('click',buildNewsTopicFilters);$('#rank-news-relevance').addEventListener('click',rankNewsRelevance);$('#news-search-form').addEventListener('submit',event=>{event.preventDefault();scanNews($('#news-search').value.trim())});$('#news-peak').addEventListener('change',()=>loadNews());$('#news-publication').addEventListener('change',()=>loadNews());$('#news-topic').addEventListener('change',()=>loadNews());$('#news-relevance').addEventListener('change',()=>loadNews());let newsSearchTimer;$('#news-search').addEventListener('input',()=>{clearTimeout(newsSearchTimer);newsSearchTimer=setTimeout(()=>loadNews({quiet:true}),220)});
+$('#analysis-read-btn').addEventListener('click',toggleAnalysisSpeech);$('#analysis-stop-btn').addEventListener('click',()=>stopAnalysisSpeech());
+$('#analysis-mp3-btn').addEventListener('click',createAnalysisPodcast);$('#analysis-copy-transcript').addEventListener('click',copyAnalysisPodcastTranscript);$('#youtube-publish-btn').addEventListener('click',publishAnalysisToYouTube);$('#youtube-series').addEventListener('change',()=>{if(!activeNewsStory)return;const field=$('#youtube-video-title'),current=field.value,separator=current.indexOf(' | '),headline=separator>=0?current.slice(separator+3).trim():activeNewsStory.title;field.value=youtubeTitleForTheme(headline,$('#youtube-series').value)});$('#youtube-review-confirm').addEventListener('change',updateYouTubePublishButton);
+$('#news-items').addEventListener('click',event=>{const button=event.target.closest('[data-news-action]');if(!button)return;const card=button.closest('.news-item');if(!card)return;if(button.dataset.newsAction==='read')toggleNewsSpeech(card);else if(button.dataset.newsAction==='stop')stopNewsSpeech();else if(button.dataset.newsAction==='analyze')analyzeNewsStory(card,button);else if(button.dataset.newsAction==='publish')publishNewsStory(card,button);else if(button.dataset.newsAction==='republish')republishNewsStory(card,button);else if(button.dataset.newsAction==='retry-x')unlockXRetry(card);else if(button.dataset.newsAction==='translate')translateNewsStory(card,button);else if(button.dataset.newsAction==='change-peak'){const select=card.querySelector('.news-peak-select');select.hidden=!select.hidden;if(!select.hidden)select.focus()}else if(button.dataset.newsAction==='change-topic'){const select=card.querySelector('.news-topic-select');select.hidden=!select.hidden;if(!select.hidden)select.focus()}else if(button.dataset.newsAction==='delete-story')deleteNewsStory(card,button)});
+$('#news-items').addEventListener('change',event=>{const artwork=event.target.closest('.news-artwork-select');if(artwork){changeNewsArtworkTheme(artwork.closest('.news-item'),artwork);return}const select=event.target.closest('.news-peak-select');if(select){changeNewsPeak(select.closest('.news-item'),select);return}const topicSelect=event.target.closest('.news-topic-select');if(topicSelect)changeNewsTopic(topicSelect.closest('.news-item'),topicSelect)});$('#auto-reload').addEventListener('change',e=>setAutoReload(e.target.value));try{setAutoReload(localStorage.getItem('rhtc-options-auto-reload')||'0',false)}catch(e){setAutoReload('0',false)};$('#refresh').addEventListener('click',()=>loadRows({ai:true,snapshot:true}));$('#review-limit').addEventListener('change',e=>{state.displayLimit=Number(e.target.value)||300;renderRows()});$('#max-spend').addEventListener('change',e=>{const spend=parseMaxSpend(e.target.value);if(Number.isFinite(spend))e.target.value=formatMaxSpend(spend);loadRows({ai:false,snapshot:false})});$('#sort').addEventListener('change',e=>{state.sort=e.target.value;loadRows({ai:false,snapshot:false})});let searchTimer;$('#search').addEventListener('input',e=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.query=e.target.value.trim();loadRows({ai:false,snapshot:false})},220)});
+function recoverTickerReportLayout(){
+  const report=$('#ticker-print-report'),detailModal=$('#detail-modal .detail-modal');
+  if(!report||!detailModal)return;
+  if(report.parentElement!==detailModal)detailModal.appendChild(report);
+  report.classList.remove('ticker-report-detached');
+  document.documentElement.classList.remove('ticker-report-detached');
+  detailModal.classList.toggle('report-preview-mode',!report.hidden);
+}
+window.addEventListener('pageshow',recoverTickerReportLayout);recoverTickerReportLayout();
+$('#market-clock').textContent=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date())+' ET';
+initializeWatchlist();
+loadNews({quiet:true});
+$('#orphaned-tickers-btn').addEventListener('click',showOrphanedTickers);
+$('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/options/auth/logout',{method:'POST',credentials:'same-origin'})}finally{location.replace('/options/login')}});
+
+
+// Keep the guide menu fully inside the current viewport, including on narrow phones.
+(()=>{
+ const toggle=document.getElementById('guide-menu-toggle'),menu=document.getElementById('guide-menu');
+ const guideHead=document.getElementById('guide-submenu-toggle'),guideBody=document.getElementById('guide-submenu');
+ const reportHead=document.getElementById('reporting-submenu-toggle'),reportBody=document.getElementById('reporting-submenu');
+ if(!toggle||!menu||!guideHead||!guideBody||!reportHead||!reportBody)return;
+ const storageKey='rhtc-dashboard-menu-v1',original=[...menu.children],root=document.createElement('div');root.id='guide-menu-items';
+ const bar=document.createElement('div');bar.className='guide-menu-editbar';bar.hidden=true;bar.innerHTML='<div class="guide-menu-editbar-copy"><strong>Customize menu</strong><span id="guide-menu-edit-hint">Select items to group, drag to reorder, or tap Rename to change a name.</span></div><div class="guide-menu-editbar-actions"><button id="guide-menu-group-selected" type="button">Group selected</button><button id="guide-menu-edit-done" type="button">Done</button></div>';
+ const edit=document.createElement('button');edit.id='guide-menu-customize';edit.type='button';edit.className='guide-menu-customize';edit.textContent='Customize menu';edit.setAttribute('role','menuitem');
+ const map=new Map(),native=[{key:'group:reporting',head:reportHead,body:reportBody},{key:'group:documentation',head:guideHead,body:guideBody}],groupHeads=new Set(native.map(g=>g.head)),groupBodies=new Set(native.map(g=>g.body));
+ const itemDefaults=new Map();
+ const itemLabels=new Map();
+ const keyOf=el=>el.dataset.menuKey||el.id||('link:'+el.getAttribute('href'));
+ const entry=(el,key)=>{const n=document.createElement('div');n.className='guide-menu-entry';n.dataset.menuKey=key||keyOf(el);n.append(el);map.set(n.dataset.menuKey,n);itemDefaults.set(n.dataset.menuKey,el.textContent);return n};
+ const nameGroup=(head,label)=>{
+  head.querySelector('.guide-menu-group-title').textContent=label;
+  head.setAttribute('aria-label',label);
+  document.getElementById(head.dataset.menuTarget)?.setAttribute('aria-label',label);
+ };
+ const group=(head,body,key,label,isCustom=false)=>{
+  const n=document.createElement('div');n.className='guide-menu-entry guide-menu-group'+(isCustom?' guide-menu-custom-group':'');n.dataset.menuKey=key;n.dataset.menuGroup='true';
+  for(const child of [...body.children])body.append(entry(child));
+  body.id=body.id||'guide-menu-submenu-'+key.replace(/[^a-z0-9]+/gi,'-');body.classList.add('guide-submenu');body.setAttribute('role','group');head.dataset.menuTarget=body.id;
+  if(isCustom){head.type='button';head.className='guide-menu-parent';head.setAttribute('aria-haspopup','true');head.setAttribute('aria-expanded','false');head.innerHTML='<span></span><span class="guide-menu-chevron" aria-hidden="true">⌄</span>'}
+  head.firstElementChild.classList.add('guide-menu-group-title');
+  if(isCustom)nameGroup(head,label);
+  n.append(head,body);map.set(key,n);return n;
+ };
+ menu.replaceChildren(bar,root,edit);
+ for(const g of native)root.append(group(g.head,g.body,g.key,g.key));
+ for(const el of original)if(!groupHeads.has(el)&&!groupBodies.has(el))root.append(entry(el));
+ for(const g of native)for(const child of g.body.children)map.set(child.dataset.menuKey,child);
+ const customGroup=(key,label)=>group(document.createElement('button'),document.createElement('div'),key,label,true);
+ const entries=()=>[...menu.querySelectorAll('.guide-menu-entry')];
+ const toolsFor=n=>{
+  if(n.querySelector(':scope > .guide-menu-entry-tools'))return;
+  const host=n;
+  const tools=document.createElement('span');tools.className='guide-menu-entry-tools';
+  const drag=document.createElement('button');drag.type='button';drag.className='guide-menu-drag';drag.textContent='⠿';drag.title='Drag to reorder or move';drag.setAttribute('aria-label','Drag to reorder or move');drag.draggable=true;tools.append(drag);
+  for(const [dir,glyph] of [['up','↑'],['down','↓']]){const b=document.createElement('button');b.type='button';b.className='guide-menu-move';b.textContent=glyph;b.title='Move '+dir;b.setAttribute('aria-label','Move item '+dir);b.dataset.move=dir;tools.append(b)}
+  const rename=document.createElement('button');
+  rename.type='button';rename.className='guide-menu-rename';rename.textContent='Rename';
+  tools.append(rename);
+  if(n.dataset.menuGroup==='true'){
+   const ungroup=document.createElement('button');
+   ungroup.type='button';ungroup.className='guide-menu-ungroup';ungroup.textContent='Ungroup';
+   tools.append(ungroup);
+  }
+  else{const c=document.createElement('input');c.type='checkbox';c.className='guide-menu-select';c.setAttribute('aria-label','Select menu item to group');tools.append(c)}
+  host.append(tools);
+ };
+ const groupList=()=>[...root.children].filter(n=>n.dataset.menuGroup==='true').map(n=>({key:n.dataset.menuKey,label:n.querySelector('.guide-menu-group-title')?.textContent||n.querySelector('.guide-menu-parent span')?.textContent||'Group',native:!n.classList.contains('guide-menu-custom-group'),children:[...n.querySelector('.guide-submenu').children].map(c=>c.dataset.menuKey)}));
+ const currentMenu=()=>({root:[...root.children].map(n=>n.dataset.menuKey),groups:groupList(),item_labels:Object.fromEntries(itemLabels)});
+ const readLocalMenu=()=>{try{const data=JSON.parse(localStorage.getItem(storageKey)||'null');return data&&Array.isArray(data.root)&&Array.isArray(data.groups)?data:null}catch(_){return null}};
+ let menuSaveQueue=Promise.resolve();
+ const writeSharedMenu=data=>{
+  menuSaveQueue=menuSaveQueue.catch(()=>{}).then(async()=>{
+   const response=await fetch('/options/api/dashboard-menu',{method:'PUT',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+   if(!response.ok)throw new Error('Shared menu save failed');
+  });
+  return menuSaveQueue;
+ };
+ const save=()=>{const data=currentMenu();try{localStorage.setItem(storageKey,JSON.stringify(data))}catch(_){}void writeSharedMenu(data).catch(()=>{})};
+ const nameItem=(key,label)=>{
+  const item=map.get(key)?.firstElementChild;
+  if(!item||!itemDefaults.has(key))return;
+  const original=itemDefaults.get(key);
+  item.textContent=label||original;
+  if(item.getAttribute('href')?.split('?')[0]==='/options/trading-import'){
+   item.href='/options/trading-import?'+new URLSearchParams({title:item.textContent});
+  }
+  if(label&&label!==original)itemLabels.set(key,label);
+  else itemLabels.delete(key);
+ };
+ const restore=data=>{if(!data||!Array.isArray(data.root)||!Array.isArray(data.groups))return false;
+  for(const key of itemDefaults.keys()){
+   const label=data.item_labels?.[key];
+   if(itemLabels.has(key)||(typeof label==='string'&&label.trim()))nameItem(key,typeof label==='string'?label.trim():'');
+  }
+  const keys=new Set(data.groups.map(g=>g.key));
+  for(const g of [...root.children].filter(n=>n.dataset.menuGroup==='true'))if(!keys.has(g.dataset.menuKey)){for(const c of [...g.querySelector('.guide-submenu').children])root.append(c);g.remove();map.delete(g.dataset.menuKey)}
+  for(const g of data.groups)if(g.native===false&&!map.has(g.key))root.append(customGroup(g.key,g.label||'New group'));
+  for(const g of data.groups){
+   const head=map.get(g.key)?.querySelector('.guide-menu-parent');
+   if(head&&typeof g.label==='string'&&g.label.trim())nameGroup(head,g.label);
+  }
+  for(const g of data.groups){const target=map.get(g.key)?.querySelector('.guide-submenu');if(target)for(const key of g.children||[]){const child=map.get(key);if(child)target.append(child)}}
+  for(const key of data.root){const n=map.get(key);if(n)root.append(n)}
+  for(const n of map.values())if(n.parentElement?.classList.contains('guide-submenu')&&!data.groups.some(g=>g.children?.includes(n.dataset.menuKey)))root.append(n);
+  return true;
+ };
+ restore(readLocalMenu());
+ const ensureYoutubeEntryVisible=()=>{
+  const youtubeEntry=map.get('link:/options/api/youtube/connect');
+  if(!youtubeEntry)return;
+  const link=youtubeEntry.querySelector('a[href^="/options/api/youtube/connect"]');
+  if(link)link.textContent='Connect to YouTube';
+  const reporting=map.get('group:reporting');
+  root.insertBefore(youtubeEntry,reporting?.nextSibling||null);
+ };
+ ensureYoutubeEntryVisible();
+ const syncSharedMenu=async()=>{
+  const localMenu=readLocalMenu();
+  try{
+   const response=await fetch('/options/api/dashboard-menu',{credentials:'same-origin',cache:'no-store'});
+   if(!response.ok)return;
+   const result=await response.json();
+   if(result.menu&&restore(result.menu)){ensureYoutubeEntryVisible();try{localStorage.setItem(storageKey,JSON.stringify(currentMenu()))}catch(_){}}
+   else if(localMenu)await writeSharedMenu(localMenu);
+  }catch(_){}
+ };
+ void syncSharedMenu();
+ const editing=()=>menu.classList.contains('is-editing');
+ const place=()=>{
+  const rect=toggle.getBoundingClientRect(),width=menu.getBoundingClientRect().width,gap=12;
+  menu.style.left=Math.max(gap,Math.min(rect.right-width,innerWidth-width-gap))+'px';
+  const top=editing()?gap:Math.max(gap,Math.min(rect.bottom+8,innerHeight-menu.offsetHeight-gap));
+  menu.style.top=top+'px';
+  menu.style.right='auto';
+ };
+ const setEditing=on=>{menu.classList.toggle('is-editing',on);bar.hidden=!on;edit.hidden=on;if(on)entries().forEach(toolsFor);requestAnimationFrame(place)};
+ const collapse=()=>menu.querySelectorAll('.guide-menu-parent').forEach(h=>{const b=document.getElementById(h.dataset.menuTarget);if(b)b.hidden=true;h.setAttribute('aria-expanded','false')});
+ const close=()=>{menu.hidden=true;toggle.setAttribute('aria-expanded','false');collapse();if(editing())setEditing(false)};
+ const renameDialog=document.createElement('dialog');
+ renameDialog.className='guide-menu-rename-dialog';
+ renameDialog.setAttribute('aria-labelledby','guide-menu-rename-title');
+ renameDialog.innerHTML='<form method="dialog"><label id="guide-menu-rename-title" for="guide-menu-rename-input">Rename group</label><input id="guide-menu-rename-input" maxlength="300" required autofocus><div class="guide-menu-editbar-actions"><button type="button">Cancel</button><button type="submit">Rename</button></div></form>';
+ menu.append(renameDialog);
+ const renameInput=renameDialog.querySelector('input');
+ let renameEntry=null;
+ const openRename=entry=>{
+  if(renameDialog.open)return;
+  renameEntry=entry;
+  const isGroup=entry.dataset.menuGroup==='true';
+  renameDialog.querySelector('label').textContent=isGroup?'Rename group':'Rename menu item';
+  renameInput.value=isGroup?entry.firstElementChild.querySelector('.guide-menu-group-title').textContent:entry.firstElementChild.textContent;
+  renameDialog.showModal();
+  renameInput.select();
+ };
+ renameDialog.querySelector('[type="button"]').addEventListener('click',()=>renameDialog.close());
+ renameDialog.addEventListener('keydown',e=>{if(e.key==='Escape')e.stopPropagation()});
+ renameDialog.addEventListener('submit',e=>{
+  e.preventDefault();
+  const label=renameInput.value.trim();
+  if(!label){renameInput.value='';renameInput.reportValidity();return}
+  if(renameEntry.dataset.menuGroup==='true')nameGroup(renameEntry.firstElementChild,label);
+  else nameItem(renameEntry.dataset.menuKey,label);
+  save();
+  renameDialog.close();
+ });
+ edit.addEventListener('click',e=>{e.stopPropagation();setEditing(true)});
+ document.getElementById('guide-menu-edit-done').addEventListener('click',e=>{e.stopPropagation();setEditing(false);save()});
+ document.getElementById('guide-menu-group-selected').addEventListener('click',e=>{
+  e.stopPropagation();const picked=entries().filter(n=>n.dataset.menuGroup!=='true'&&n.querySelector(':scope > .guide-menu-entry-tools .guide-menu-select')?.checked);
+  if(picked.length<2){document.getElementById('guide-menu-edit-hint').textContent='Select at least two items to create a group.';return}
+  const name=prompt('Name this menu group:');if(!name?.trim())return;const key='group:custom:'+Date.now().toString(36),g=customGroup(key,name.trim()),body=g.querySelector('.guide-submenu');
+  picked.forEach(n=>{n.querySelector('.guide-menu-select').checked=false;body.append(n)});root.append(g);entries().forEach(toolsFor);save();requestAnimationFrame(place);
+ });
+ toggle.addEventListener('click',e=>{e.stopPropagation();const open=menu.hidden;menu.hidden=!open;toggle.setAttribute('aria-expanded',String(open));if(open){collapse();requestAnimationFrame(place)}});
+ menu.addEventListener('click',e=>{
+  const rename=e.target.closest('.guide-menu-rename');
+  if(editing()&&rename){
+   openRename(rename.closest('.guide-menu-entry'));
+   return;
+  }
+  const ungroup=e.target.closest('.guide-menu-ungroup');if(ungroup){e.stopPropagation();const g=ungroup.closest('.guide-menu-group'),parent=g.parentElement;for(const child of [...g.querySelector('.guide-submenu').children])parent.insertBefore(child,g);g.remove();map.delete(g.dataset.menuKey);save();requestAnimationFrame(place);return}
+  const move=e.target.closest('.guide-menu-move');if(move){e.stopPropagation();const n=move.closest('.guide-menu-entry'),siblings=[...n.parentElement.children].filter(child=>child.classList.contains('guide-menu-entry')),i=siblings.indexOf(n),target=move.dataset.move==='up'?siblings[i-1]:siblings[i+1];if(target)n.parentElement.insertBefore(n,move.dataset.move==='up'?target:target.nextElementSibling);save();requestAnimationFrame(place);return}
+  const head=e.target.closest('.guide-menu-parent');if(head){e.stopPropagation();if(editing()&&e.target.closest('.guide-menu-entry-tools'))return;const body=document.getElementById(head.dataset.menuTarget);if(!body)return;const open=body.hidden;body.hidden=!open;head.setAttribute('aria-expanded',String(open));requestAnimationFrame(place);return}
+  if(e.target.closest('#open-earnings-report')){close();void showEarningsReport();return}
+  if(e.target.closest('a')||e.target.closest('#infra-audit-btn')||e.target.closest('#orphaned-tickers-btn')||e.target.closest('#open-trade-report')||e.target.closest('#open-tax-lot-report')||e.target.closest('#open-weekly-income-report')||e.target.closest('#open-ticker-tax-lot-report'))close();
+ });
+ let dragged=null;
+ menu.addEventListener('dragstart',e=>{const h=e.target.closest('.guide-menu-drag');if(!editing()||!h){e.preventDefault();return}dragged=h.closest('.guide-menu-entry');e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',dragged.dataset.menuKey);dragged.classList.add('is-dragging')});
+ menu.addEventListener('dragend',()=>{dragged?.classList.remove('is-dragging');dragged=null;menu.querySelectorAll('.drop-before,.drop-after,.drop-into').forEach(n=>n.classList.remove('drop-before','drop-after','drop-into'))});
+ menu.addEventListener('dragover',e=>{if(!editing()||!dragged)return;const t=e.target.closest('.guide-menu-entry,.guide-submenu,#guide-menu-items');if(!t||t===dragged||dragged.contains(t))return;e.preventDefault();menu.querySelectorAll('.drop-before,.drop-after,.drop-into').forEach(n=>n.classList.remove('drop-before','drop-after','drop-into'));if(t.classList.contains('guide-menu-group')&&e.target.closest('.guide-menu-parent'))t.classList.add('drop-into');else if(t.classList.contains('guide-menu-entry'))t.classList.add(e.clientY<t.getBoundingClientRect().top+t.offsetHeight/2?'drop-before':'drop-after')});
+ menu.addEventListener('drop',e=>{if(!editing()||!dragged)return;const t=e.target.closest('.guide-menu-entry,.guide-submenu,#guide-menu-items');if(!t||t===dragged||dragged.contains(t))return;e.preventDefault();if(t.classList.contains('guide-menu-group')&&dragged.dataset.menuGroup!=='true')t.querySelector('.guide-submenu').append(dragged);else if(t.classList.contains('guide-submenu')||t.id==='guide-menu-items')t.append(dragged);else{const before=e.clientY<t.getBoundingClientRect().top+t.offsetHeight/2?t:(t.nextElementSibling===dragged?dragged.nextElementSibling:t.nextElementSibling);t.parentElement.insertBefore(dragged,before)}save();requestAnimationFrame(place)});
+ menu.addEventListener('change',e=>{if(e.target.matches('.guide-menu-select')){const count=menu.querySelectorAll('.guide-menu-select:checked').length;document.getElementById('guide-menu-edit-hint').textContent=count?count+' selected. Choose “Group selected” to combine them.':'Select items to group, drag to reorder, or tap Rename to change a name.'}});
+ document.addEventListener('click',e=>{if(!e.target.closest('.guide-menu-wrap'))close()});
+ document.addEventListener('keydown',e=>{if(e.key==='Escape'){close();toggle.focus()}});
+ window.addEventListener('resize',()=>{if(!menu.hidden)place()});
+})();
+
+if(new URLSearchParams(location.search).get("youtube")==="connected"){const notice=document.createElement("div");notice.setAttribute("role","status");notice.style.cssText="padding:16px;background:#174b35;color:white;text-align:center";notice.textContent="YouTube connected. You can now publish a reviewed video from the dashboard.";document.body.prepend(notice);const u=new URL(location.href);u.searchParams.delete("youtube");history.replaceState(null,"",u.pathname+u.search+u.hash);}
