@@ -2,7 +2,8 @@
 
 **For:** RHTC internal research users<br>
 **Stable release:** v2026.11.15<br>
-**Last checked:** November 15, 2026<br>
+**Last checked:** November 22, 2026
+**Documentation update:** November 22, 2026 (post-baseline workflows; stable release unchanged)<br>
 **Application:** Covered Call Screener / Income Engine and RHTC News Feed
 
 ## Table of contents
@@ -18,6 +19,15 @@
 9. [Project inventory](#project-inventory)
 10. [Other controls and settings](#other-controls-and-settings)
 11. [Troubleshooting and data limitations](#troubleshooting-and-data-limitations)
+12. [Customize and synchronize the dashboard menu](#customize-and-synchronize-the-dashboard-menu)
+13. [Import brokerage CSV files](#import-brokerage-csv-files)
+14. [Preview, print, and save financial reports](#preview-print-and-save-financial-reports)
+15. [Transaction report](#transaction-report)
+16. [Tax lot and ticker tax lot reports](#tax-lot-and-ticker-tax-lot-reports)
+17. [Weekly income reports](#weekly-income-reports)
+18. [Open tax lot report](#open-tax-lot-report)
+19. [Cash Activity Report](#cash-activity-report)
+20. [Reporting troubleshooting and limitations](#reporting-troubleshooting-and-limitations)
 
 ## Overview
 
@@ -39,7 +49,7 @@ The header shows the watchlist universe size, calls to review, median bid yield,
 
 **v2026.11.15** is the approved stable production baseline. It covers the deployed Income Engine, shared watchlist and saved reports, stock and call scoring, Buffett and CEO-risk reports, earnings and split-aware price scenarios, news analysis, YouTube/X publishing controls, mobile layouts, comprehensive HTML/PDF reports, and the Infrastructure Audit.
 
-The Git reference `stable/v2026.11.15` identifies the exact source baseline. Later changes should be compared with that stable branch before they are promoted as a new stable release. Application data remains in the configured persistent Railway volume and is not stored inside the source baseline.
+The Git reference `stable/v2026.11.15` identifies the exact source baseline. Later changes should be compared with that stable branch before they are promoted as a new stable release. The reporting and menu enhancements documented below were implemented after the stable baseline and **do not** constitute a new approved stable release. Application data remains in the configured persistent Railway volume and is not stored inside the source baseline.
 
 ## Sign in and navigate
 
@@ -51,7 +61,7 @@ On phones, the page is designed to scroll as a single page. Full-screen controls
 | --- | --- |
 | Screener logo | Opens the Income Engine / covered-call screen |
 | News logo | Opens the RHTC News Feed and hides Income Engine controls |
-| Guide menu (☰) | Opens guide, update, PDF viewing/printing, and download actions |
+| Dashboard menu (☰) | Opens Reporting, Documentation, Connect to YouTube, Infrastructure audit, and other utilities. Choose **Customize menu** to reorganize or rename entries. |
 | Theme button | Toggles dark and light themes |
 | Log out | Ends the signed-in session |
 
@@ -242,3 +252,143 @@ The inventory can report whether a named credential exists, but never reveals it
 | Values differ from a brokerage screen | Quotes may be delayed; share details, holdings, and long-term call fields are manually maintained. |
 
 The screener selects a single nearest expiration and nearest out-of-the-money call per symbol for its candidate view. Its yield and income figures do not account for assignment, commissions, taxes, spread execution, existing positions, or opportunity cost. Verify the current contract, bid/ask spread, liquidity, and brokerage account before making any trade decision.
+
+## Customize and synchronize the dashboard menu
+
+Open the **☰ dashboard menu** in the header. The **Reporting** group contains brokerage importing and financial reports; **Documentation** contains Open User Guide, Update User Guide, Create PDF · View / Print, and Download PDF. Connect to YouTube and Infrastructure audit are available as separate actions.
+
+To customize the menu:
+
+1. Open ☰ and choose **Customize menu**.
+2. Drag an entry to reorder or move it. On touch devices, use the **up/down** movement controls if dragging is inconvenient.
+3. Select entries and choose **Group selected** to create a group.
+4. Choose **Rename** for a menu entry or group; **Ungroup** removes an existing grouping.
+5. Choose **Done** after making changes.
+
+Multiple groups can remain expanded at once. Changing an entry's displayed name does not change its underlying report or screen. **Connect to YouTube** is maintained as a top-level entry, even when restoring a saved menu.
+
+**Cross-device persistence:** the browser saves menu layout locally for immediate use and also sends it to the application's server. On load, a signed-in device requests the shared layout, allowing a consistent arrangement across iPhone, iPad, and desktop browsers using the same deployment. If the shared save fails or a device is offline, changes may remain local. Confirm the same deployment and reload the dashboard if layouts differ.
+
+## Import brokerage CSV files
+
+Open **Reporting → Import CSV files**. The importer loads brokerage-exported transaction histories into the application's persistent transaction database; it does **not** connect to a brokerage or submit orders.
+
+| File format | Supported source | Account handling |
+| --- | --- | --- |
+| **Fidelity** | Fidelity brokerage transaction-history CSV | Enter the account identifier |
+| **Fidelity IRA** | Fidelity Accounts History CSV | Leave Account ID blank to use numbers within the CSV, or provide one to import only its matching rows |
+| **Schwab** | Schwab transaction CSV | Enter an account identifier; alphanumeric IDs are accepted |
+| **Vanguard** | CSV matching the implemented Vanguard column layout | Enter the account identifier; export layouts may vary |
+
+To import:
+
+1. Export the trading history as a CSV from the brokerage.
+2. Select its **File format** and specify Account ID when required.
+3. Choose the source CSV and submit the import.
+4. Review the import result, including skipped records.
+5. Run a transaction report to reconcile dates, quantities, actions, and amounts against your brokerage statement.
+
+Use the **same account identifier** in later imports for that account. The importer generates fingerprints for recognized records to avoid loading the same transaction twice when CSV date ranges overlap. It distinguishes brokerage/account histories instead of treating all files from one brokerage as a single account.
+
+Account-specific history management must be scoped to the selected brokerage/account identity; never assume an account purge affects all accounts. Retain original statements and files for reconciliation. Supported formats require the expected export headers; a broker changing its CSV layout may require an importer update.
+
+## Preview, print, and save financial reports
+
+The financial reporting screens follow a **preview-first** workflow:
+
+1. Open the report under **Reporting**.
+2. Choose the available account, tax year, and other report-specific filters.
+3. Select **Preview report**; report rows remain hidden until requested.
+4. Review the report, use **Full screen** if needed, or navigate back to the filters.
+5. Use the PDF, print, save, and return controls appropriate to the browser.
+
+The interface offers **Print or save PDF** on supported Apple mobile devices through system sharing. Desktop browsers may present separate print and download actions. A generated PDF is a separate snapshot of the selected report. Use **Return to dashboard** or the report navigation controls instead of relying on the browser's back button.
+
+Financial PDFs use RHTC-branded report headings, formatted tables, and page-number footers; longer reports repeat report headings on subsequent pages where supported. Print/save behavior also depends on browser and operating-system permissions.
+
+## Transaction report
+
+Open **Reporting → Transaction report** and select an account and reporting year. The report organizes imported stock and option transaction records by underlying ticker and shows **Date, Action, Security, Quantity, Price ($), and Amount ($)**. Ticker groups provide grouped details and open-position summaries where applicable.
+
+The report uses transaction quantities—not dollar balances—to determine whether a stock or option position remains open. It distinguishes stock buys/sells from written or repurchased calls and applies ordering rules for activities occurring on the same day (including purchases before relevant sales). Use it to reconcile purchases, disposals, and closing trades. Option contracts may be represented with a leading hyphen in ticker-based views.
+
+The report is a reconstruction from imported history, not an independently verified current brokerage position statement. Missing opening history, assignments, exercises, or corporate actions can affect remaining-position calculations.
+
+## Tax lot and ticker tax lot reports
+
+### Tax Lot Report — Form 8949 presentation
+
+Open **Reporting → Tax lot report · Form 8949**, select an account and tax year, and choose **Preview report**. Completed transactions are matched using **FIFO (first in, first out)** against the available full account history. Open or unmatched tax lots are omitted.
+
+The report follows the principal **IRS Form 8949** column structure:
+
+| Column | Content |
+| --- | --- |
+| (a) | Description of property |
+| (b) | Date acquired |
+| (c) | Date sold or disposed |
+| (d) | Proceeds |
+| (e) | Cost or other basis |
+| (f) | Adjustment code |
+| (g) | Adjustment amount |
+| (h) | Gain or loss |
+
+Short-term (held one year or less) and long-term (held more than one year) transactions appear in separate sections, followed by proceeds, basis, and net gain/loss totals for each holding-period category.
+
+### Ticker Tax Lot Report
+
+Open **Reporting → Ticker tax lot report · Form 8949** and select an account, tax year, and underlying ticker from the dropdown. The selectable ticker list omits leading-hyphen option symbols, but the related option activity remains eligible for the report for that underlying ticker. For example, selecting **AAOI** may include transactions represented as **AAOI** and **-AAOI**.
+
+**Tax caveat:** this is an analytical report, **not an official IRS filing**. Reconcile imported cost basis, option assignments/exercises, wash sales, adjustments, corporate actions, and broker-issued Form 1099-B records before filing.
+
+## Weekly income reports
+
+Both reports select an **account and tax year** and group **completed tax lots by closing week**. These are realized-lot measures and should not be equated automatically with the cash premium received on the date an option was written.
+
+### Weekly Income Summary Report
+
+Open **Reporting → Weekly Income Summary Report**. The report shows each reported week, date range, number of closed lots, **Proceeds, Cost basis, and Net gain/loss**, followed by a total row. Weeks without completed lots may be absent rather than displayed as zero-income weeks.
+
+### Weekly Income Detail Report
+
+Open **Reporting → Weekly Income Detail Report** to expand the summary by tax-lot records. Each week shows acquisition and sale dates, proceeds, basis, code, adjustments, and net gain/loss. Related stock and option records are organized by underlying ticker within each week, with **lightly shaded ticker subtotal rows**. Use the detail to explain which completed positions contributed to each week's result.
+
+## Open tax lot report
+
+Open **Reporting → Open tax lot report** and choose an account and reporting year (or **All/latest**, when offered). This lists positions remaining unmatched at the selected cutoff rather than trades already closed in the Form 8949 report.
+
+Visible columns include **Ticker / security, Side, Date acquired, Holding period, Open quantity, Cost/Premium, and Per unit**. Entries are grouped by underlying ticker and acquisition date, with shares before associated option-contract positions. Stock positions and individual option-security groups have their own subtotal lines.
+
+- **Long stock:** cost is displayed using a negative cash-flow convention. **Total Long** summarizes open shares, aggregate cost, and average cost per share.
+- **Short written calls:** collected premium is positive. The option **Per unit** premium is total remaining premium ÷ (**open contracts × 100**) for standard 100-share contracts. **Total Short** summarizes open contracts, total premium, and average premium per underlying share for each option-security group.
+- Subtotals are **lightly shaded**, remain with the corresponding security group, and are not merely grand totals at the end of the report.
+- Cash-sweep symbols such as **FCASH** are excluded from the open stock-lot presentation. Expired calls and assigned calls are processed by the closing/assignment matching logic instead of being shown as still-open contracts.
+
+Verify lot dates, quantities, assigned/expired contract treatment, premiums, and any nonstandard contract deliverables against brokerage records.
+
+## Cash Activity Report
+
+Open **Reporting → Cash Activity Report**. Select brokerage/account filters and choose **Preview report** to view **non-stock and non-option cash movements**.
+
+Recognized activity may include deposits, withdrawals, transfers in/out, dividends and distributions, federal tax withholding/payments, **interest earned**, **margin interest**, **bill payments**, **cash advances**, and other classified cash activities. Interest earned and margin interest have separate categories; bill pay and cash advance are also separate.
+
+Within each category, entries are organized by date and show **Date, Transaction, Ticker, Description, and Amount** with a **category subtotal**. Use the report to reconcile cash inflows, outflows, charges, and distributions separately from security transactions. The accuracy of categorization depends on the imported broker action codes and descriptions.
+
+## Reporting troubleshooting and limitations
+
+| Symptom | Check |
+| --- | --- |
+| No account choices appear | Import the appropriate CSV first; confirm account ID and supported headers. |
+| Expected transactions are absent | Check the source export date range, brokerage format, account ID, and duplicate-skipping result. |
+| A tax-lot report contains no rows | Confirm the selected year has **completed**, FIFO-matchable positions; open lots do not appear in Form 8949. |
+| Open quantities or option positions look wrong | Reconcile buy/sell and written/repurchased call quantities, assignments, expirations, exercises, and earlier imported history. |
+| Weekly income differs from cash premiums received | Compare closing dates against premium receipt dates; use Weekly Income Detail for lot-level reconciliation. |
+| Cash activity is misclassified | Review the original CSV action and description; different brokers use different labels. |
+| Menu layout differs across devices | Verify both browsers use the same signed-in deployment and that the server received the shared menu save. |
+| Print or download does not work | Confirm that PDF generation succeeded, review browser permission prompts, and check iOS sharing/Files availability. |
+
+All reporting results are derived from imported CSV records and application calculations. Missing transactions, broker-specific codes, rounding, historical cost-basis differences, wash sales, split adjustments, or options events can produce discrepancies. **Brokerage statements and official tax documents remain authoritative.**
+
+### Release discipline
+
+The historical stable release **v2026.11.15** and Git reference **\`stable/v2026.11.15\`** remain unchanged. Adding these user instructions documents later application functionality; it does **not** authorize an application deployment, create a new stable tag, or change the stable source baseline.
