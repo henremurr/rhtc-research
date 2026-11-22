@@ -321,8 +321,14 @@ def build_open_tax_lot_report(account, year, lots, title=""):
                      money(lot["unit_amount"])])
         if lot.get("amount") not in (None, ""):
             totals[lot["amount_type"]] += Decimal(lot["amount"])
-    data.append(["Open lot totals", "", "", "", "",
-                 f"Cost {money(totals['Cost'])}   |   Premium {money(totals['Premium'])}   |   Proceeds {money(totals['Proceeds'])}", ""])
+    long_shares = sum((Decimal(lot["quantity"]) for lot in lots if lot.get("amount_type") == "Cost"), Decimal(0))
+    short_contracts = sum((Decimal(lot["quantity"]) for lot in lots if lot.get("amount_type") == "Premium"), Decimal(0))
+    long_cost = totals["Cost"]
+    short_premium = totals["Premium"]
+    data.append(["Total Long", "", "", "", format(long_shares.normalize(), ",f"),
+                 money(long_cost), money(long_cost / long_shares) if long_shares else "—"])
+    data.append(["Total Short", "", "", "", format(short_contracts.normalize(), ",f"),
+                 money(short_premium), money(short_premium / (short_contracts * 100)) if short_contracts else "—"])
     table = LongTable(data, colWidths=[210, 60, 84, 80, 80, 100, 74], repeatRows=1,
                       hAlign="LEFT", splitInRow=1)
     table.setStyle(TableStyle([
@@ -330,8 +336,8 @@ def build_open_tax_lot_report(account, year, lots, title=""):
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 8),
         ("VALIGN", (0, 0), (-1, -1), "TOP"), ("ALIGN", (4, 1), (-1, -1), "RIGHT"),
         ("LINEBELOW", (0, 0), (-1, 0), 1, gold), ("LINEBELOW", (0, 1), (-1, -2), .3, colors.HexColor("#D5DADD")),
-        ("LINEABOVE", (0, -1), (-1, -1), 1, gold), ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
-        ("SPAN", (0, -1), (4, -1)),
+        ("LINEABOVE", (0, -2), (-1, -2), 1, gold), ("LINEABOVE", (0, -1), (-1, -1), .5, gold),
+        ("FONTNAME", (0, -2), (-1, -1), "Helvetica-Bold"),
         ("LEFTPADDING", (0, 0), (-1, -1), 5), ("RIGHTPADDING", (0, 0), (-1, -1), 5),
         ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
     ]))
