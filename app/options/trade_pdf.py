@@ -382,6 +382,7 @@ def build_open_tax_lot_report(account, year, lots, title=""):
         ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
     ] + [("LINEABOVE", (0, row), (-1, row), .75, gold) for row in subtotal_rows]
         + [("FONTNAME", (0, row), (-1, row), "Helvetica-Bold") for row in subtotal_rows]
+        + [("BACKGROUND", (0, row), (-1, row), colors.HexColor("#F7F3E8")) for row in subtotal_rows]
         + [("NOSPLIT", (0, start), (-1, end)) for start, end in group_row_ranges]))
     doc.build([table], onFirstPage=decorate, onLaterPages=decorate)
     return output.getvalue()
