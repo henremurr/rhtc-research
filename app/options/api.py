@@ -37,8 +37,8 @@ from app.options.x_publish import router as x_router
 from app.options.user_guide import router as user_guide_router
 
 BASE = Path(__file__).parent
-OPTIONS_RELEASE_VERSION = "v2026.11.15"
-OPTIONS_RELEASE_DATE = "2026-11-15"
+OPTIONS_RELEASE_VERSION = "v2026.11.22"
+OPTIONS_RELEASE_DATE = "2026-11-22"
 
 app = FastAPI(title="RHTC Options Dashboard", version=OPTIONS_RELEASE_VERSION)
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
