@@ -421,7 +421,7 @@ def tax_lot_rows(db, account, year, open_only=False):
                            "quantity": format(qty.normalize(), "f"), "amount": amount_value,
                            "unit_amount": unit_value, "amount_type": "Basis" if side == "long" else "Proceeds",
                            "term": holding_term(acquired, as_of) if as_of else "short"})
-        return sorted(result, key=lambda row: (row["ticker"], row["acquired"], row["description"]))
+        return sorted(result, key=lambda row: (row["ticker"], 0 if " share" in row["description"] else 1, row["acquired"], row["description"]))
     return sorted(completed, key=lambda row: (row["sold"], row["description"], row["acquired"]))
 
 
