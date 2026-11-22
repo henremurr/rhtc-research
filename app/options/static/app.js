@@ -340,6 +340,8 @@ async function printEarningsReport(){
     const response=await fetch('/options/api/ticker-report/pdf',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:'RHTC',title,generated_at:generatedAt,sections:[{title:'Upcoming earnings',text:bodyText}]})});
     if(!response.ok){const error=await response.json().catch(()=>({}));throw Error(error.detail||'PDF generation failed ('+response.status+').')}
     const blob=await response.blob();
+    const earningsPdfFile=new File([blob],'RHTC_Upcoming_Earnings_Report.pdf',{type:'application/pdf'});
+    const isAppleMobile=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
     if(earningsReportPdfUrl)URL.revokeObjectURL(earningsReportPdfUrl);
     earningsReportPdfUrl=URL.createObjectURL(blob);
     if(pdfWindow){
@@ -347,12 +349,23 @@ async function printEarningsReport(){
       viewer.write('<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+safe(title)+'</title><style>*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;font:16px system-ui,-apple-system,sans-serif;color:#17202a;background:#eef1f4}body{display:flex;flex-direction:column}header{min-height:58px;display:flex;align-items:center;gap:12px;padding:8px 14px;background:#17202a;color:#fff;flex-wrap:wrap}button,a{font:600 14px system-ui,-apple-system,sans-serif;padding:9px 13px;border-radius:6px;border:0;background:#e2c778;color:#171717;text-decoration:none}button:hover,a:hover{background:#d6b85f;color:#171717}header span{margin-left:auto;font-size:13px}iframe{display:block;flex:1;width:100%;min-height:0;border:0;background:#fff}@media(max-width:520px){header span{margin-left:0}}</style></head><body><header><button id="back" type="button">Back to earnings report</button><button id="print" type="button">Print</button><a id="download">Download PDF</a><span>'+safe(title)+'</span></header><iframe id="pdf-frame" title="'+safe(title)+'"></iframe></body></html>');
       viewer.close();
       viewer.getElementById('back').addEventListener('click',()=>{pdfWindow.close();try{window.focus()}catch(error){}});
-      viewer.getElementById('print').addEventListener('click',()=>{const frame=viewer.getElementById('pdf-frame');try{frame.contentWindow.focus();frame.contentWindow.print()}catch(error){pdfWindow.print()}});
-      const download=viewer.getElementById('download');download.href=earningsReportPdfUrl;download.download='RHTC_Upcoming_Earnings_Report.pdf';
+      const printButton=viewer.getElementById('print'),download=viewer.getElementById('download');
+      download.href=earningsReportPdfUrl;download.download='RHTC_Upcoming_Earnings_Report.pdf';
+      const canSharePdf=Boolean(pdfWindow.navigator.share&&pdfWindow.navigator.canShare?.({files:[earningsPdfFile]}));
+      if(isAppleMobile&&canSharePdf){
+        printButton.hidden=true;download.textContent='Print or save PDF';
+        download.addEventListener('click',async event=>{event.preventDefault();try{await pdfWindow.navigator.share({files:[earningsPdfFile]})}catch(error){if(error.name!=='AbortError')pdfWindow.alert('Could not open Print or Save options. Use the browser Share button to print or save this PDF.')}});
+      }else{
+        printButton.addEventListener('click',()=>{const frame=viewer.getElementById('pdf-frame');try{frame.contentWindow.focus();frame.contentWindow.print()}catch(error){pdfWindow.print()}});
+      }
       viewer.getElementById('pdf-frame').src=earningsReportPdfUrl;
     }
     const open=document.createElement('a');open.className='refresh-btn secondary';open.href=earningsReportPdfUrl;open.target='_blank';open.rel='noopener';open.textContent='Open PDF';
     const download=document.createElement('a');download.className='refresh-btn ticker-report-pdf-link';download.href=earningsReportPdfUrl;download.download='RHTC_Upcoming_Earnings_Report.pdf';download.textContent='Download PDF';
+    if(isAppleMobile&&navigator.share&&navigator.canShare?.({files:[earningsPdfFile]})){
+      download.textContent='Print or save PDF';
+      download.addEventListener('click',async event=>{event.preventDefault();status.textContent='Choose Print or Save to Files.';try{await navigator.share({files:[earningsPdfFile]})}catch(error){if(error.name!=='AbortError')status.textContent='Could not open Print or Save options. Use Open PDF, then the browser Share button.'}});
+    }
     const back=document.createElement('button');back.type='button';back.className='refresh-btn secondary';back.textContent='Back to report';back.onclick=()=>{toolbar.replaceChildren(action,status);action.disabled=false;action.textContent='Generate PDF';status.textContent='PDF ready. Open or download the report above.'};
     toolbar.replaceChildren(open,download,back,status);
     status.textContent=pdfWindow?'PDF opened in a separate tab. Use Back to earnings report there to return.':'PDF ready. Open or download the report.';
