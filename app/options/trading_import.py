@@ -388,6 +388,8 @@ def tax_lot_rows(db, account, year, open_only=False):
         result = []
         for security, open_lots in inventory.items():
             ticker = tax_lot_ticker(security)
+            if ticker == "FCASH":
+                continue
             for lot in open_lots:
                 # Calls whose OCC expiration date has passed are no longer open
                 # positions, even when the broker omits a separate expiry row.
