@@ -1783,3 +1783,12 @@ body.news-mode .news-research-title {
 .guide-menu.is-editing .guide-menu-group > .guide-submenu {grid-column: 1 / -1}
 .guide-menu.is-editing .guide-menu-group-title {min-width: 0; overflow-wrap: anywhere}
 .guide-menu-entry-tools .guide-menu-rename {color: var(--gold)}
+
+/* Match Earnings Calendar PDF actions to the standard gold report controls. */
+.earnings-report-toolbar{border-color:#b9944a}
+.earnings-report-toolbar .refresh-btn,
+.earnings-report-toolbar .ticker-report-pdf-link{min-height:44px;padding:0 .8rem;border:0!important;border-radius:.4rem;background:#e2c778!important;color:#171717!important;font:600 12px var(--sans);box-shadow:none;text-decoration:none!important}
+.earnings-report-toolbar .refresh-btn:hover,
+.earnings-report-toolbar .ticker-report-pdf-link:hover{background:#d6b85f!important;color:#171717!important}
+.earnings-report-toolbar .refresh-btn:focus-visible,
+.earnings-report-toolbar .ticker-report-pdf-link:focus-visible{outline:3px solid #fff;outline-offset:2px}
