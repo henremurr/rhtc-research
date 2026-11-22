@@ -412,7 +412,7 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
     return;
    }
    if(reportMode==='open-tax'){
-    const rows=data.lots||[],labels=['Ticker / security','Side','Date acquired','Holding period','Open quantity','Basis / proceeds','Per unit'];
+    const rows=data.lots||[],labels=['Ticker / security','Side','Date acquired','Holding period','Open quantity','Cost/Premium','Per unit'];
     const dollars=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'});
     if(rows.length){
      const wrap=document.createElement('div');wrap.style.overflowX='auto';
@@ -420,9 +420,13 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
      const head=table.createTHead().insertRow();for(const label of labels){const th=document.createElement('th');th.textContent=label;head.append(th);}
      const body=table.createTBody();
      for(const lot of rows){const row=body.insertRow();const values=[lot.ticker+' · '+lot.description,lot.side,lot.acquired,lot.term,lot.quantity,lot.amount,lot.unit_amount];values.forEach((value,index)=>{const cell=row.insertCell();cell.dataset.label=labels[index];cell.textContent=value==null||value===''?'—':index===5||index===6?dollars.format(Number(value)):value;if(index>=4)cell.style.textAlign='right';});}
-     const footer=table.createTFoot().insertRow(),label=footer.insertCell();label.colSpan=5;label.textContent='Open lot totals';label.style.fontWeight='700';
-     const basis=rows.filter(lot=>lot.amount_type==='Basis').reduce((sum,lot)=>sum+(Number(lot.amount)||0),0),proceeds=rows.filter(lot=>lot.amount_type==='Proceeds').reduce((sum,lot)=>sum+(Number(lot.amount)||0),0);
-     const total=footer.insertCell();total.textContent='Basis '+dollars.format(basis)+' · Proceeds '+dollars.format(proceeds);total.style.textAlign='right';total.style.fontWeight='700';footer.insertCell();
+     const longLots=rows.filter(lot=>lot.amount_type==='Cost'),shortLots=rows.filter(lot=>lot.amount_type==='Premium');
+     const sumQuantity=group=>group.reduce((sum,lot)=>sum+(Number(lot.quantity)||0),0),sumAmount=group=>group.reduce((sum,lot)=>sum+(Number(lot.amount)||0),0);
+     const longShares=sumQuantity(longLots),longCost=sumAmount(longLots),shortContracts=sumQuantity(shortLots),shortPremium=sumAmount(shortLots);
+     const quantityFormat=new Intl.NumberFormat('en-US',{maximumFractionDigits:6}),footer=table.createTFoot();
+     const addTotal=(title,quantity,amount,unit)=>{const row=footer.insertRow(),label=row.insertCell();label.colSpan=4;label.textContent=title;label.style.fontWeight='700';const qtyCell=row.insertCell();qtyCell.textContent=quantityFormat.format(quantity);qtyCell.style.textAlign='right';const amountCell=row.insertCell();amountCell.textContent=dollars.format(amount);amountCell.style.textAlign='right';const unitCell=row.insertCell();unitCell.textContent=dollars.format(unit);unitCell.style.textAlign='right';};
+     addTotal('Total Long',longShares,longCost,longShares?longCost/longShares:0);
+     addTotal('Total Short',shortContracts,shortPremium,shortContracts?shortPremium/(shortContracts*100):0);
     }
     showReport(results,params,rows.length?rows.length+' open lots as of '+(params.year==='0'?'the latest available transaction':params.year+' year-end')+'.':'No open tax lots for this account as of the selected year-end.',Boolean(rows.length));
     return;
