@@ -422,7 +422,16 @@ def tax_lot_rows(db, account, year, open_only=False):
                            "quantity": format(qty.normalize(), "f"), "amount": amount_value,
                            "unit_amount": unit_value, "amount_type": "Premium" if is_option else ("Cost" if side == "long" else "Proceeds"),
                            "term": holding_term(acquired, as_of) if as_of else "short"})
-        return sorted(result, key=lambda row: (row["ticker"], 0 if " share" in row["description"] else 1, row["acquired"], row["description"]))
+        def open_lot_sort_key(row):
+            description = row["description"]
+            if " share" in description:
+                return (row["ticker"], 0, row["acquired"], 0, Decimal(0), description)
+            contract = re.search(r"(\\d{6})([CP])(\\d+(?:\\.\\d+)?)", description)
+            if contract:
+                return (row["ticker"], 1, contract.group(1), 0 if contract.group(2) == "C" else 1,
+                        Decimal(contract.group(3)), description)
+            return (row["ticker"], 1, "999999", 9, Decimal(0), description)
+        return sorted(result, key=open_lot_sort_key)
     return sorted(completed, key=lambda row: (row["sold"], row["description"], row["acquired"]))
 
 
