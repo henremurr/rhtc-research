@@ -3546,6 +3546,56 @@ def split_stock_analysis_sections(analysis: str) -> tuple[str, str]:
 
 
 
+@app.post("/api/earnings-report/save", status_code=201)
+async def save_earnings_calendar(request: Request):
+    pdf = await request.body()
+    if len(pdf) > 20 * 1024 * 1024:
+        raise HTTPException(413, "Report exceeds 20 MB.")
+    if not pdf.startswith(b"%PDF-"):
+        raise HTTPException(400, "A PDF report is required.")
+    saved_at = datetime.now(timezone.utc).isoformat()
+    with closing(connect_watchlist_db()) as connection:
+        with connection:
+            connection.execute("""CREATE TABLE IF NOT EXISTS earnings_calendar_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                saved_at TEXT NOT NULL,
+                pdf BLOB NOT NULL
+            )""")
+            cursor = connection.execute(
+                "INSERT INTO earnings_calendar_reports (saved_at, pdf) VALUES (?, ?)",
+                (saved_at, pdf),
+            )
+            report_id = cursor.lastrowid
+    return {"id": report_id, "saved_at": saved_at}
+
+
+@app.get("/api/earnings-report/saved")
+async def list_saved_earnings_calendars():
+    with closing(connect_watchlist_db()) as connection:
+        connection.execute("""CREATE TABLE IF NOT EXISTS earnings_calendar_reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, saved_at TEXT NOT NULL, pdf BLOB NOT NULL
+        )""")
+        rows = connection.execute(
+            "SELECT id, saved_at FROM earnings_calendar_reports ORDER BY saved_at DESC, id DESC"
+        ).fetchall()
+    return {"reports": [dict(row) for row in rows]}
+
+
+@app.get("/api/earnings-report/saved/{report_id}")
+async def get_saved_earnings_calendar(report_id: int):
+    with closing(connect_watchlist_db()) as connection:
+        connection.execute("""CREATE TABLE IF NOT EXISTS earnings_calendar_reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, saved_at TEXT NOT NULL, pdf BLOB NOT NULL
+        )""")
+        row = connection.execute(
+            "SELECT pdf FROM earnings_calendar_reports WHERE id = ?", (report_id,)
+        ).fetchone()
+    if row is None:
+        raise HTTPException(404, "Saved report not found.")
+    return Response(content=row["pdf"], media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="Earnings_Calendar_{report_id}.pdf"'})
+
+
 @app.post("/api/ticker-report/pdf")
 async def create_ticker_report_pdf(data: TickerReportPdfInput):
     symbol = data.symbol.strip().upper()
