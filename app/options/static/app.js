@@ -369,7 +369,7 @@ async function printEarningsReport(){
   if(!content?.querySelector('table')){status.textContent='Load the earnings report before previewing.';return}
   action.disabled=true;action.textContent='Preparing preview…';status.textContent='Generating Earnings Calendar PDF…';
   const title='Earnings Calendar',generatedAt=new Date().toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'});
-  const bodyText=['As of '+($('#earnings-report-meta')?.textContent||''),$('#earnings-report-status')?.textContent||'',reportHtmlToText(content.innerHTML)].filter(Boolean).join('\\n\\n');
+  const bodyText=reportHtmlToText(content.innerHTML);
   try{
     const response=await fetch('/options/api/ticker-report/pdf',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:'RHTC',title,generated_at:generatedAt,sections:[{title:'Upcoming earnings',text:bodyText}]})});
     if(!response.ok){const data=await response.json().catch(()=>({}));throw Error(data.detail||'PDF generation failed ('+response.status+').')}
@@ -387,9 +387,6 @@ async function printEarningsReport(){
       pages.innerHTML='<article class="earnings-page-sheet">'
         +'<header class="earnings-page-header">THREE PEAKS | RESEARCH</header>'
         +'<h2>Earnings Calendar</h2>'
-        +'<div class="earnings-page-meta">Prepared '+safe(generatedAt)+' · RHTC Three Peaks Research</div>'
-        +'<div class="earnings-page-meta">'+safe($('#earnings-report-meta')?.textContent||'')+'</div>'
-        +'<div class="earnings-page-meta">'+safe($('#earnings-report-status')?.textContent||'')+'</div>'
         +content.innerHTML
         +'</article>';
       pages.hidden=false;
