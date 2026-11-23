@@ -1839,7 +1839,7 @@ async def _build_news_summary(data: NewsSummaryInput, job_id: str | None = None)
         "\n## On the horizon — 2-12 months\nIdentify at most 4 developing structural themes and potential second-order beneficiaries and losers across AI/infrastructure, energy/fuels/infrastructure, defense/space/infrastructure, cross-peak, or any other theme supported by the selected stories. Explain the chain from catalyst to business impact, the milestone that upgrades the idea from watchlist to trade candidate, dependencies, and what would disprove the thesis. Distinguish speculative from funded/contracted developments.\n"
         "\n## Portfolio alignment and rebalancing priorities\nEvaluate the CURRENT RHTC HOLDINGS SNAPSHOT provided separately alongside the news; only positive-share rows count as holdings, with accounts kept distinct. Compare each material holding and its peak exposure with the strongest beneficiary/loser categories and the Now / Near term / Horizon opportunities. Group findings into three short subsections: ### Correctly positioned — maintain or monitor, ### Misaligned — thesis or exposure at risk, and ### Rebalance candidates — add, reduce, diversify, or hold pending confirmation. Name the held tickers and accounts with specific supporting reasons, confidence, priority, and a catalyst that would change the call. Highlight overlapping company exposure across multiple accounts, crowded peak/industry exposure, neglected themes and missing beneficiaries, correlated downside, and covered-call assignment/upside-cap risk when the supplied contract metadata is sufficient. Distinguish gaps where there is no compelling action. Keep recommendations CONDITIONAL rather than issuing orders; articulate what would trigger a review. NEVER treat shares, stored share_price, or options fields as up-to-date valuation data; portfolio weights, unrealized P/L, tax impact, contract coverage, liquidity, and diversification cannot be quantified reliably without verified current quotes and account balances. Where those inputs are missing, say 'weight not verified' and propose a rebalance direction without made-up percentages or lot amounts. Explicitly state the snapshot is derived from RHTC Watchlist Manager, not reconciled brokerage positions, and warn if no held positions are available. This section is more important than a generic stock ideas list.\n"
         "\n## What could go wrong\nIn a tight paragraph, spotlight the most important contradictory evidence, timing uncertainty, funding or regulatory risk, crowded positioning, and unknown price/valuation inputs that might make the seemingly attractive ideas bad trades. State when standing aside is the best supported stance.\n"
-        "\n## Public-market names worth checking\nCover relevant listed companies from the entire public market rather than only the RHTC watchlist. Use a few short third-level headings in the form TICKER — Verified Company Name. For each, explain its specific economic exposure, directional bias, time window (Now / Near term / Horizon), confidence, catalyst or verification trigger, and principal risk in 2-3 natural sentences. Include both beneficiaries and losers if supported. Do not invent ticker-company mappings or force tenuous thematic links. This is a prioritized shortlist, not an exhaustive list of every ticker.\n"
+        "\n## Public-market names worth checking\nCover relevant listed companies from the entire public market rather than only the RHTC watchlist. For EACH company, use a third-level Markdown heading on its own line, exactly ### TICKER — Verified Company Name (no bullet before the company name). Follow it with 2-3 short plain-text lines or sentences with clearly marked Exposure, Time window, Confidence, Trigger, and Risk; group details under their company heading. Never format each of these details as separate generic bullets, and never combine two companies in one line. Include both beneficiaries and losers if supported. Do not invent ticker-company mappings or force tenuous thematic links. This is a prioritized shortlist, not an exhaustive list of every ticker.\n"
         "\nWrite naturally, avoid redundant sections, dense checklists, mechanical article recaps, story indexes or appendices, and keep the briefing roughly 900-1600 words when the evidence warrants it. Put high-value setups first. The objective is decision support and efficient research prioritization, not a promise of profitability or unsupported precise entry instructions. The report is a finished standalone artifact, NOT an interactive chat. Never finish with questions addressed to the reader, invitations to respond, offers to perform more analysis, suggested follow-up prompts, or a 'What would you like to do next?' section. If information is missing, state the limitation declaratively and list any required validation as a factual condition, not as a question. End with the final substantive assessment or decision-relevant takeaway.\n"
     )
 
@@ -2005,7 +2005,7 @@ async def create_news_summary_pdf(data: NewsSummaryPdfInput) -> Response:
     from reportlab.lib.pagesizes import letter
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import inch
-    from reportlab.platypus import ListFlowable, ListItem, Paragraph, SimpleDocTemplate, Spacer
+    from reportlab.platypus import KeepTogether, ListFlowable, ListItem, Paragraph, SimpleDocTemplate, Spacer
 
     gold = colors.HexColor("#b2934a")
     ink = colors.HexColor("#17202b")
@@ -2099,6 +2099,23 @@ async def create_news_summary_pdf(data: NewsSummaryPdfInput) -> Response:
     ]
     paragraph_lines: list[str] = []
     bullet_lines: list[str] = []
+    in_market_names = False
+    company_block: list = []
+
+    def flush_company():
+        if company_block:
+            # Keep the company name and its exposure/trigger/risk details together.
+            story.append(KeepTogether(list(company_block)))
+            company_block.clear()
+
+    def add_company_detail(value: str):
+        label = re.match(r"^(Exposure|Time window|Timeframe|Confidence|Trigger|Catalyst|Risk|Direction|Bias|Indicator|Why it matters|Portfolio position)\\s*:\\s*(.*)$", value, re.IGNORECASE)
+        if label:
+            content = f"<b>{markup(label.group(1).capitalize())}:</b> {markup(label.group(2))}"
+        else:
+            content = markup(value)
+        company_block.append(Paragraph(content, body_style))
+
 
     def flush_paragraph():
         if paragraph_lines:
@@ -2111,20 +2128,52 @@ async def create_news_summary_pdf(data: NewsSummaryPdfInput) -> Response:
             story.append(ListFlowable(items, bulletType="bullet", start="circle", bulletColor=gold, bulletFontName="Helvetica", bulletFontSize=7, leftIndent=18, bulletIndent=4, spaceAfter=7))
             bullet_lines.clear()
 
-    for raw_line in data.analysis.replace("\r", "").split("\n"):
+    for raw_line in data.analysis.replace("\\r", "").split("\\n"):
         line = raw_line.strip()
         if not line:
             flush_paragraph()
             flush_bullets()
             continue
-        heading = re.match(r"^(#{1,3})\s+(.+)$", line)
+        heading = re.match(r"^(#{1,3})\\s+(.+)$", line)
         if heading:
             flush_paragraph()
             flush_bullets()
-            style = ticker_heading_style if len(heading.group(1)) >= 3 else heading_style
-            story.append(Paragraph(markup(heading.group(2)), style))
+            heading_text = heading.group(2).strip()
+            if len(heading.group(1)) <= 2:
+                flush_company()
+                in_market_names = bool(re.search(
+                    r"(?:public.market (?:names|companies)|forward impact assessment)", heading_text, re.I
+                ))
+                story.append(Paragraph(markup(heading_text), heading_style))
+            elif in_market_names:
+                flush_company()
+                company_block.append(Paragraph(markup(heading_text), ticker_heading_style))
+            else:
+                story.append(Paragraph(markup(heading_text), ticker_heading_style))
             continue
-        bullet = re.match(r"^(?:[-*•]|\d+[.)])\s+(.+)$", line)
+        bullet = re.match(r"^(?:[-*•]|\\d+[.)])\\s+(.+)$", line)
+        if in_market_names:
+            content = bullet.group(1).strip() if bullet else line
+            # Normalize model-generated company bullets into full company headers.
+            company_heading = re.match(
+                r"^([A-Z][A-Z0-9.]{0,9})\\s*[-–—:]\\s+(.+)$", content
+            )
+            if company_heading and company_heading.group(1) not in {
+                "NOW", "RISK", "TRIGGER", "EXPOSURE", "CONFIDENCE"
+            }:
+                flush_paragraph()
+                flush_bullets()
+                flush_company()
+                company_block.append(Paragraph(
+                    markup(f"{company_heading.group(1)} — {company_heading.group(2)}"),
+                    ticker_heading_style,
+                ))
+            elif company_block:
+                add_company_detail(content)
+            else:
+                # Preserve an introductory paragraph without forcing it into a company card.
+                paragraph_lines.append(content)
+            continue
         if bullet:
             label = bullet.group(1).strip()
             if label.endswith(":"):
@@ -2143,6 +2192,7 @@ async def create_news_summary_pdf(data: NewsSummaryPdfInput) -> Response:
             paragraph_lines.append(line)
     flush_paragraph()
     flush_bullets()
+    flush_company()
 
     doc.build(story, onFirstPage=draw_page, onLaterPages=draw_page)
     return Response(content=output.getvalue(), media_type="application/pdf", headers={"Content-Disposition": 'inline; filename="rhtc-news-summary.pdf"', "Cache-Control": "no-store"})
