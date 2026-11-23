@@ -3731,7 +3731,17 @@ async def create_ticker_report_pdf(data: TickerReportPdfInput):
             if row[0].startswith("@@RHTC_GROUP@@"):
                 grouped_rows.append(row_index)
                 row[0] = row[0][len("@@RHTC_GROUP@@"):]
-            cell_data.append([paragraph(str(cell), style) for cell in row])
+            cell_data.append([
+                paragraph(
+                    str(cell),
+                    ParagraphStyle("EarningsNegative", parent=style, textColor=colors.HexColor("#d32f2f"))
+                    if is_earnings_calendar and not (header and row_index == 0)
+                    and row_index not in grouped_rows
+                    and re.fullmatch(r"(?:-\s*\$?|\$\s*-)\s*[\d,]+(?:\.\d+)?\s*(?:[%xKMBT])?", str(cell).strip().replace("−", "-"))
+                    else style,
+                )
+                for cell in row
+            ])
         table = Table(
             cell_data, colWidths=[(page_size[0] - left - right) / width_count] * width_count,
             repeatRows=1 if header else 0, hAlign="LEFT", splitByRow=1,
