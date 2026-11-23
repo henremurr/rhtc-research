@@ -417,6 +417,46 @@ function toggleEarningsPreviewFullScreen(){
   const expanded=preview.classList.toggle('expanded');
   $('#earnings-preview-expand').textContent=expanded?'Exit full screen':'Full screen';
 }
+async function saveEarningsReport(){
+  if(!earningsReportPdfFile||!earningsReportPdfUrl){
+    const status=$('#earnings-report-print-status');
+    if(status)status.textContent='Preview the report before saving.';
+    return;
+  }
+  // iOS does not support browser-selected save paths. The native share sheet
+  // provides Save to Files and lets the user select a destination.
+  const isAppleMobile=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+  if(isAppleMobile&&navigator.share&&navigator.canShare?.({files:[earningsReportPdfFile]})){
+    try{
+      await navigator.share({files:[earningsReportPdfFile]});
+    }catch(error){
+      if(error.name!=='AbortError')window.open(earningsReportPdfUrl,'_blank','noopener');
+    }
+    return;
+  }
+  // Desktop browsers with the File System Access API can select a filename
+  // and destination. Other browsers use their ordinary PDF download process.
+  if(typeof window.showSaveFilePicker==='function'){
+    try{
+      const handle=await window.showSaveFilePicker({
+        suggestedName:earningsReportPdfFile.name,
+        types:[{description:'PDF document',accept:{'application/pdf':['.pdf']}}]
+      });
+      const writable=await handle.createWritable();
+      await writable.write(earningsReportPdfFile);
+      await writable.close();
+      return;
+    }catch(error){
+      if(error.name==='AbortError')return;
+    }
+  }
+  const link=document.createElement('a');
+  link.href=earningsReportPdfUrl;
+  link.download=earningsReportPdfFile.name;
+  document.body.append(link);
+  link.click();
+  link.remove();
+}
 async function saveOrPrintEarningsPdf(){
   if(!earningsReportPdfFile||!earningsReportPdfUrl)return;
   const isAppleMobile=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
