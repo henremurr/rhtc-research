@@ -371,7 +371,30 @@ async function printEarningsReport(){
     earningsReportPdfUrl=URL.createObjectURL(blob);
     earningsReportPdfFile=new File([blob],'RHTC_Upcoming_Earnings_Report.pdf',{type:'application/pdf'});
     const preview=$('#earnings-preview');
-    $('#earnings-preview-frame').src=earningsReportPdfUrl;
+    const pages=$('#earnings-preview-pages'),frame=$('#earnings-preview-frame');
+    const isAppleMobile=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+    if(isAppleMobile){
+      // iOS Safari does not reliably scroll a multipage PDF inside an iframe.
+      // Keep the original PDF for Print/Save, but preview report content in
+      // an independently scrollable document surface.
+      pages.innerHTML='<article class="earnings-page-sheet">'
+        +'<header class="earnings-page-header">THREE PEAKS | RESEARCH</header>'
+        +'<h2>Earnings Calendar</h2>'
+        +'<div class="earnings-page-meta">Prepared '+safe(generatedAt)+' · RHTC Three Peaks Research</div>'
+        +'<div class="earnings-page-meta">'+safe($('#earnings-report-meta')?.textContent||'')+'</div>'
+        +'<div class="earnings-page-meta">'+safe($('#earnings-report-status')?.textContent||'')+'</div>'
+        +content.innerHTML
+        +'</article>';
+      pages.hidden=false;
+      frame.hidden=true;
+      frame.removeAttribute('src');
+      pages.scrollTop=0;
+    }else{
+      pages.hidden=true;
+      pages.replaceChildren();
+      frame.hidden=false;
+      frame.src=earningsReportPdfUrl;
+    }
     preview.showModal();
     status.textContent='';
   }catch(error){status.textContent='Could not preview PDF: '+error.message}
@@ -380,6 +403,8 @@ async function printEarningsReport(){
 function closeEarningsPreview(){
   const preview=$('#earnings-preview');
   if(preview?.open)preview.close();
+  const pages=$('#earnings-preview-pages');
+  if(pages){pages.scrollTop=0;pages.replaceChildren();}
   preview?.classList.remove('expanded');
   const button=$('#earnings-preview-expand');if(button)button.textContent='Full screen';
 }
