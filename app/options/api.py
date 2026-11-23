@@ -3567,7 +3567,7 @@ async def create_ticker_report_pdf(data: TickerReportPdfInput):
     page_size = landscape(letter) if is_earnings_calendar else letter
     output = BytesIO()
     left = right = 0.45 * inch if is_earnings_calendar else 0.72 * inch
-    top, bottom = 0.94 * inch, 0.68 * inch
+    top, bottom = (0.90 if is_earnings_calendar else 0.94) * inch, 0.68 * inch
     doc = SimpleDocTemplate(
         output, pagesize=page_size, leftMargin=left, rightMargin=right,
         topMargin=top, bottomMargin=bottom,
@@ -3809,13 +3809,13 @@ async def create_ticker_report_pdf(data: TickerReportPdfInput):
     def draw_page(canvas, document):
         canvas.saveState()
         page_width, page_height = page_size
-        logo_size = 0.35 * inch
+        logo_size = (0.30 if is_earnings_calendar else 0.35) * inch
         logo_x = document.leftMargin
-        logo_y = page_height - 0.50 * inch
+        logo_y = page_height - (0.49 if is_earnings_calendar else 0.50) * inch
         canvas.drawImage(logo_image, logo_x, logo_y, width=logo_size, height=logo_size, mask="auto")
         canvas.setFillColor(dark_gold)
         canvas.setFont("Helvetica-Bold", 8)
-        canvas.drawString(logo_x + logo_size + 8, logo_y + 0.13 * inch, "THREE PEAKS  |  RESEARCH")
+        canvas.drawString(logo_x + logo_size + 8, logo_y + (0.10 if is_earnings_calendar else 0.13) * inch, "THREE PEAKS  |  RESEARCH")
         canvas.setFillColor(muted)
         canvas.setFont("Helvetica-Bold", 7)
         canvas.drawRightString(page_width - document.rightMargin, logo_y + 0.13 * inch, symbol)
@@ -3824,13 +3824,15 @@ async def create_ticker_report_pdf(data: TickerReportPdfInput):
                 "\u2212": "-", "\u2010": "-", "\u2011": "-",
                 "\u2012": "-", "\u2013": "-", "\u2014": "-",
             })).encode("cp1252", "replace").decode("cp1252")
-            title_size = 8
+            title_size = 9 if is_earnings_calendar else 8
             available_width = page_width - document.leftMargin - document.rightMargin
             while title_size > 6 and canvas.stringWidth(repeated_title, "Helvetica-Bold", title_size) > available_width:
                 title_size -= 0.5
             canvas.setFillColor(dark_gold)
             canvas.setFont("Helvetica-Bold", title_size)
-            canvas.drawString(document.leftMargin, page_height - 0.55 * inch, repeated_title)
+            # Earnings title belongs on its own line below the gold header rule;
+            # the former -0.55 inch position overlapped the logo/brand row.
+            canvas.drawString(document.leftMargin, page_height - (0.75 if is_earnings_calendar else 0.55) * inch, repeated_title)
         canvas.setStrokeColor(gold)
         canvas.setLineWidth(1.1)
         canvas.line(document.leftMargin, page_height - 0.61 * inch, page_width - document.rightMargin, page_height - 0.61 * inch)
