@@ -432,6 +432,111 @@ async function saveEarningsReport(){
   }catch(error){if(status)status.textContent='Unable to save: '+error.message}
   finally{button.disabled=false;button.textContent='Save to DB'}
 }
+let earningsHistory=[],earningsHistoryIndex=0,earningsHistoryUrl='',earningsHistoryFile=null,earningsHistorySeq=0,earningsHistoryBusy=false;
+function closeEarningsHistory(){
+  ++earningsHistorySeq;
+  const dialog=$('#earnings-history');if(dialog?.open)dialog.close();
+  const frame=$('#earnings-history-frame');frame.removeAttribute('src');
+  if(earningsHistoryUrl)URL.revokeObjectURL(earningsHistoryUrl);
+  earningsHistoryUrl='';earningsHistoryFile=null;
+}
+function updateEarningsHistoryControls(){
+  const has=earningsHistory.length>0;
+  $('#earnings-history-prev').disabled=earningsHistoryBusy||!has||earningsHistoryIndex>=earningsHistory.length-1;
+  $('#earnings-history-next').disabled=earningsHistoryBusy||!has||earningsHistoryIndex<=0;
+  $('#earnings-history-delete').disabled=earningsHistoryBusy||!has;
+  $('#earnings-history-purge').disabled=earningsHistoryBusy||!has;
+  $('#earnings-history-print').disabled=earningsHistoryBusy||!earningsHistoryFile;
+}
+async function openEarningsHistory(){
+  const dialog=$('#earnings-history');
+  if(!dialog.open)dialog.showModal();
+  await refreshEarningsHistory(0);
+}
+async function refreshEarningsHistory(index){
+  const status=$('#earnings-history-status');
+  earningsHistoryBusy=true;updateEarningsHistoryControls();
+  try{
+    const response=await fetch('/options/api/earnings-report/saved',{credentials:'same-origin',cache:'no-store'});
+    if(!response.ok)throw Error('Could not load report history.');
+    const data=await response.json();
+    earningsHistory=Array.isArray(data.reports)?data.reports:[];
+    earningsHistoryIndex=Math.max(0,Math.min(index,earningsHistory.length-1));
+    await viewEarningsHistoryReport();
+  }catch(error){status.textContent=error.message}
+  finally{earningsHistoryBusy=false;updateEarningsHistoryControls()}
+}
+async function viewEarningsHistoryReport(){
+  const sequence=++earningsHistorySeq,status=$('#earnings-history-status'),frame=$('#earnings-history-frame');
+  frame.removeAttribute('src');
+  if(earningsHistoryUrl)URL.revokeObjectURL(earningsHistoryUrl);
+  earningsHistoryUrl='';earningsHistoryFile=null;updateEarningsHistoryControls();
+  const report=earningsHistory[earningsHistoryIndex];
+  if(!report){status.textContent='No saved Earnings Calendar reports.';return}
+  const label='Report #'+report.id+' · '+new Date(report.saved_at).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'medium'})+' · '+(earningsHistoryIndex+1)+' of '+earningsHistory.length+' (newest first)';
+  status.textContent=label+' · Loading…';
+  try{
+    const response=await fetch('/options/api/earnings-report/saved/'+encodeURIComponent(report.id),{credentials:'same-origin',cache:'no-store'});
+    if(!response.ok)throw Error('Could not retrieve report.');
+    const blob=await response.blob();
+    if(sequence!==earningsHistorySeq)return;
+    earningsHistoryFile=new File([blob],'Earnings_Calendar_'+report.id+'.pdf',{type:'application/pdf'});
+    earningsHistoryUrl=URL.createObjectURL(blob);
+    frame.src=earningsHistoryUrl;status.textContent=label;
+  }catch(error){if(sequence===earningsHistorySeq)status.textContent=error.message}
+  finally{updateEarningsHistoryControls()}
+}
+async function navigateEarningsHistory(delta){
+  if(earningsHistoryBusy)return;
+  const next=earningsHistoryIndex+delta;if(next<0||next>=earningsHistory.length)return;
+  earningsHistoryIndex=next;earningsHistoryBusy=true;updateEarningsHistoryControls();
+  try{await viewEarningsHistoryReport()}finally{earningsHistoryBusy=false;updateEarningsHistoryControls()}
+}
+async function removeEarningsHistory(purge){
+  if(earningsHistoryBusy||!earningsHistory.length)return;
+  const report=earningsHistory[earningsHistoryIndex];
+  if(!confirm(purge?'Permanently delete ALL saved Earnings Calendar reports?':'Permanently delete Earnings Calendar report #'+report.id+'?'))return;
+  earningsHistoryBusy=true;updateEarningsHistoryControls();
+  try{
+    const response=await fetch('/options/api/earnings-report/saved'+(purge?'':'/'+encodeURIComponent(report.id)),{method:'DELETE',credentials:'same-origin'});
+    if(!response.ok)throw Error('Database deletion failed.');
+    await refreshEarningsHistory(purge?0:earningsHistoryIndex);
+  }catch(error){$('#earnings-history-status').textContent=error.message}
+  finally{earningsHistoryBusy=false;updateEarningsHistoryControls()}
+}
+let earningsHistoryPrintUrl='',earningsHistoryPrintFile=null;
+function previewEarningsHistoryPrint(){
+  if(!earningsHistoryFile)return;
+  if(earningsHistoryPrintUrl)URL.revokeObjectURL(earningsHistoryPrintUrl);
+  earningsHistoryPrintFile=earningsHistoryFile;
+  earningsHistoryPrintUrl=URL.createObjectURL(earningsHistoryPrintFile);
+  const dialog=$('#earnings-history-print-preview');
+  $('#earnings-history-print-frame').src=earningsHistoryPrintUrl;
+  $('#earnings-history-download').href=earningsHistoryPrintUrl;
+  $('#earnings-history-download').download=earningsHistoryPrintFile.name;
+  dialog.showModal();
+}
+function closeEarningsHistoryPrint(){
+  const dialog=$('#earnings-history-print-preview');if(dialog.open)dialog.close();
+  dialog.classList.remove('expanded');$('#earnings-history-print-expand').textContent='Full screen';
+  $('#earnings-history-print-frame').removeAttribute('src');
+  if(earningsHistoryPrintUrl)URL.revokeObjectURL(earningsHistoryPrintUrl);
+  earningsHistoryPrintUrl='';earningsHistoryPrintFile=null;
+}
+function toggleEarningsHistoryPrint(){
+  const expanded=$('#earnings-history-print-preview').classList.toggle('expanded');
+  $('#earnings-history-print-expand').textContent=expanded?'Exit full screen':'Full screen';
+}
+async function printSavedEarningsHistory(){
+  if(!earningsHistoryPrintFile)return;
+  const mobile=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+  if(mobile&&navigator.share&&navigator.canShare?.({files:[earningsHistoryPrintFile]})){
+    try{await navigator.share({files:[earningsHistoryPrintFile]})}catch(error){if(error.name!=='AbortError')window.open(earningsHistoryPrintUrl,'_blank','noopener')}
+    return;
+  }
+  try{const frame=$('#earnings-history-print-frame');frame.contentWindow.focus();frame.contentWindow.print()}catch(error){window.open(earningsHistoryPrintUrl,'_blank','noopener')}
+}
+function returnFromEarningsHistory(){closeEarningsHistoryPrint();closeEarningsHistory();closeEarningsPreview();closeEarningsReport()}
 async function saveOrPrintEarningsPdf(){
   if(!earningsReportPdfFile||!earningsReportPdfUrl)return;
   const isAppleMobile=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
