@@ -364,11 +364,13 @@ async function showEarningsReport(){
 }
 let earningsReportPdfUrl='';
 let earningsReportPdfFile=null;
+let earningsReportRunAt=null;
 async function printEarningsReport(){
   const content=$('#earnings-report-content'),action=$('#earnings-report-pdf-btn'),status=$('#earnings-report-print-status');
   if(!content?.querySelector('table')){status.textContent='Load the earnings report before previewing.';return}
   action.disabled=true;action.textContent='Preparing preview…';status.textContent='Generating Earnings Calendar PDF…';
-  const title='Earnings Calendar',generatedAt=new Date().toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'});
+  const runAt=new Date();runAt.setMilliseconds(0);
+  const title='Earnings Calendar',generatedAt=runAt.toLocaleString('en-US',{dateStyle:'medium',timeStyle:'medium'});
   const bodyText=reportHtmlToText(content.innerHTML);
   try{
     const response=await fetch('/options/api/ticker-report/pdf',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:'RHTC',title,generated_at:generatedAt,sections:[{title:'Upcoming earnings',text:bodyText}]})});
@@ -377,6 +379,7 @@ async function printEarningsReport(){
     if(earningsReportPdfUrl)URL.revokeObjectURL(earningsReportPdfUrl);
     earningsReportPdfUrl=URL.createObjectURL(blob);
     earningsReportPdfFile=new File([blob],'RHTC_Upcoming_Earnings_Report.pdf',{type:'application/pdf'});
+    earningsReportRunAt=runAt.toISOString();
     const preview=$('#earnings-preview');
     const pages=$('#earnings-preview-pages'),frame=$('#earnings-preview-frame');
     const isAppleMobile=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
@@ -385,7 +388,7 @@ async function printEarningsReport(){
       // Keep the original PDF for Print/Save, but preview report content in
       // an independently scrollable document surface.
       pages.innerHTML='<article class="earnings-page-sheet">'
-        +'<header class="earnings-page-header">THREE PEAKS | RESEARCH</header>'
+        +'<header class="earnings-page-header">THREE PEAKS | RESEARCH <span style="float:right">Run Date-Time: '+generatedAt+'</span></header>'
         +'<h2>Earnings Calendar</h2>'
         +content.innerHTML
         +'</article>';
@@ -425,10 +428,10 @@ async function saveEarningsReport(){
   button.disabled=true;button.textContent='Saving…';
   if(status)status.textContent='';
   try{
-    const response=await fetch('/options/api/earnings-report/save',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/pdf'},body:earningsReportPdfFile});
+    const response=await fetch('/options/api/earnings-report/save',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/pdf','X-Report-Run-At':earningsReportRunAt},body:earningsReportPdfFile});
     const data=await response.json().catch(()=>({}));
     if(!response.ok||!data.saved_at||!data.id)throw Error(typeof data.detail==='string'?data.detail:'Database save failed ('+response.status+').');
-    if(status)status.textContent='Saved to DB · '+new Date(data.saved_at).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'medium'})+' · Report #'+data.id;
+    if(status)status.textContent='Saved to DB · Run Date-Time: '+new Date(data.saved_at).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'medium'})+' · Report #'+data.id;
   }catch(error){if(status)status.textContent='Unable to save: '+error.message}
   finally{button.disabled=false;button.textContent='Save to DB'}
 }
