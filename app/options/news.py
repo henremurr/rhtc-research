@@ -2109,7 +2109,7 @@ async def create_news_summary_pdf(data: NewsSummaryPdfInput) -> Response:
             company_block.clear()
 
     def add_company_detail(value: str):
-        label = re.match(r"^(Exposure|Time window|Timeframe|Confidence|Trigger|Catalyst|Risk|Direction|Bias|Indicator|Why it matters|Portfolio position)\\s*:\\s*(.*)$", value, re.IGNORECASE)
+        label = re.match(r"^(Exposure|Time window|Timeframe|Confidence|Trigger|Catalyst|Risk|Direction|Bias|Indicator|Why it matters|Portfolio position)\s*:\s*(.*)$", value, re.IGNORECASE)
         if label:
             content = f"<b>{markup(label.group(1).capitalize())}:</b> {markup(label.group(2))}"
         else:
@@ -2128,13 +2128,13 @@ async def create_news_summary_pdf(data: NewsSummaryPdfInput) -> Response:
             story.append(ListFlowable(items, bulletType="bullet", start="circle", bulletColor=gold, bulletFontName="Helvetica", bulletFontSize=7, leftIndent=18, bulletIndent=4, spaceAfter=7))
             bullet_lines.clear()
 
-    for raw_line in data.analysis.replace("\\r", "").split("\\n"):
+    for raw_line in data.analysis.replace("\r", "").split("\n"):
         line = raw_line.strip()
         if not line:
             flush_paragraph()
             flush_bullets()
             continue
-        heading = re.match(r"^(#{1,3})\\s+(.+)$", line)
+        heading = re.match(r"^(#{1,3})\s+(.+)$", line)
         if heading:
             flush_paragraph()
             flush_bullets()
@@ -2151,12 +2151,12 @@ async def create_news_summary_pdf(data: NewsSummaryPdfInput) -> Response:
             else:
                 story.append(Paragraph(markup(heading_text), ticker_heading_style))
             continue
-        bullet = re.match(r"^(?:[-*•]|\\d+[.)])\\s+(.+)$", line)
+        bullet = re.match(r"^(?:[-*•]|\d+[.)])\s+(.+)$", line)
         if in_market_names:
             content = bullet.group(1).strip() if bullet else line
             # Normalize model-generated company bullets into full company headers.
             company_heading = re.match(
-                r"^([A-Z][A-Z0-9.]{0,9})\\s*[-–—:]\\s+(.+)$", content
+                r"^([A-Z][A-Z0-9.]{0,9})\s*[-–—:]\s+(.+)$", content
             )
             if company_heading and company_heading.group(1) not in {
                 "NOW", "RISK", "TRIGGER", "EXPOSURE", "CONFIDENCE"
