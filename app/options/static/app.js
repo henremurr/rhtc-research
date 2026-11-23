@@ -310,14 +310,14 @@ async function showEarningsReport(){
       const epsValue=Number(event.eps_estimate);
       const epsAvailable=event.eps_estimate!==null&&event.eps_estimate!==undefined&&Number.isFinite(epsValue);
       const eps=epsAvailable?String.fromCharCode(36)+epsValue.toFixed(2):'Unavailable';
-      const epsColor=epsAvailable?(epsValue>0?'#58d68d':'#ff6b6b'):'';
+      const epsColor=epsAvailable?(epsValue<0?'#d32f2f':epsValue>0?'#58d68d':''):'';
       const last=Number(event.last_price),lastAvailable=Number.isFinite(last)&&last>0;
       const lastText=lastAvailable?'$'+last.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'Unavailable';
       const ttmEpsValue=event.ttm_eps==null?NaN:Number(event.ttm_eps);
       const ttmEpsText=Number.isFinite(ttmEpsValue)?'$'+ttmEpsValue.toFixed(2):'—';
       const ttmQuarterAvgValue=Number.isFinite(ttmEpsValue)?ttmEpsValue/4:NaN;
       const ttmQuarterAvgText=Number.isFinite(ttmQuarterAvgValue)?'$'+ttmQuarterAvgValue.toFixed(2):'—';
-      const ttmEpsColor=Number.isFinite(ttmEpsValue)?(ttmEpsValue<0?'#ff6b6b':'#58d68d'):'';
+      const ttmEpsColor=Number.isFinite(ttmEpsValue)?(ttmEpsValue<0?'#d32f2f':ttmEpsValue>0?'#58d68d':''):'';
       const peValue=event.pe_ratio==null?NaN:Number(event.pe_ratio);
       const peText=Number.isFinite(peValue)&&peValue>0?peValue.toFixed(1)+'x':'—';
       const compactFundamental=(value,shares=false)=>{
@@ -338,7 +338,7 @@ async function showEarningsReport(){
       const ticker=String(event.symbol||'');
       const tickerButton='<button type="button" class="earnings-stock-quote-btn" data-stock-symbol="'+safe(ticker)+'" aria-label="Open stock quote for '+safe(ticker)+'" title="Open stock quote">'+safe(ticker)+'</button>';
       const holdingMarker=event.is_holding?'<span class="earnings-holding-marker"> (holding)</span>':'';
-      return weekHeading+'<tr><td>'+safe(eventDate)+'</td><td data-label="Ticker">'+tickerButton+holdingMarker+'</td><td data-label="Last">'+safe(lastText)+'</td><td data-label="Shares outstanding">'+safe(sharesText)+'</td><td data-label="Revenue (TTM)">'+safe(revenueText)+'</td><td data-label="Earnings (TTM)">'+safe(earningsText)+'</td><td data-label="Margin (TTM)">'+safe(marginText)+'</td><td data-label="P/E (TTM)">'+safe(peText)+'</td><td data-label="EPS (TTM)" style="color:'+ttmEpsColor+'">'+safe(ttmEpsText)+'</td><td data-label="EPS (TTM/4) average" style="color:'+ttmEpsColor+'">'+safe(ttmQuarterAvgText)+'</td><td data-label="qEPS forecast" style="color:'+epsColor+'">'+safe(eps)+'</td></tr>';
+      return weekHeading+'<tr><td>'+safe(eventDate)+'</td><td data-label="Ticker">'+tickerButton+holdingMarker+'</td><td data-label="Last">'+safe(lastText)+'</td><td data-label="Shares outstanding" style="color:'+(Number(event.shares_outstanding)<0?'#d32f2f':'')+'">'+safe(sharesText)+'</td><td data-label="Revenue (TTM)" style="color:'+(revenueNumber<0?'#d32f2f':'')+'">'+safe(revenueText)+'</td><td data-label="Earnings (TTM)" style="color:'+(earningsNumber<0?'#d32f2f':'')+'">'+safe(earningsText)+'</td><td data-label="Margin (TTM)" style="color:'+(margin<0?'#d32f2f':'')+'">'+safe(marginText)+'</td><td data-label="P/E (TTM)">'+safe(peText)+'</td><td data-label="EPS (TTM)" style="color:'+ttmEpsColor+'">'+safe(ttmEpsText)+'</td><td data-label="EPS (TTM/4) average" style="color:'+ttmEpsColor+'">'+safe(ttmQuarterAvgText)+'</td><td data-label="qEPS forecast" style="color:'+epsColor+'">'+safe(eps)+'</td></tr>';
     }).join('');
   content.innerHTML=events.length?'<div class="earnings-report-table-wrap"><table class="earnings-report-table"><thead><tr><th>Next earnings</th><th>Ticker</th><th>Last</th><th>Shares outstanding</th><th>Revenue (TTM)</th><th>Earnings (TTM)</th><th>Margin (TTM)</th><th>P/E (TTM)</th><th>EPS (TTM)</th><th>EPS (TTM/4) average</th><th>qEPS forecast</th></tr></thead><tbody>'+earningsRows+'</tbody></table></div>':'<p class="earnings-report-empty">No upcoming earnings have been saved yet. Run Analyze Stock on tickers to populate the report.</p>';
     const earningsFootnotes='<section class="earnings-report-footnotes" aria-label="Financial definitions and interpretation">'
