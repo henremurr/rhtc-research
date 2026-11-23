@@ -3909,14 +3909,16 @@ async def get_earnings_report(
         shares = finite_number("shares_outstanding")
         revenue = finite_number("revenue")
         eps_ttm = finite_number("earnings_per_share")
+        pe_ratio = finite_number("price_earnings_ratio")
         fundamentals_by_symbol[str(row["symbol"] or "").strip().upper()] = {
             "shares_outstanding": shares if shares is not None and shares > 0 else None,
             "revenue": revenue,
+            "pe_ratio": pe_ratio if pe_ratio is not None and pe_ratio > 0 else None,
             "earnings": eps_ttm * shares if eps_ttm is not None and shares is not None and shares > 0 else None,
         }
     for event in events:
         event.update(fundamentals_by_symbol.get(event["symbol"], {
-            "earnings": None, "shares_outstanding": None, "revenue": None,
+            "earnings": None, "shares_outstanding": None, "revenue": None, "pe_ratio": None,
         }))
     total_before_filter = len(events)
     if eps_sign != "all":
