@@ -1840,7 +1840,7 @@ async def _build_news_summary(data: NewsSummaryInput, job_id: str | None = None)
         "\n## Portfolio alignment and rebalancing priorities\nEvaluate the CURRENT RHTC HOLDINGS SNAPSHOT provided separately alongside the news; only positive-share rows count as holdings, with accounts kept distinct. Compare each material holding and its peak exposure with the strongest beneficiary/loser categories and the Now / Near term / Horizon opportunities. Group findings into three short subsections: ### Correctly positioned — maintain or monitor, ### Misaligned — thesis or exposure at risk, and ### Rebalance candidates — add, reduce, diversify, or hold pending confirmation. Name the held tickers and accounts with specific supporting reasons, confidence, priority, and a catalyst that would change the call. Highlight overlapping company exposure across multiple accounts, crowded peak/industry exposure, neglected themes and missing beneficiaries, correlated downside, and covered-call assignment/upside-cap risk when the supplied contract metadata is sufficient. Distinguish gaps where there is no compelling action. Keep recommendations CONDITIONAL rather than issuing orders; articulate what would trigger a review. NEVER treat shares, stored share_price, or options fields as up-to-date valuation data; portfolio weights, unrealized P/L, tax impact, contract coverage, liquidity, and diversification cannot be quantified reliably without verified current quotes and account balances. Where those inputs are missing, say 'weight not verified' and propose a rebalance direction without made-up percentages or lot amounts. Explicitly state the snapshot is derived from RHTC Watchlist Manager, not reconciled brokerage positions, and warn if no held positions are available. This section is more important than a generic stock ideas list.\n"
         "\n## What could go wrong\nIn a tight paragraph, spotlight the most important contradictory evidence, timing uncertainty, funding or regulatory risk, crowded positioning, and unknown price/valuation inputs that might make the seemingly attractive ideas bad trades. State when standing aside is the best supported stance.\n"
         "\n## Public-market names worth checking\nCover relevant listed companies from the entire public market rather than only the RHTC watchlist. Use a few short third-level headings in the form TICKER — Verified Company Name. For each, explain its specific economic exposure, directional bias, time window (Now / Near term / Horizon), confidence, catalyst or verification trigger, and principal risk in 2-3 natural sentences. Include both beneficiaries and losers if supported. Do not invent ticker-company mappings or force tenuous thematic links. This is a prioritized shortlist, not an exhaustive list of every ticker.\n"
-        "\nWrite naturally, avoid redundant sections, dense checklists, mechanical article recaps, story indexes or appendices, and keep the briefing roughly 900-1600 words when the evidence warrants it. Put high-value setups first. The objective is decision support and efficient research prioritization, not a promise of profitability or unsupported precise entry instructions.\n"
+        "\nWrite naturally, avoid redundant sections, dense checklists, mechanical article recaps, story indexes or appendices, and keep the briefing roughly 900-1600 words when the evidence warrants it. Put high-value setups first. The objective is decision support and efficient research prioritization, not a promise of profitability or unsupported precise entry instructions. The report is a finished standalone artifact, NOT an interactive chat. Never finish with questions addressed to the reader, invitations to respond, offers to perform more analysis, suggested follow-up prompts, or a 'What would you like to do next?' section. If information is missing, state the limitation declaratively and list any required validation as a factual condition, not as a question. End with the final substantive assessment or decision-relevant takeaway.\n"
     )
 
     async def response_text(client, instructions: str, prompt: str, limit: int) -> str:
@@ -1965,6 +1965,26 @@ async def _build_news_summary(data: NewsSummaryInput, job_id: str | None = None)
                 line = f"### {ticker_bullet.group(1).upper()} — {ticker_bullet.group(2)}"
         normalized_lines.append(line)
     analysis = "\n".join(normalized_lines)
+
+    # Remove any accidental conversational closing section. The news summary is
+    # a standalone report, not an interactive assistant response.
+    trailing_chat_heading = re.search(
+        r"(?im)^#{1,3}\\s+(?:questions?\\s+for\\s+you|follow[- ]?up\\s+questions?|"
+        r"suggested\\s+(?:questions?|prompts?|follow[- ]?ups?)|"
+        r"what\\s+(?:would\\s+you\\s+like|should\\s+we\\s+do)\\b|"
+        r"next\\s+steps\\s+for\\s+you)\\s*[:?]?\\s*$",
+        analysis,
+    )
+    if trailing_chat_heading:
+        analysis = analysis[:trailing_chat_heading.start()].rstrip()
+    analysis = re.sub(
+        r"(?ims)\\n+(?:would you like (?:me|us) to|"
+        r"do you want (?:me|us) to|"
+        r"shall I|let me know if you'd like|"
+        r"tell me if you'd like)\\b[^\\n]*\\s*$",
+        "",
+        analysis,
+    ).rstrip()
 
     # Keep full source metadata for optional inline source links without printing an appendix.
     references = sources
