@@ -3632,14 +3632,15 @@ async def create_ticker_report_pdf(data: TickerReportPdfInput):
             Paragraph("COMPREHENSIVE TICKER REPORT  ·  " + xml_escape(symbol), cover_style),
             HRFlowable(width="100%", thickness=2, color=gold, spaceAfter=12),
         ])
-    story.extend([
-        Paragraph(xml_escape(data.title), title_style),
-        Paragraph(
+    story.append(Paragraph(xml_escape(data.title), title_style))
+    # The Earnings Calendar title is followed directly by its column headers.
+    # Do not print the prepared timestamp or redundant report metadata.
+    if not is_earnings_calendar:
+        story.append(Paragraph(
             "Prepared " + xml_escape(data.generated_at or datetime.now().astimezone().strftime("%b %d, %Y %I:%M %p %Z"))
             + "  ·  RHTC Three Peaks Research",
             meta_style,
-        ),
-    ])
+        ))
 
     quote_fields = [
         "Call bid / ask", "Open interest / volume", "Bid / ask size",
