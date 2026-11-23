@@ -3709,7 +3709,7 @@ async def create_ticker_report_pdf(data: TickerReportPdfInput):
         for row_index in grouped_rows:
             commands.extend([
                 ("SPAN", (0, row_index), (-1, row_index)),
-                ("BACKGROUND", (0, row_index), (-1, row_index), pale_ink),
+                ("BACKGROUND", (0, row_index), (-1, row_index), pale_gold if is_earnings_calendar else pale_ink),
                 ("LINEABOVE", (0, row_index), (-1, row_index), 1.1, gold),
                 ("TEXTCOLOR", (0, row_index), (-1, row_index), dark_gold),
                 ("FONTNAME", (0, row_index), (-1, row_index), "Helvetica-Bold"),
