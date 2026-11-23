@@ -1792,3 +1792,12 @@ body.news-mode .news-research-title {
 .earnings-report-toolbar .ticker-report-pdf-link:hover{background:#d6b85f!important;color:#171717!important}
 .earnings-report-toolbar .refresh-btn:focus-visible,
 .earnings-report-toolbar .ticker-report-pdf-link:focus-visible{outline:3px solid #fff;outline-offset:2px}
+
+/* Compact explanatory notes below the Earnings Calendar table. */
+.earnings-report-footnotes{margin:16px 0 8px;padding:14px 16px;border-top:2px solid #a98537;background:rgba(169,133,55,.07);border-radius:6px}
+.earnings-report-footnotes h3{margin:0 0 10px;font:700 14px/1.35 var(--sans);color:#d7b979}
+.earnings-report-footnotes p{margin:0 0 9px;font:12px/1.55 var(--sans);color:#c5cdd6;max-width:100%}
+.earnings-report-footnotes p:last-child{margin-bottom:0}
+.earnings-report-footnotes b{color:#edd394}
+:root:not([data-theme="dark"]) .earnings-report-footnotes h3,:root:not([data-theme="dark"]) .earnings-report-footnotes b{color:#705622}
+:root:not([data-theme="dark"]) .earnings-report-footnotes p{color:#485260}
