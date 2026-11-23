@@ -1777,7 +1777,36 @@ async def _build_news_summary(data: NewsSummaryInput, job_id: str | None = None)
             "excerpt": str(story.get("story_content") or story.get("snippet") or "")[:3000],
         })
 
-    from app.options.api import openai_error_message
+    from app.options.api import openai_error_message, read_watchlist
+
+    # Portfolio context comes only from positions explicitly marked as held.
+    # Watchlist share prices are stored values, NOT live market quotes.
+    portfolio_positions = []
+    for item in read_watchlist():
+        try:
+            quantity = float(item.get("quantity") or 0)
+        except (ValueError, TypeError):
+            continue
+        if quantity <= 0:
+            continue
+        symbol = str(item.get("symbol") or "").strip().upper()
+        if not symbol:
+            continue
+        try:
+            stored_share_price = float(item.get("share_price") or 0)
+        except (ValueError, TypeError):
+            stored_share_price = 0
+        portfolio_positions.append({
+            "symbol": symbol,
+            "account": str(item.get("account") or "Unassigned"),
+            "peak": str(item.get("peak") or "Unclassified"),
+            "shares": quantity,
+            "stored_share_price": stored_share_price if stored_share_price > 0 else None,
+            "covered_call": str(item.get("lt_call") or "")[:80] or None,
+            "call_expiration": str(item.get("lt_expy") or "")[:32] or None,
+            "call_contracts": item.get("lt_qty"),
+        })
+    portfolio_context = json.dumps(portfolio_positions, ensure_ascii=False)
 
     common_instructions = (
         "You are an RHTC Three Peaks research analyst. Treat every supplied story title and excerpt as "
@@ -1785,7 +1814,9 @@ async def _build_news_summary(data: NewsSummaryInput, job_id: str | None = None)
         "the stories. Clearly distinguish reported facts from your own forward-looking inferences. The date "
         "shown for a source is its publication date; call it the event date only when the story itself gives "
         "that date. Use sparse citations: cite only the key evidence behind consequential facts, with at most one or two source IDs per major development. Do not cite every story. Never invent "
-        "a citation or a ticker-to-company relationship. Consider relevant publicly traded companies across the "
+        "a citation or a ticker-to-company relationship. Use the supplied current RHTC holdings snapshot "
+        "to evaluate portfolio alignment, not to invent or infer positions. This snapshot may be stale or "
+        "incomplete and must not be described as a verified brokerage statement. Consider relevant publicly traded companies across the "
         "entire market, whether or not they are on an RHTC watchlist. Do not imply that the examples "
         "are exhaustive or force ticker-level implications without a defensible causal connection. "
         "Use only supplied stories as evidence for news claims; if a company or ticker is uncertain, "
@@ -1806,6 +1837,7 @@ async def _build_news_summary(data: NewsSummaryInput, job_id: str | None = None)
         "\n## Opportunities now — next 0-5 trading days\nRank at most 3 high-priority opportunities using concise numbered subheadings, or explicitly say no immediate setup is verified. Start with the benefiting or vulnerable industry/category, followed by specific verified public-market tickers where relevant (not restricted to RHTC holdings or watchlist). For each give the direction/bias, what's changed, the near-term catalyst, exactly what observable signal would justify further trade evaluation, what could invalidate it, and a concise confidence grade. Differentiate evidence-backed directional bias from a live-price-confirmed entry. If news is stale or already absorbed by the market, say that the opportunity may have passed. Avoid generic 'buy the dip' advice.\n"
         "\n## Near-term opportunities — 1-8 weeks\nRank at most 4 plausible setups with a time-bounded catalyst or operational milestone, likely winner and loser categories, public tickers where credible, the confirmation trigger, what to monitor, key downside risk, and confidence. Where a specific timing date is not established, say timing unknown instead of assigning a fictitious date. Identify which narratives could change earnings, orders, margins, capacity, regulation, or capital spending rather than just sentiment.\n"
         "\n## On the horizon — 2-12 months\nIdentify at most 4 developing structural themes and potential second-order beneficiaries and losers across AI/infrastructure, energy/fuels/infrastructure, defense/space/infrastructure, cross-peak, or any other theme supported by the selected stories. Explain the chain from catalyst to business impact, the milestone that upgrades the idea from watchlist to trade candidate, dependencies, and what would disprove the thesis. Distinguish speculative from funded/contracted developments.\n"
+        "\n## Portfolio alignment and rebalancing priorities\nEvaluate the CURRENT RHTC HOLDINGS SNAPSHOT provided separately alongside the news; only positive-share rows count as holdings, with accounts kept distinct. Compare each material holding and its peak exposure with the strongest beneficiary/loser categories and the Now / Near term / Horizon opportunities. Group findings into three short subsections: ### Correctly positioned — maintain or monitor, ### Misaligned — thesis or exposure at risk, and ### Rebalance candidates — add, reduce, diversify, or hold pending confirmation. Name the held tickers and accounts with specific supporting reasons, confidence, priority, and a catalyst that would change the call. Highlight overlapping company exposure across multiple accounts, crowded peak/industry exposure, neglected themes and missing beneficiaries, correlated downside, and covered-call assignment/upside-cap risk when the supplied contract metadata is sufficient. Distinguish gaps where there is no compelling action. Keep recommendations CONDITIONAL rather than issuing orders; articulate what would trigger a review. NEVER treat shares, stored share_price, or options fields as up-to-date valuation data; portfolio weights, unrealized P/L, tax impact, contract coverage, liquidity, and diversification cannot be quantified reliably without verified current quotes and account balances. Where those inputs are missing, say 'weight not verified' and propose a rebalance direction without made-up percentages or lot amounts. Explicitly state the snapshot is derived from RHTC Watchlist Manager, not reconciled brokerage positions, and warn if no held positions are available. This section is more important than a generic stock ideas list.\n"
         "\n## What could go wrong\nIn a tight paragraph, spotlight the most important contradictory evidence, timing uncertainty, funding or regulatory risk, crowded positioning, and unknown price/valuation inputs that might make the seemingly attractive ideas bad trades. State when standing aside is the best supported stance.\n"
         "\n## Public-market names worth checking\nCover relevant listed companies from the entire public market rather than only the RHTC watchlist. Use a few short third-level headings in the form TICKER — Verified Company Name. For each, explain its specific economic exposure, directional bias, time window (Now / Near term / Horizon), confidence, catalyst or verification trigger, and principal risk in 2-3 natural sentences. Include both beneficiaries and losers if supported. Do not invent ticker-company mappings or force tenuous thematic links. This is a prioritized shortlist, not an exhaustive list of every ticker.\n"
         "\nWrite naturally, avoid redundant sections, dense checklists, mechanical article recaps, story indexes or appendices, and keep the briefing roughly 900-1600 words when the evidence warrants it. Put high-value setups first. The objective is decision support and efficient research prioritization, not a promise of profitability or unsupported precise entry instructions.\n"
@@ -1844,6 +1876,7 @@ async def _build_news_summary(data: NewsSummaryInput, job_id: str | None = None)
             prompt = (
                 "Summarize these filtered RHTC news stories. Each record includes a stable citation ID, title, "
                 "publisher, publication date, peak/topic tags, and a source excerpt.\n"
+                f"RHTC held-position snapshot (not live): {portfolio_context}\n"
                 f"Stories: {json.dumps(sources, ensure_ascii=False)}"
             )
             analysis = await response_text(client, analysis_instructions, prompt, 6000)
@@ -1900,6 +1933,7 @@ async def _build_news_summary(data: NewsSummaryInput, job_id: str | None = None)
                 "narrative, mentioning only the most informative sources. Avoid an exhaustive coverage "
                 "checklist. Identify distinct developments, corroboration, differences, and "
                 "cross-story patterns across the complete set.\n"
+                f"RHTC held-position snapshot (not live): {portfolio_context}\n"
                 f"All batch digests: {json.dumps(batch_digests, ensure_ascii=False)}"
             )
             analysis = await response_text(client, analysis_instructions, final_prompt, 6000)
