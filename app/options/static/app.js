@@ -313,7 +313,8 @@ async function showEarningsReport(){
       const epsColor=epsAvailable?(epsValue>0?'#58d68d':'#ff6b6b'):'';
       const last=Number(event.last_price),lastAvailable=Number.isFinite(last)&&last>0;
       const lastText=lastAvailable?'$'+last.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'Unavailable';
-      const positionCost=lastAvailable?'$'+(last*100).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}):'Unavailable';
+      const peValue=event.pe_ratio==null?NaN:Number(event.pe_ratio);
+      const peText=Number.isFinite(peValue)&&peValue>0?peValue.toFixed(1)+'x':'—';
       const compactFundamental=(value,shares=false)=>{
         if(value===null||value===undefined||value==='')return '—';
         const amount=Number(value);if(!Number.isFinite(amount))return '—';
@@ -332,9 +333,9 @@ async function showEarningsReport(){
       const ticker=String(event.symbol||'');
       const tickerButton='<button type="button" class="earnings-stock-quote-btn" data-stock-symbol="'+safe(ticker)+'" aria-label="Open stock quote for '+safe(ticker)+'" title="Open stock quote">'+safe(ticker)+'</button>';
       const holdingMarker=event.is_holding?'<span class="earnings-holding-marker"> (holding)</span>':'';
-      return weekHeading+'<tr><td>'+safe(eventDate)+'</td><td data-label="Ticker">'+tickerButton+holdingMarker+'</td><td data-label="Last">'+safe(lastText)+'</td><td data-label="Revenue (TTM)">'+safe(revenueText)+'</td><td data-label="Earnings (TTM est.)">'+safe(earningsText)+'</td><td data-label="Profit margin (TTM est.)">'+safe(marginText)+'</td><td data-label="Shares outstanding">'+safe(sharesText)+'</td><td data-label="EPS estimate" style="color:'+epsColor+'">'+safe(eps)+'</td><td data-label="100 shares">'+safe(positionCost)+'</td></tr>';
+      return weekHeading+'<tr><td>'+safe(eventDate)+'</td><td data-label="Ticker">'+tickerButton+holdingMarker+'</td><td data-label="Last">'+safe(lastText)+'</td><td data-label="Revenue (TTM)">'+safe(revenueText)+'</td><td data-label="Earnings (TTM est.)">'+safe(earningsText)+'</td><td data-label="Profit margin (TTM est.)">'+safe(marginText)+'</td><td data-label="Shares outstanding">'+safe(sharesText)+'</td><td data-label="EPS estimate" style="color:'+epsColor+'">'+safe(eps)+'</td><td data-label="P/E (TTM)">'+safe(peText)+'</td></tr>';
     }).join('');
-  content.innerHTML=events.length?'<div class="earnings-report-table-wrap"><table class="earnings-report-table"><thead><tr><th>Next earnings</th><th>Ticker</th><th>Last</th><th>Revenue (TTM)</th><th>Earnings (TTM est.)</th><th>Profit margin</th><th>Shares outstanding</th><th>EPS estimate</th><th>100 shares</th></tr></thead><tbody>'+earningsRows+'</tbody></table></div>':'<p class="earnings-report-empty">No upcoming earnings have been saved yet. Run Analyze Stock on tickers to populate the report.</p>';
+  content.innerHTML=events.length?'<div class="earnings-report-table-wrap"><table class="earnings-report-table"><thead><tr><th>Next earnings</th><th>Ticker</th><th>Last</th><th>Revenue (TTM)</th><th>Earnings (TTM est.)</th><th>Profit margin</th><th>Shares outstanding</th><th>EPS estimate</th><th>P/E</th></tr></thead><tbody>'+earningsRows+'</tbody></table></div>':'<p class="earnings-report-empty">No upcoming earnings have been saved yet. Run Analyze Stock on tickers to populate the report.</p>';
     const earningsFootnotes='<section class="earnings-report-footnotes" aria-label="Financial definitions and interpretation">'
       +'<h3>Financial definitions and interpretation</h3>'
       +'<p><b>1. Revenue (TTM):</b> Sales generated from products and services over the trailing 12 months, before expenses. Revenue growth indicates whether the business is expanding, but does not establish profitability.</p>'
@@ -342,7 +343,8 @@ async function showEarningsReport(){
       +'<p><b>3. Profit margin (TTM estimate):</b> Estimated net earnings divided by trailing 12-month revenue, multiplied by 100. Negative values indicate a net loss; unavailable or zero revenue leaves the margin unavailable.</p>'
       +'<p><b>4. Shares outstanding:</b> Shares issued and held by shareholders. Changes in share count can affect EPS and the estimated total earnings calculation.</p>'
       +'<p><b>5. EPS estimate:</b> Consensus earnings per share expected for the next quarterly earnings report. This forward-looking quarterly figure is not directly comparable with trailing 12-month revenue or earnings.</p>'
-      +'<p><b>6. Profitability and trading:</b> Net profit margin = net earnings / revenue × 100%. Compare revenue growth with earnings growth: rising sales with faster-growing earnings may indicate improving profitability, while rising sales with declining earnings warrant investigation. Negative earnings indicate a net loss.</p>'
+      +'<p><b>6. P/E (TTM):</b> Trailing price-to-earnings ratio compares stock price with earnings per share. A value of 20x means the stock trades at 20 times trailing annual EPS. Negative, zero, or unavailable ratios display as unavailable. The figure comes from the latest saved Stock Analysis quote and may differ from a calculation using the current Last price.</p>'
+      +'<p><b>7. Profitability and trading:</b> Net profit margin = net earnings / revenue × 100%. Compare revenue growth with earnings growth: rising sales with faster-growing earnings may indicate improving profitability, while rising sales with declining earnings warrant investigation. Negative earnings indicate a net loss.</p>'
       +'<p><b>Data note:</b> TTM fundamentals use the latest saved Stock Analysis snapshot and may be stale or unavailable; upcoming EPS estimates and earnings dates are subject to revision. Figures are informational, not trading signals.</p>'
       +'</section>';
     content.insertAdjacentHTML('beforeend',earningsFootnotes);
