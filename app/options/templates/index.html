@@ -69,10 +69,31 @@
 </div>
 <div class="modal-backdrop infra-backdrop" id="infra-modal" role="presentation" onclick="if(event.target===this)hideInfrastructureInventory()"><section class="modal infra-modal" role="dialog" aria-modal="true" aria-labelledby="infra-title"><div class="infra-modal-header"><div><div class="eyebrow">RHTC PLATFORM REVIEW</div><h2 id="infra-title">Development &amp; deployment inventory</h2><p class="infra-subtitle">Live runtime and deployment configuration, plus the APIs, credentials, ownership, pricing, and lifecycle notes for connected services.</p></div><div class="infra-header-actions"><button id="infra-refresh" class="refresh-btn" type="button">↻ Recheck deployment</button><button class="modal-close" type="button" onclick="hideInfrastructureInventory()" aria-label="Close infrastructure inventory">×</button></div></div><div id="infra-status" class="infra-status" role="status" aria-live="polite">Checking deployed runtime…</div><div id="infra-inventory-results" class="infra-inventory-results"><div class="infra-loading">Loading current inventory…</div></div></section></div>
 <dialog id="earnings-preview" aria-modal="true" aria-label="Earnings Calendar PDF preview">
-<nav class="earnings-preview-toolbar"><button type="button" class="trade-action" id="earnings-preview-close" onclick="closeEarningsPreview()">Close preview</button><button type="button" class="trade-action" onclick="closeEarningsPreview();closeEarningsReport()">Return to dashboard</button><button type="button" class="trade-action" id="earnings-preview-expand" onclick="toggleEarningsPreviewFullScreen()">Full screen</button><button type="button" class="trade-action" onclick="saveOrPrintEarningsPdf()">Print or save PDF</button><button type="button" class="trade-action" id="earnings-preview-save" onclick="saveEarningsReport()">Save to DB</button></nav><div id="earnings-preview-save-status" role="status" aria-live="polite" style="color:#e6cf86;background:#17212a;padding:0 12px;flex-shrink:0"></div>
+<nav class="earnings-preview-toolbar"><button type="button" class="trade-action" id="earnings-preview-close" onclick="closeEarningsPreview()">Close preview</button><button type="button" class="trade-action" onclick="closeEarningsPreview();closeEarningsReport()">Return to dashboard</button><button type="button" class="trade-action" id="earnings-preview-expand" onclick="toggleEarningsPreviewFullScreen()">Full screen</button><button type="button" class="trade-action" onclick="saveOrPrintEarningsPdf()">Print or save PDF</button><button type="button" class="trade-action" id="earnings-preview-save" onclick="saveEarningsReport()">Save to DB</button><button type="button" class="trade-action" onclick="openEarningsHistory()">View History</button></nav><div id="earnings-preview-save-status" role="status" aria-live="polite" style="color:#e6cf86;background:#17212a;padding:0 12px;flex-shrink:0"></div>
 <div id="earnings-preview-pages" role="region" aria-label="Scrollable Earnings Calendar preview" tabindex="0" hidden></div>
 <iframe id="earnings-preview-frame" title="Earnings Calendar PDF" loading="eager"></iframe>
 </dialog>
+<dialog id="earnings-history" class="earnings-history-dialog" aria-label="Earnings Calendar history" oncancel="event.preventDefault();closeEarningsHistory()">
+<nav><button class="trade-action" type="button" onclick="closeEarningsHistory()">Close history</button><button class="trade-action" type="button" onclick="returnFromEarningsHistory()">Return to dashboard</button><button class="trade-action" id="earnings-history-prev" type="button" onclick="navigateEarningsHistory(1)" disabled>Previous (older)</button><button class="trade-action" id="earnings-history-next" type="button" onclick="navigateEarningsHistory(-1)" disabled>Next (newer)</button><button class="trade-action" id="earnings-history-delete" type="button" onclick="removeEarningsHistory(false)" disabled>Delete</button><button class="trade-action" id="earnings-history-purge" type="button" onclick="removeEarningsHistory(true)" disabled>Purge</button><button class="trade-action" id="earnings-history-print" type="button" onclick="previewEarningsHistoryPrint()" disabled>Print</button></nav>
+<div id="earnings-history-status" role="status" aria-live="polite"></div>
+<iframe id="earnings-history-frame" title="Saved Earnings Calendar"></iframe>
+</dialog>
+<dialog id="earnings-history-print-preview" class="earnings-history-dialog" aria-label="Saved Earnings Calendar print preview" oncancel="event.preventDefault();closeEarningsHistoryPrint()">
+<nav><button class="trade-action" type="button" onclick="closeEarningsHistoryPrint()">Close preview</button><button class="trade-action" type="button" onclick="returnFromEarningsHistory()">Return to dashboard</button><button class="trade-action" id="earnings-history-print-expand" type="button" onclick="toggleEarningsHistoryPrint()">Full screen</button><button class="trade-action" type="button" onclick="printSavedEarningsHistory()">Print report</button><a class="trade-action" id="earnings-history-download" download>Download PDF</a></nav>
+<iframe id="earnings-history-print-frame" title="Saved Earnings Calendar print preview"></iframe>
+</dialog>
+<style>
+.earnings-history-dialog{padding:0;border:0;width:92vw;height:88vh;max-width:none;max-height:none;background:#fff;color:#171717}
+.earnings-history-dialog[open]{display:flex;flex-direction:column;position:fixed;inset:0;margin:auto}
+.earnings-history-dialog.expanded{width:100vw;height:100dvh;margin:0}
+.earnings-history-dialog::backdrop{background:#000b}
+.earnings-history-dialog nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:10px;background:#172229;flex:none}
+.earnings-history-dialog .trade-action{box-sizing:border-box;display:flex;align-items:center;justify-content:center;width:100%;min-width:0;min-height:44px;white-space:normal;text-align:center;background:#e2c778;color:#171717;text-decoration:none}
+.earnings-history-dialog .trade-action:disabled{opacity:.45}
+.earnings-history-dialog iframe{flex:1;min-height:0;width:100%;border:0;background:#fff}
+#earnings-history-status{background:#172229;color:#e6cf86;padding:6px 12px;flex:none}
+@media(max-width:600px){.earnings-history-dialog{width:100vw;height:100dvh}.earnings-history-dialog .trade-action{font-size:14px;padding:7px;min-height:46px}}
+</style>
 <style>
 #earnings-preview{padding:0;border:0;border-radius:0;width:92vw;height:88vh;max-width:none;max-height:none;background:#fff;color:#171717}
 #earnings-preview[open]{display:flex;flex-direction:column;position:fixed;inset:0;margin:auto;z-index:11000}
@@ -124,7 +145,7 @@
 <label class="youtube-review-label"><input id="youtube-review-confirm" type="checkbox"> I reviewed the full MP3, title, description, and selected artwork.</label>
 <div class="youtube-publish-actions"><button id="youtube-publish-btn" type="button" disabled>▶ Publish to YouTube + X</button><span id="youtube-publish-status" role="status" aria-live="polite"></span></div>
 </section></div></div></div>
-<script src="/options/static/app.js?v=earnings-save-db-20261123"></script>
+<script src="/options/static/app.js?v=earnings-history-20261123"></script>
 <style>
 #trade-preview{padding:0;border:0;width:92vw;height:88vh;max-width:none;max-height:none;background:#222;color:white}
 #trade-preview[open]{display:flex;flex-direction:column;position:fixed;inset:0;margin:auto;z-index:10000}
