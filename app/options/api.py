@@ -3615,8 +3615,12 @@ async def create_ticker_report_pdf(data: TickerReportPdfInput):
     )
     table_header_style = ParagraphStyle(
         "RHTCTableHeader", parent=body_style, fontName="Helvetica-Bold",
-        fontSize=7.7, leading=9.5, textColor=colors.white, spaceAfter=0,
-        wordWrap="CJK",
+        fontSize=7.0 if is_earnings_calendar else 7.7,
+        leading=9.2 if is_earnings_calendar else 9.5,
+        textColor=colors.white, spaceAfter=0,
+        # Word wrapping at spaces keeps "outstanding" intact rather than
+        # splitting it mid-word in the landscape Earnings Calendar header.
+        wordWrap="LTR" if is_earnings_calendar else "CJK",
     )
     table_cell_style = ParagraphStyle(
         "RHTCTableCell", parent=body_style, fontSize=8.1,
