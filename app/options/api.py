@@ -3898,7 +3898,7 @@ async def create_ticker_report_pdf(data: TickerReportPdfInput):
             continue
         render_body(body, section.title)
 
-    def draw_page(canvas, document):
+    run_date_time = datetime.now().astimezone().strftime("%b %d, %Y %I:%M:%S %p %Z")\n\n    def draw_page(canvas, document):
         canvas.saveState()
         page_width, page_height = page_size
         logo_size = (0.30 if is_earnings_calendar else 0.35) * inch
@@ -3910,7 +3910,7 @@ async def create_ticker_report_pdf(data: TickerReportPdfInput):
         canvas.drawString(logo_x + logo_size + 8, logo_y + (0.10 if is_earnings_calendar else 0.13) * inch, "THREE PEAKS  |  RESEARCH")
         canvas.setFillColor(muted)
         canvas.setFont("Helvetica-Bold", 7)
-        canvas.drawRightString(page_width - document.rightMargin, logo_y + 0.13 * inch, symbol)
+        canvas.drawRightString(page_width - document.rightMargin, logo_y + 0.13 * inch,\n                               "Run Date-Time: " + (data.generated_at or run_date_time) if is_earnings_calendar else symbol)
         if document.page > 1:
             repeated_title = data.title.translate(str.maketrans({
                 "\u2212": "-", "\u2010": "-", "\u2011": "-",
@@ -3933,7 +3933,7 @@ async def create_ticker_report_pdf(data: TickerReportPdfInput):
         canvas.line(document.leftMargin, 0.52 * inch, page_width - document.rightMargin, 0.52 * inch)
         canvas.setFillColor(muted)
         canvas.setFont("Helvetica", 7.5)
-        canvas.drawString(document.leftMargin, 0.34 * inch, f"{symbol}  ·  Informational research")
+        if not is_earnings_calendar:\n            canvas.drawString(document.leftMargin, 0.34 * inch, f"{symbol}  ·  Informational research")
         canvas.drawRightString(page_width - document.rightMargin, 0.34 * inch, f"PAGE {document.page}")
         canvas.restoreState()
 
