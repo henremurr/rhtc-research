@@ -331,6 +331,16 @@ async function showEarningsReport(){
       return weekHeading+'<tr><td>'+safe(eventDate)+'</td><td data-label="Ticker">'+tickerButton+holdingMarker+'</td><td data-label="Revenue (TTM)">'+safe(revenueText)+'</td><td data-label="Earnings (TTM est.)">'+safe(earningsText)+'</td><td data-label="Shares outstanding">'+safe(sharesText)+'</td><td data-label="EPS estimate" style="color:'+epsColor+'">'+safe(eps)+'</td><td data-label="Last">'+safe(lastText)+'</td><td data-label="100 shares">'+safe(positionCost)+'</td></tr>';
     }).join('');
   content.innerHTML=events.length?'<div class="earnings-report-table-wrap"><table class="earnings-report-table"><thead><tr><th>Next earnings</th><th>Ticker</th><th>Revenue (TTM)</th><th>Earnings (TTM est.)</th><th>Shares outstanding</th><th>EPS estimate</th><th>Last</th><th>100 shares</th></tr></thead><tbody>'+earningsRows+'</tbody></table></div>':'<p class="earnings-report-empty">No upcoming earnings have been saved yet. Run Analyze Stock on tickers to populate the report.</p>';
+    const earningsFootnotes='<section class="earnings-report-footnotes" aria-label="Financial definitions and interpretation">'
+      +'<h3>Financial definitions and interpretation</h3>'
+      +'<p><b>1. Revenue (TTM):</b> Sales generated from products and services over the trailing 12 months, before expenses. Revenue growth indicates whether the business is expanding, but does not establish profitability.</p>'
+      +'<p><b>2. Earnings (TTM estimate):</b> Estimated net income over the trailing 12 months, after operating costs, interest and taxes. Here it is calculated as trailing EPS multiplied by shares outstanding; it is not a separately reported net-income figure.</p>'
+      +'<p><b>3. Shares outstanding:</b> Shares issued and held by shareholders. Changes in share count can affect EPS and the estimated total earnings calculation.</p>'
+      +'<p><b>4. EPS estimate:</b> Consensus earnings per share expected for the next quarterly earnings report. This forward-looking quarterly figure is not directly comparable with trailing 12-month revenue or earnings.</p>'
+      +'<p><b>5. Profitability and trading:</b> Net profit margin = net earnings / revenue × 100%. Compare revenue growth with earnings growth: rising sales with faster-growing earnings may indicate improving profitability, while rising sales with declining earnings warrant investigation. Negative earnings indicate a net loss.</p>'
+      +'<p><b>Data note:</b> TTM fundamentals use the latest saved Stock Analysis snapshot and may be stale or unavailable; upcoming EPS estimates and earnings dates are subject to revision. Figures are informational, not trading signals.</p>'
+      +'</section>';
+    content.insertAdjacentHTML('beforeend',earningsFootnotes);
     const total=Number(data.total_before_filter)||events.length;
     const investmentText=Number.isFinite(investment)&&investment>0?' fitting '+formatMaxSpend(investment)+' for 100 shares':'';
     const epsText=epsSign==='negative'?' · negative EPS':epsSign==='nonnegative'?' · EPS not negative':'';
