@@ -3596,6 +3596,33 @@ async def get_saved_earnings_calendar(report_id: int):
                     headers={"Content-Disposition": f'inline; filename="Earnings_Calendar_{report_id}.pdf"'})
 
 
+@app.delete("/api/earnings-report/saved/{report_id}")
+async def delete_saved_earnings_calendar(report_id: int):
+    with closing(connect_watchlist_db()) as connection:
+        with connection:
+            connection.execute("""CREATE TABLE IF NOT EXISTS earnings_calendar_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, saved_at TEXT NOT NULL, pdf BLOB NOT NULL
+            )""")
+            cursor = connection.execute(
+                "DELETE FROM earnings_calendar_reports WHERE id = ?", (report_id,)
+            )
+            if not cursor.rowcount:
+                raise HTTPException(404, "Saved report not found.")
+    return {"deleted": 1}
+
+
+@app.delete("/api/earnings-report/saved")
+async def purge_saved_earnings_calendars():
+    with closing(connect_watchlist_db()) as connection:
+        with connection:
+            connection.execute("""CREATE TABLE IF NOT EXISTS earnings_calendar_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, saved_at TEXT NOT NULL, pdf BLOB NOT NULL
+            )""")
+            cursor = connection.execute("DELETE FROM earnings_calendar_reports")
+            count = cursor.rowcount
+    return {"deleted": count}
+
+
 @app.post("/api/ticker-report/pdf")
 async def create_ticker_report_pdf(data: TickerReportPdfInput):
     symbol = data.symbol.strip().upper()
