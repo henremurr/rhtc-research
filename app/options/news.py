@@ -1801,36 +1801,13 @@ async def _build_news_summary(data: NewsSummaryInput, job_id: str | None = None)
         "the phrase in words (for example, say \"more than $1 trillion\")."
     )
     analysis_instructions = common_instructions + (
-        "\nWrite a clear, story-driven market briefing for an informed general reader. Explain developments
-        as a coherent narrative: what changed, why it matters, who benefits or loses, and what comes
-        next. Integrate related news instead of retelling articles in order. Write natural paragraphs,
-        use short topic headings only when needed, and avoid repetitive bullets, source indexes,
-        lists of dates, bureaucratic reporting templates, and unexplained jargon. Distinguish facts
-        from interpretations; acknowledge uncertainty and contradictory evidence. Cite only the
-        most consequential claims using source IDs such as [S0001], not every article. Do not
-        include a references section or numbered source list.\n"
-        "## 60-second read\nWrite a lively but precise 100-140 word paragraph summarizing the
-        dominant story, its near-term economic significance, leading beneficiary and loser categories,
-        and the biggest uncertainty.\n"
-        "## Immediate market guidance — likely beneficiaries and losers\nUse the subheadings
-        Likely beneficiary categories and Likely loser categories. Provide sector/business-model
-        guidance first, not ticker recommendations. Explain the mechanism, confidence, near-term
-        window of 0-90 days, and what would confirm or overturn the view. Do not invent exposures
-        when news does not support them.\n"
-        "## The developing story\nTell the main story in several connected paragraphs, weaving
-        meaningful developments, dates, evidence, and consequences together. Group distinct themes
-        under brief subheadings only where useful. Avoid separate redundant sections about what
-        happened, when, and why.\n"
-        "## What comes next\nIn one or two paragraphs explain material catalysts, barriers,
-        questions, and signals that change the outlook.\n"
-        "## Public-market companies to watch\nAcross all relevant themes and the entire public
-        market, not only the RHTC watchlist, select the most defensible potential beneficiaries,
-        losers, and mixed-exposure companies. Format each company as a level-three heading in the
-        form TICKER — Verified Company Name, followed by two or three readable sentences on
-        impact direction, mechanism, horizon, confidence, and an indicator to monitor. Do not
-        fabricate ticker matches, pad lists, or pretend this is an exhaustive market-wide screen.\n"
-        "Aim for roughly 900-1500 words depending on available substantive evidence. End with
-        company impacts; never append a bibliography, list of indexed stories, or source appendix."
+        "\nWrite a clear, story-driven market briefing for an informed general reader. Explain developments as a coherent narrative: what changed, why it matters, who benefits or loses, and what comes next. Integrate related news instead of retelling articles in order. Write natural paragraphs, use short topic headings only when needed, and avoid repetitive bullets, source indexes, lists of dates, bureaucratic reporting templates, and unexplained jargon. Distinguish facts from interpretations; acknowledge uncertainty and contradictory evidence. Cite only the most consequential claims using source IDs such as [S0001], not every article. Do not include a references section or numbered source list.\n"
+        "\n## 60-second read\nWrite a precise 100-140 word paragraph summarizing the dominant story, its near-term economic significance, leading beneficiary and loser categories, and the biggest uncertainty.\n"
+        "\n## Immediate market guidance — likely beneficiaries and losers\nUse short subheadings for Likely beneficiary categories and Likely loser categories. Provide sector and business-model guidance first, not ticker recommendations. Explain the mechanism, confidence, near-term window of 0-90 days, and what would confirm or overturn the view. Do not invent exposures when news does not support them.\n"
+        "\n## The developing story\nTell the main story in several connected paragraphs, weaving meaningful developments, dates, evidence, and consequences together. Group distinct themes under brief subheadings only where useful. Avoid separate redundant sections about what happened, when, and why.\n"
+        "\n## What comes next\nIn one or two paragraphs explain material catalysts, barriers, questions, and signals that change the outlook.\n"
+        "\n## Public-market companies to watch\nAcross all relevant themes and the entire public market, not only the RHTC watchlist, select the most defensible potential beneficiaries, losers, and mixed-exposure companies. Format each company as a level-three heading in the form TICKER — Verified Company Name, followed by two or three readable sentences on impact direction, mechanism, horizon, confidence, and an indicator to monitor. Do not fabricate ticker matches, pad lists, or pretend this is an exhaustive market-wide screen.\n"
+        "\nAim for roughly 900-1500 words depending on available substantive evidence. End with company impacts; never append a bibliography, list of indexed stories, or source appendix.\n"
     )
 
     async def response_text(client, instructions: str, prompt: str, limit: int) -> str:
