@@ -294,13 +294,13 @@ def tax_lot_ticker(symbol):
 def tax_lot_rows(db, account, year, open_only=False):
     """Match completed security lots FIFO and return Form 8949 columns."""
     rows = db.execute("""
-        SELECT trade_date, action, symbol, description, quantity, amount
+        SELECT trade_date, action, symbol, description, quantity, amount, fingerprint, occurrence
         FROM trading_transactions WHERE account=?
         ORDER BY trade_date, rowid
     """, (account,))
     inventory = {}
     completed = []
-    for day, action, symbol, description, quantity, amount in rows:
+    for day, action, symbol, description, quantity, amount, fingerprint, occurrence in rows:
         if open_only and year and day[:4] > str(year):
             break
         if not symbol or quantity in (None, ""):
@@ -381,7 +381,8 @@ def tax_lot_rows(db, account, year, open_only=False):
         if remaining > 0:
             opened_cash = cash * remaining / qty if cash is not None else None
             lots.append({"date": day, "qty": remaining, "value": opened_cash,
-                         "side": "long" if bought else "short", "option": is_option, "call": is_call})
+                         "side": "long" if bought else "short", "option": is_option, "call": is_call,
+                         "source": (fingerprint, occurrence), "original_qty": qty})
     if open_only:
         as_of = f"{year}-12-31" if year else (day if 'day' in locals() else "")
         as_of_date = datetime.strptime(as_of, "%Y-%m-%d").date() if as_of else None
@@ -404,8 +405,10 @@ def tax_lot_rows(db, account, year, open_only=False):
                 # Keep different option contracts separate, but consolidate
                 # same-security lots acquired on the same date.
                 key = (ticker, lot["date"], security, lot["side"], lot["option"])
-                group = grouped.setdefault(key, {"quantity": Decimal(0), "amount": Decimal(0), "known": True})
+                group = grouped.setdefault(key, {"quantity": Decimal(0), "amount": Decimal(0), "known": True, "sources": [], "deletable": True})
                 group["quantity"] += lot["qty"]
+                group["sources"].append(lot["source"])
+                group["deletable"] = group["deletable"] and lot["qty"] == lot["original_qty"]
                 if lot["value"] is None:
                     group["known"] = False
                 elif group["known"]:
@@ -421,7 +424,9 @@ def tax_lot_rows(db, account, year, open_only=False):
                            "ticker": ticker, "side": side, "acquired": acquired,
                            "quantity": format(qty.normalize(), "f"), "amount": amount_value,
                            "unit_amount": unit_value, "amount_type": "Premium" if is_option else ("Cost" if side == "long" else "Proceeds"),
-                           "term": holding_term(acquired, as_of) if as_of else "short"})
+                           "term": holding_term(acquired, as_of) if as_of else "short",
+                           "delete_id": hashlib.sha256(json.dumps(sorted(group["sources"])).encode()).hexdigest() if group["deletable"] and not year else None,
+                           "_sources": group["sources"] if group["deletable"] and not year else []})
         def open_lot_sort_key(row):
             description = row["description"]
             if " share" in description:
@@ -533,7 +538,22 @@ def register(app, database_path):
             periods = [(account_id, str(period_year)) for account_id, first, last in bounds
                        for period_year in range(int(last), int(first) - 1, -1)]
             lots = tax_lot_rows(db, account, year, open_only=True) if account and 0 <= year <= 9998 else []
-            return {"periods": periods, "lots": lots}
+            return {"periods": periods, "lots": [{k: v for k, v in lot.items() if k != "_sources"} for lot in lots]}
+
+    @app.post("/api/open-tax-lot-report/delete")
+    def delete_open_tax_lots(payload: dict):
+        account = payload.get("account")
+        ids = payload.get("ids")
+        if not isinstance(account, str) or not account or payload.get("year") != 0 or not isinstance(ids, list) or not ids or len(ids) > 1000 or any(not isinstance(i, str) or not re.fullmatch(r"[a-f0-9]{64}", i) for i in ids):
+            raise HTTPException(422, "Select valid open lots from the latest available report.")
+        with closing(sqlite3.connect(database_path(), timeout=20)) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            lots = {lot["delete_id"]: lot for lot in tax_lot_rows(db, account, 0, open_only=True) if lot["delete_id"]}
+            if not set(ids).issubset(lots):
+                raise HTTPException(409, "Selected lots changed or have matched transactions. Refresh the report.")
+            sources = {tuple(source) for ident in ids for source in lots[ident]["_sources"]}
+            db.executemany("DELETE FROM trading_transactions WHERE account=? AND fingerprint=? AND occurrence=?", [(account, *source) for source in sources])
+        return {"deleted_count": len(sources)}
 
     @app.get("/api/open-tax-lot-report/pdf")
     def open_tax_lot_pdf(account: str, year: int, download: bool = False, title: str = ""):
