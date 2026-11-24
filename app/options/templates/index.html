@@ -255,7 +255,7 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
  #preview-pages tfoot{display:table-row-group}
 }
 </style>
-<dialog id="trade-preview" aria-modal="true" aria-labelledby="preview-title">
+<style>@media print{.active-lot-delete-tools,.active-lot-select{display:none!important}}</style><dialog id="trade-preview" aria-modal="true" aria-labelledby="preview-title">
 <nav><button type="button" class="trade-action" id="preview-close">Close preview</button><button type="button" id="preview-return" class="trade-action">Return to dashboard</button><button type="button" id="preview-expand" class="trade-action" aria-pressed="false">Full screen</button><button type="button" id="preview-print" class="trade-action">Print report</button><a id="preview-download" class="trade-action" download>Download PDF</a><span id="preview-print-status" role="status"></span></nav>
 <div id="preview-pages" hidden></div></dialog>
 <dialog id="trade-report-dialog" aria-labelledby="trade-title" style="width:min(60rem,94vw);max-height:88vh;box-sizing:border-box;background:#171c21;color:#eef2f5;border:1px solid #847450;border-radius:12px;padding:1rem">
@@ -470,6 +470,12 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
    }
    if(reportMode==='open-tax'){
     const rows=data.lots||[],labels=['Ticker / security','Side','Date acquired','Holding period','Open quantity','Cost/Premium','Per unit'];
+    const selected=new Map();
+    const deleteButton=document.createElement('button');deleteButton.type='button';deleteButton.className='trade-action';deleteButton.textContent='Delete selected';deleteButton.disabled=true;deleteButton.style.cssText='background:#e2c778;color:#171717;min-height:44px;margin:8px 0';
+    const deleteTools=document.createElement('div');deleteTools.className='active-lot-delete-tools';deleteTools.append(deleteButton);
+    const deletionNote=document.createElement('span');deletionNote.textContent=params.year==='0'?' Select erroneous, wholly open trades to permanently delete their imported transactions.':' Select All years to manage current active trades.';deleteTools.append(deletionNote);results.append(deleteTools);
+    const updateSelection=()=>{deleteButton.disabled=!selected.size;deleteButton.textContent='Delete selected'+(selected.size?' ('+selected.size+')':'');};
+    deleteButton.onclick=async()=>{if(!selected.size)return;const ids=[...selected.keys()];if(!confirm('Permanently delete the imported transactions for these active lots from account '+params.account+'?\n\n'+[...selected.values()].join('\n')+'\n\nThis affects transaction history and cannot be undone.'))return;deleteButton.disabled=true;const checks=results.querySelectorAll('.active-lot-select');checks.forEach(c=>c.disabled=true);try{const response=await fetch('/options/api/open-tax-lot-report/delete',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({account:params.account,year:Number(params.year),ids})});const result=await response.json();if(!response.ok)throw Error(typeof result.detail==='string'?result.detail:'Unable to delete selected trades.');closePreview();get('trade-filters').requestSubmit();}catch(error){alert(error.message);checks.forEach(c=>c.disabled=!c.value);updateSelection();}};
     const dollars=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'});
     if(rows.length){
      const wrap=document.createElement('div');wrap.style.overflowX='auto';
@@ -488,7 +494,7 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
      let activeKey=null,activeLots=[];
      for(const lot of rows){
       const key=groupKey(lot);if(key!==activeKey){if(activeLots.length)addSubtotal(activeLots);activeKey=key;activeLots=[];}
-      const row=body.insertRow(),values=[lot.ticker+' · '+lot.description,lot.side,lot.acquired,lot.term,lot.quantity,lot.amount,lot.unit_amount];values.forEach((value,index)=>{const cell=row.insertCell();cell.dataset.label=labels[index];cell.textContent=value==null||value===''?'—':index===5||index===6?dollars.format(Number(value)):value;if(index>=4)cell.style.textAlign='right';});
+      const row=body.insertRow(),values=[lot.ticker+' · '+lot.description,lot.side,lot.acquired,lot.term,lot.quantity,lot.amount,lot.unit_amount];values.forEach((value,index)=>{const cell=row.insertCell();cell.dataset.label=labels[index];cell.textContent=value==null||value===''?'—':index===5||index===6?dollars.format(Number(value)):value;if(index===0){const check=document.createElement('input');check.type='checkbox';check.className='active-lot-select';check.value=lot.delete_id||'';check.disabled=!lot.delete_id;check.setAttribute('aria-label','Select '+lot.description+' acquired '+lot.acquired);check.title=lot.delete_id?'Select active trade':'Historical or partially matched trade cannot be deleted safely';check.style.cssText='width:20px;height:20px;vertical-align:middle;margin:0 8px 0 0;accent-color:#b38b36';check.onchange=()=>{if(check.checked)selected.set(check.value,lot.description+' · '+lot.acquired);else selected.delete(check.value);updateSelection();};cell.prepend(check);}if(index>=4)cell.style.textAlign='right';});
       if(key)activeLots.push(lot);
      }
      if(activeLots.length)addSubtotal(activeLots);
