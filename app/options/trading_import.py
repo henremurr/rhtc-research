@@ -425,8 +425,8 @@ def tax_lot_rows(db, account, year, open_only=False):
                            "quantity": format(qty.normalize(), "f"), "amount": amount_value,
                            "unit_amount": unit_value, "amount_type": "Premium" if is_option else ("Cost" if side == "long" else "Proceeds"),
                            "term": holding_term(acquired, as_of) if as_of else "short",
-                           "delete_id": hashlib.sha256(json.dumps(sorted(group["sources"])).encode()).hexdigest() if group["deletable"] and not year else None,
-                           "_sources": group["sources"] if group["deletable"] and not year else []})
+                           "delete_id": hashlib.sha256(json.dumps(sorted(group["sources"])).encode()).hexdigest() if group["deletable"] and (not year or year == datetime.now().year) else None,
+                           "_sources": group["sources"] if group["deletable"] and (not year or year == datetime.now().year) else []})
         def open_lot_sort_key(row):
             description = row["description"]
             if " share" in description:
@@ -544,11 +544,15 @@ def register(app, database_path):
     def delete_open_tax_lots(payload: dict):
         account = payload.get("account")
         ids = payload.get("ids")
-        if not isinstance(account, str) or not account or payload.get("year") != 0 or not isinstance(ids, list) or not ids or len(ids) > 1000 or any(not isinstance(i, str) or not re.fullmatch(r"[a-f0-9]{64}", i) for i in ids):
+        if not isinstance(account, str) or not account or payload.get("year") not in (0, datetime.now().year) or not isinstance(ids, list) or not ids or len(ids) > 1000 or any(not isinstance(i, str) or not re.fullmatch(r"[a-f0-9]{64}", i) for i in ids):
             raise HTTPException(422, "Select valid open lots from the latest available report.")
         with closing(sqlite3.connect(database_path(), timeout=20)) as db, db:
             db.execute("BEGIN IMMEDIATE")
             lots = {lot["delete_id"]: lot for lot in tax_lot_rows(db, account, 0, open_only=True) if lot["delete_id"]}
+            if payload.get("year"):
+                visible = {lot["delete_id"] for lot in tax_lot_rows(db, account, payload["year"], open_only=True)}
+                if not set(ids).issubset(visible):
+                    raise HTTPException(409, "Selected lots changed. Refresh the report.")
             if not set(ids).issubset(lots):
                 raise HTTPException(409, "Selected lots changed or have matched transactions. Refresh the report.")
             sources = {tuple(source) for ident in ids for source in lots[ident]["_sources"]}
