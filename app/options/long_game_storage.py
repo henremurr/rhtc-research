@@ -37,6 +37,14 @@ class LongGameStorage:
                 (job_id, json.dumps(state), time.time()),
             )
 
+    def latest_job_id(self):
+        with self.connection() as db:
+            row = db.execute(
+                "SELECT id FROM long_game_jobs ORDER BY CASE WHEN json_extract(state, '$.status') = 'running' "
+                "OR json_extract(state, '$.resumable') = 1 THEN 0 ELSE 1 END, updated_at DESC LIMIT 1"
+            ).fetchone()
+        return row[0] if row else None
+
     def read_state(self, job_id):
         with self.connection() as db:
             row = db.execute("SELECT state FROM long_game_jobs WHERE id=?", (job_id,)).fetchone()

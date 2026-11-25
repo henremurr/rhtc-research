@@ -86,6 +86,7 @@ async function requestJson(url,options){
   return data;
 }
 const resume=document.getElementById('resume'),jobKey='rhtc-long-game-job';
+const analysisUrl='/options/api/long-game-report/analyze';
 let jobId,shown=0;
 try{jobId=localStorage.getItem(jobKey)||sessionStorage.getItem(jobKey);}catch{}
 resume.hidden=!jobId;
@@ -109,7 +110,7 @@ async function analyze(resuming){
   const timer=setInterval(tick,1000);
   log(resuming?'Requesting resume.':'Submitting analysis request.');
   try{
-    const url='/options/api/long-game-report/analyze';
+    const url=analysisUrl;
     const target=resuming?url+'/'+encodeURIComponent(jobId)+'/resume':url;
     const {job_id}=await requestJson(target,{method:'POST'});
     if(jobId!==job_id)shown=0;
@@ -153,8 +154,43 @@ async function analyze(resuming){
     resume.hidden=!jobId;
   }
 }
+async function restoreSavedJob(){
+  run.disabled=true;
+  resume.disabled=true;
+  try{
+    const latest=await requestJson(analysisUrl+'/latest',{cache:'no-store'});
+    rememberJob(latest.job_id);
+    if(!jobId)return;
+    resume.hidden=false;
+    const data=await requestJson(analysisUrl+'/'+encodeURIComponent(jobId),{cache:'no-store'});
+    activityWindow.hidden=false;
+    for(const line of data.activity)log(line);
+    shown=data.activity.length;
+    if(data.analysis){
+      render(data.analysis);
+      asOf.hidden=false;
+      asOf.textContent='As of '+data.as_of;
+      print.disabled=false;
+    }
+    if(data.status==='failed')status.textContent=data.error;
+    else if(data.status==='running')status.textContent='An analysis is running. Choose Resume to follow its progress.';
+    else if(data.resumable)status.textContent='Partial analysis ready. Resume to retry unfinished research.';
+    else{
+      status.textContent='Analysis complete.';
+      rememberJob(null);
+    }
+  }catch(error){
+    if(error.httpStatus===404)rememberJob(null);
+    status.textContent=error.message;
+  }finally{
+    run.disabled=false;
+    resume.disabled=false;
+    resume.hidden=!jobId;
+  }
+}
 run.onclick=()=>analyze(false);
 resume.onclick=()=>analyze(true);
+void restoreSavedJob();
 </script>
 </body>
 </html>

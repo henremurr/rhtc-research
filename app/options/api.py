@@ -3754,6 +3754,12 @@ async def resume_long_game_analysis(job_id: str):
     return {"job_id": job_id}
 
 
+@app.get("/api/long-game-report/analyze/latest")
+async def latest_long_game_analysis():
+    job_id = next(iter(_LONG_GAME_JOBS), None) or long_game_storage().latest_job_id()
+    return JSONResponse({"job_id": job_id}, headers={"Cache-Control": "private, no-store"})
+
+
 @app.get("/api/long-game-report/analyze/{job_id}")
 async def long_game_job_status(job_id: str):
     job = _LONG_GAME_JOBS.get(job_id) or long_game_storage().read_state(job_id)
