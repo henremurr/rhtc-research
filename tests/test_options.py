@@ -672,6 +672,37 @@ class OptionsRoutesTest(unittest.TestCase):
         incomes = [((row["bid"] + row["ask"]) / 2) * 100 for row in rows]
         self.assertEqual(incomes, sorted(incomes, reverse=True))
 
+    def test_watchlist_delete_is_scoped_to_exact_account_and_preserves_reports(self):
+        watchlist = "/options/api/watchlist"
+        delete_entry = f"{watchlist}/AMD/entry"
+        accounts = ["Fidelity Brokerage", "Fidelity IRA", "Schwab PRCA", None]
+        rows = [{"symbol": "AMD", "peak": "AI/I", "account": account} for account in accounts]
+        saved = self.request("PUT", watchlist, json={"rows": rows})
+        self.assertEqual(saved.status_code, 200, saved.text)
+
+        with sqlite3.connect(os.path.join(self.data_dir.name, "rhtc_symbols.sqlite3")) as db:
+            db.execute(
+                "INSERT INTO ceo_risk_reports(symbol, created_at, risk_score, risk_rating, report_json) "
+                "VALUES ('AMD', '2026-11-25', 50, 'Moderate', '{}')"
+            )
+
+        self.assertEqual(self.request("DELETE", f"{watchlist}/AMD").status_code, 404)
+        self.assertEqual(self.request("DELETE", delete_entry).status_code, 422)
+        self.assertEqual(self.request("DELETE", delete_entry, params={"account": "Fidelity"}).status_code, 404)
+        self.assertEqual(self.request("GET", watchlist).json()["rows"][0]["ceo_risk_report_count"], 1)
+
+        removed = self.request("DELETE", delete_entry, params={"account": accounts[0]})
+        self.assertEqual(removed.status_code, 200, removed.text)
+        self.assertEqual(removed.json()["deleted_count"], 1)
+        remaining = self.request("GET", watchlist).json()["rows"]
+        self.assertEqual([row["account"] for row in remaining], accounts[1:])
+        self.assertTrue(all(row["ceo_risk_report_count"] == 1 for row in remaining))
+
+        removed = self.request("DELETE", delete_entry, params={"account": ""})
+        self.assertEqual(removed.status_code, 200, removed.text)
+        remaining = self.request("GET", watchlist).json()["rows"]
+        self.assertEqual([row["account"] for row in remaining], accounts[1:3])
+
     def test_watchlist_updates_persist_across_requests_and_drive_dashboard_scan(self):
         symbols = [
             {"symbol": "NEWCO", "peak": "Other", "share_price": None, "quantity": 4, "account": None, "lt_call": "260", "lt_expy": "280616", "lt_qty": 1, "lt_premium": 20.5, "pg": "PRJ"},

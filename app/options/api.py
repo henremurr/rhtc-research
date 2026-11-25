@@ -1680,43 +1680,24 @@ async def update_watchlist(data: WatchlistUpdate):
     return {"rows": saved_rows, "count": len(saved_rows)}
 
 
-@app.delete("/api/watchlist/{symbol}")
-async def delete_watchlist_ticker(symbol: str):
+@app.delete("/api/watchlist/{symbol}/entry")
+async def delete_watchlist_entry(symbol: str, account: str = Query(...)):
     require_watchlist_storage()
     symbol = symbol.strip().upper()
     if not SYMBOL_PATTERN.fullmatch(symbol):
         raise HTTPException(400, "Enter a valid ticker symbol.")
 
-    deleted_by_table: dict[str, int] = {}
     with closing(connect_watchlist_db()) as connection:
-        connection.execute("BEGIN IMMEDIATE")
-        tables = connection.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
-        ).fetchall()
-        for table_row in tables:
-            table_name = str(table_row["name"])
-            escaped_name = table_name.replace('"', '""')
-            columns = {
-                row["name"]
-                for row in connection.execute(f'PRAGMA table_info("{escaped_name}")')
-            }
-            if "symbol" not in columns:
-                continue
-            deleted = connection.execute(
-                f'DELETE FROM "{escaped_name}" WHERE symbol = ?',
-                (symbol,),
-            ).rowcount
-            if deleted:
-                deleted_by_table[table_name] = int(deleted)
+        deleted = connection.execute(
+            "DELETE FROM symbols WHERE symbol = ? AND COALESCE(account, '') = ?",
+            (symbol, account),
+        ).rowcount
+        if not deleted:
+            raise HTTPException(404, "Watchlist entry not found for this account.")
+        connection.execute("INSERT OR REPLACE INTO app_state(key, value) VALUES ('legacy_import_open', '0')")
         connection.commit()
 
-    _FINNHUB_BUFFETT_CACHE.pop(symbol, None)
-    return {
-        "symbol": symbol,
-        "deleted_count": sum(deleted_by_table.values()),
-        "deleted_by_table": deleted_by_table,
-        "news_note": "Ticker-specific news search results are not stored; shared news stories are not linked to individual tickers.",
-    }
+    return {"symbol": symbol, "account": account, "deleted_count": deleted}
 
 
 _FINNHUB_BUFFETT_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
