@@ -1874,3 +1874,19 @@ body.news-mode .news-research-title {
   #symbols-modal .buffett-screen-controls button{flex-shrink:0;white-space:nowrap}
   #symbols-modal .buffett-screen-controls :is(#buffett-screen-status,#ceo-risk-screen-status){flex:0 1 24ch}
 }
+
+
+#symbol-list .symbol-entry.editing{
+  grid-template-columns:minmax(4rem,.7fr) minmax(7rem,1.3fr) repeat(2,minmax(4rem,.8fr)) minmax(8rem,1.4fr) minmax(3rem,.5fr) auto auto;
+  gap:6px;
+}
+#symbol-list .symbol-edit-calls{grid-column:1/-1;display:grid;gap:6px}
+#symbol-list .symbol-extra-call{align-items:end;border-color:var(--line)}
+#symbol-list .symbol-extra-call label{display:grid;gap:3px;min-width:0}
+#symbol-list .symbol-extra-call input{padding:4px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:4px}
+#symbol-list [data-action="add-call"]{grid-column:1/-1;justify-self:start;padding-inline:10px}
+@media(max-width:760px){
+  #symbol-list .symbol-entry.editing{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #symbol-list .symbol-extra-call{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #symbol-list .symbol-extra-call button{grid-column:2;justify-self:end}
+}
