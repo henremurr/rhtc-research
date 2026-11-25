@@ -12,7 +12,11 @@ h2{margin-top:2rem;border-bottom:1px solid #c6a45c;padding-bottom:.4rem}
 nav{display:flex;flex-wrap:wrap;gap:.5rem;padding:.65rem 1rem;background:#182229;position:sticky;top:0}
 nav a,nav button{background:#e2c778;color:#171717;padding:.45rem .75rem;border:0;border-radius:.35rem;text-decoration:none;font:inherit;cursor:pointer}
 nav button:disabled{opacity:.6;cursor:default} #analysis p{white-space:pre-line} #analysis li{margin:.45rem 0}
-@media print{nav,#status{display:none}main{padding:0}h2,h3{break-after:avoid}}
+#activity-window{margin:1rem 0;padding:1rem;border:1px solid #c7ced1;border-radius:.5rem;background:#f5f7f8}
+#activity-window h2{margin:0;border:0;font-size:1rem}
+#activity{max-height:12rem;overflow-y:auto;margin:.5rem 0 0;padding-inline-start:1.5rem;overscroll-behavior:contain}
+#activity li{margin:.25rem 0} #elapsed{color:#526168;font-variant-numeric:tabular-nums}
+@media print{nav,#status,#activity-window{display:none}main{padding:0}h2,h3{break-after:avoid}}
 </style>
 </head>
 <body>
@@ -24,6 +28,11 @@ nav button:disabled{opacity:.6;cursor:default} #analysis p{white-space:pre-line}
 <main>
 <header><img src="/options/static/apple-touch-icon.png" width="54" height="54" alt="RHTC"><div><h1>Long Game Report</h1><p id="as-of" hidden></p></div></header>
 <p id="status" role="status">Choose Update analysis to generate the strategy and action plan.</p>
+<section id="activity-window" aria-labelledby="activity-title" hidden>
+<h2 id="activity-title">Analysis activity</h2>
+<span id="elapsed"></span>
+<ol id="activity" role="log" aria-label="Analysis progress" tabindex="0"></ol>
+</section>
 <article id="analysis" aria-label="Long Game strategy and action plan"></article>
 </main>
 <script>
@@ -50,20 +59,79 @@ function render(text){
   }
   analysis.replaceChildren(fragment);
 }
+const activity=document.getElementById('activity'),activityWindow=document.getElementById('activity-window');
+const elapsed=document.getElementById('elapsed');
+const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+function log(message){
+  const line=document.createElement('li');
+  line.textContent=message;
+  activity.append(line);
+  activity.scrollTop=activity.scrollHeight;
+}
+async function requestJson(url,options){
+  let response;
+  try{response=await fetch(url,options);}
+  catch{throw Object.assign(Error('Connection interrupted while contacting the report server.'),{retryable:true});}
+  if(response.status===401)throw Error('Your session expired. Sign in again to continue.');
+  const data=response.headers.get('Content-Type')?.includes('application/json')
+    ? await response.json().catch(()=>null) : null;
+  if(!response.ok||!data){
+    throw Object.assign(Error(data?.detail||'The report server did not return a usable response.'),{
+      retryable:response.status>=500||response.status===429||response.ok
+    });
+  }
+  return data;
+}
 run.onclick=async()=>{
   run.disabled=true;
-  status.textContent='Analyzing watchlist, positions, calls and saved research…';
+  activityWindow.hidden=false;
+  activity.replaceChildren();
+  status.textContent='Analysis in progress.';
+  const started=Date.now();
+  const tick=()=>{
+    const seconds=Math.floor((Date.now()-started)/1000);
+    elapsed.textContent=`Elapsed ${Math.floor(seconds/60)}m ${String(seconds%60).padStart(2,'0')}s`;
+  };
+  tick();
+  const timer=setInterval(tick,1000);
+  log('Submitting analysis request.');
   try{
-    const response=await fetch('/options/api/long-game-report/analyze',{method:'POST'});
-    const data=await response.json();
-    if(!response.ok)throw Error(data.detail||'Analysis unavailable.');
-    render(data.analysis);
-    asOf.hidden=false;
-    asOf.textContent='As of '+data.as_of;
-    print.disabled=false;
-    status.textContent='';
-  }catch(error){status.textContent=error.message;}
-  finally{run.disabled=false;}
+    const url='/options/api/long-game-report/analyze';
+    const {job_id}=await requestJson(url,{method:'POST'});
+    let shown=0,misses=0;
+    while(true){
+      let data;
+      try{
+        data=await requestJson(url+'/'+encodeURIComponent(job_id),{cache:'no-store'});
+        if(misses)log('Connection restored.');
+        misses=0;
+      }catch(error){
+        if(!error.retryable||++misses>=5)throw error;
+        if(misses===1)log('Connection interrupted. Retrying the status check.');
+        await wait(4000);
+        continue;
+      }
+      for(const line of data.activity.slice(shown))log(line);
+      shown=data.activity.length;
+      if(data.status==='failed')throw Error(data.error);
+      if(data.status==='completed'){
+        render(data.analysis);
+        asOf.hidden=false;
+        asOf.textContent='As of '+data.as_of;
+        print.disabled=false;
+        status.textContent='Analysis complete.';
+        break;
+      }
+      await wait(2000);
+    }
+  }catch(error){
+    status.textContent=error.message;
+    if(activity.lastElementChild?.textContent!==error.message)log(error.message);
+  }finally{
+    clearInterval(timer);
+    tick();
+    run.disabled=false;
+  }
 };
 </script>
 </body>

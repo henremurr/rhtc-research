@@ -3707,8 +3707,53 @@ async def long_game_quotes(watchlist):
     return prices
 
 
-@app.post("/api/long-game-report/analyze")
-async def generate_long_game_analysis():
+_LONG_GAME_JOBS: dict[str, dict[str, Any]] = {}
+
+
+@app.post("/api/long-game-report/analyze", status_code=202)
+async def start_long_game_analysis():
+    now = time.monotonic()
+    for job_id, job in list(_LONG_GAME_JOBS.items()):
+        if job["status"] != "running" and now - job["started"] > 3600:
+            del _LONG_GAME_JOBS[job_id]
+    for job_id, job in _LONG_GAME_JOBS.items():
+        if job["status"] == "running":
+            return {"job_id": job_id}
+    job_id = secrets.token_hex(16)
+    job = {"status": "running", "started": now, "activity": ["Analysis queued."]}
+    _LONG_GAME_JOBS[job_id] = job
+    job["task"] = asyncio.create_task(run_long_game_job(job))
+    return {"job_id": job_id}
+
+
+@app.get("/api/long-game-report/analyze/{job_id}")
+async def long_game_job_status(job_id: str):
+    job = _LONG_GAME_JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(404, "This analysis is no longer available. Choose Update analysis to try again.")
+    return JSONResponse({key: value for key, value in job.items() if key not in {"started", "task"}},
+                        headers={"Cache-Control": "private, no-store"})
+
+
+async def run_long_game_job(job):
+    activity = job["activity"].append
+    try:
+        result = await asyncio.wait_for(generate_long_game_analysis(activity), timeout=900)
+        activity("Report ready.")
+        job.update(status="completed", **result)
+    except TimeoutError:
+        job.update(status="failed", error="Analysis exceeded 15 minutes. Choose Update analysis to retry.")
+    except HTTPException as error:
+        job.update(status="failed", error=str(error.detail))
+    except Exception:
+        job.update(status="failed", error="The report could not be generated. Choose Update analysis to retry.")
+    finally:
+        if job["status"] == "failed":
+            activity(job["error"])
+        job.pop("task", None)
+
+
+async def generate_long_game_analysis(activity):
     from openai import AsyncOpenAI
 
     from app.options.long_game import analyze_long_game, portfolio_facts
@@ -3717,6 +3762,7 @@ async def generate_long_game_analysis():
     key = os.getenv("OPENAI_API_KEY")
     if not key:
         raise HTTPException(503, "Long Game analysis is unavailable. Configure OPENAI_API_KEY in the server settings.")
+    activity("Reading watchlist, holdings and saved calls.")
     watchlist = read_watchlist()
     symbols = sorted({row["symbol"] for row in watchlist})
     stock, ceo = {}, {}
@@ -3740,7 +3786,11 @@ async def generate_long_game_analysis():
             "SELECT title, source, published_at, first_seen_at, peak, snippet FROM news_items "
             "ORDER BY COALESCE(NULLIF(published_at, ''), first_seen_at) DESC, url"
         )]
+    activity(f"Loaded {len(symbols)} tickers, {len(news)} news articles, "
+             f"{sum(map(len, stock.values()))} stock analyses and {sum(map(len, ceo.values()))} CEO Risk reports.")
+    activity("Fetching available quotes for held tickers.")
     prices = await long_game_quotes(watchlist)
+    activity(f"Received quotes for {len(prices)} tickers. Building the portfolio snapshot.")
     now = now_pacific()
     timestamp = now.strftime("%B %d, %Y at %I:%M %p %Z")
     facts = portfolio_facts(watchlist, prices, now.date().isoformat())
@@ -3748,11 +3798,11 @@ async def generate_long_game_analysis():
         async with AsyncOpenAI(api_key=key, timeout=90, max_retries=1) as client:
             analysis = await analyze_long_game(
                 client, os.getenv("OPENAI_ANALYSIS_MODEL", os.getenv("OPENAI_MODEL", "gpt-5-mini")),
-                facts, stock, ceo, news, timestamp,
+                facts, stock, ceo, news, timestamp, activity,
             )
     except Exception as error:
         raise HTTPException(502, "Could not complete the Long Game analysis. Try updating again.") from error
-    return JSONResponse({"analysis": analysis, "as_of": timestamp}, headers={"Cache-Control": "private, no-store"})
+    return {"analysis": analysis, "as_of": timestamp}
 
 
 
