@@ -190,8 +190,8 @@ class NewsPublicationRegressionTest(unittest.TestCase):
         )
         self.insert_story("https://example.com/not-published")
 
-        published = asyncio.run(news.get_news(peak=None, q=None, publication="Published"))
-        not_published = asyncio.run(news.get_news(peak=None, q=None, publication="Not published"))
+        published = asyncio.run(news.get_news(peak=None, q=None, topic=None, relevance=None, story_range="all", publication="Published"))
+        not_published = asyncio.run(news.get_news(peak=None, q=None, topic=None, relevance=None, story_range="all", publication="Not published"))
 
         self.assertEqual([item["url"] for item in published["items"]], ["https://example.com/published"])
         self.assertEqual(
@@ -208,7 +208,7 @@ class NewsPublicationRegressionTest(unittest.TestCase):
         )
 
         saved = asyncio.run(news.mark_news_x_published(request))
-        feed = asyncio.run(news.get_news(peak=None, q=None))
+        feed = asyncio.run(news.get_news(peak=None, q=None, topic=None, relevance=None, story_range="all"))
 
         self.assertEqual(saved["status"], "saved")
         self.assertEqual(feed["items"][0]["x_published"], 1)
@@ -230,7 +230,7 @@ class NewsPublicationRegressionTest(unittest.TestCase):
         retried = asyncio.run(news.mark_news_x_published(request))
         self.assertEqual(retried["status"], "saved")
         with patch.object(news, "connect_db", side_effect=real_connect_db):
-            feed = asyncio.run(news.get_news(peak=None, q=None))
+            feed = asyncio.run(news.get_news(peak=None, q=None, topic=None, relevance=None, story_range="all"))
         self.assertEqual(feed["items"][0]["x_post_id"], "1900123456789")
 
     def test_browser_retry_saves_the_confirmed_post_and_blocks_reposting(self):
