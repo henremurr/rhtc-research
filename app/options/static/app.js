@@ -149,7 +149,9 @@ function holdingsReportSnapshot(){
   const timestamp=new Intl.DateTimeFormat('en-US',{
     dateStyle:'medium',timeStyle:'medium',timeZone:'America/Los_Angeles'
   }).format(new Date());
-  const summary=`${rows.length} holdings · Call premium ${dollars(premium)} · Position cost ${dollars(cost)} · Current value ${dollars(value)}`;
+  const premiumCost=watchlistCostRatio(premium,cost);
+  const valueCost=missingQuotes<rows.length?watchlistCostRatio(value,cost):'—';
+  const summary=`${rows.length} holdings · Call premium ${dollars(premium)} · Premium/cost ${premiumCost} · Position cost ${dollars(cost)} · Current value ${dollars(value)} · Value/cost ${valueCost}`;
   const note=[missingQuotes?`${missingQuotes} without a last quote`:'',missingCosts?`${missingCosts} without a recorded cost`:''].filter(Boolean).join('; ');
   return {account:account===null?'All accounts':account||'No account',timestamp:timestamp+' PT',headings,rows,summary,note};
 }
