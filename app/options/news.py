@@ -693,6 +693,22 @@ async def fetch_curated_feed(client: httpx.AsyncClient, feed_url: str, seen_at: 
 
 
 
+DRUDGE_NEWS_FEEDS = (
+    "https://feedpress.me/drudgereportfeed",
+    "https://rssfeedermvc.azurewebsites.net/api/rss/drudge-report",
+)
+
+
+async def fetch_drudge_feed(client: httpx.AsyncClient, seen_at: str) -> list[dict[str, str]]:
+    """Use Drudge as a discovery source; retain original article URLs."""
+    async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as feed_client:
+        for feed_url in DRUDGE_NEWS_FEEDS:
+            items = await fetch_curated_feed(feed_client, feed_url, seen_at)
+            if items:
+                return items
+    return []
+
+
 def _page_meta_content(page: str, keys: tuple[str, ...]) -> str:
     for key in keys:
         escaped = re.escape(key)
@@ -917,7 +933,8 @@ async def scan_news(*, scheduled: bool = False, query: str | None = None) -> dic
                         raise HTTPException(502, "The news provider returned an unexpected response. Try again later.")
                     raw_results.extend(data.get("results") or [])
                 feed_batches = await asyncio.gather(
-                    *(fetch_curated_feed(client, feed_url, now_pacific().isoformat()) for feed_url in CURATED_NEWS_FEEDS)
+                    *(fetch_curated_feed(client, feed_url, now_pacific().isoformat()) for feed_url in CURATED_NEWS_FEEDS),
+                    fetch_drudge_feed(client, now_pacific().isoformat()),
                 )
                 raw_results.extend(item for feed_items in feed_batches for item in feed_items)
         except httpx.TimeoutException as exc:
