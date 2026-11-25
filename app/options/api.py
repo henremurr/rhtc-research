@@ -3678,6 +3678,41 @@ class HoldingsReportPdfInput(BaseModel):
     note: str = Field(default="", max_length=180)
 
 
+@app.get("/long-game-report", response_class=HTMLResponse)
+def long_game_report():
+    from app.options.long_game import render_long_game
+    from app.options.news import connect_db as connect_news_db, now_pacific
+
+    watchlist = read_watchlist()
+    symbols = sorted({row["symbol"] for row in watchlist})
+    stock, ceo = {}, {}
+    if symbols:
+        placeholders = ",".join("?" for _ in symbols)
+        with closing(connect_watchlist_db()) as connection:
+            for row in connection.execute(
+                "SELECT symbol, created_at, rating_label, summary, details, analysis_text "
+                f"FROM stock_analysis_reports WHERE symbol IN ({placeholders}) ORDER BY created_at DESC, report_id DESC",
+                symbols,
+            ):
+                stock.setdefault(row["symbol"], []).append(dict(row))
+            for row in connection.execute(
+                "SELECT symbol, created_at, risk_score, risk_rating, report_json "
+                f"FROM ceo_risk_reports WHERE symbol IN ({placeholders}) ORDER BY created_at DESC, report_id DESC",
+                symbols,
+            ):
+                ceo.setdefault(row["symbol"], []).append(dict(row))
+    with closing(connect_news_db()) as connection:
+        news = connection.execute(
+            "SELECT url, title, source, published_at, first_seen_at, peak, snippet FROM news_items "
+            "ORDER BY COALESCE(NULLIF(published_at, ''), first_seen_at) DESC, url"
+        ).fetchall()
+    timestamp = now_pacific().strftime("%B %d, %Y at %I:%M %p %Z")
+    return HTMLResponse(
+        render_long_game(watchlist, stock, ceo, news, timestamp),
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
 @app.post("/api/holdings-report/pdf")
 def create_holdings_report_pdf(data: HoldingsReportPdfInput):
     from app.options.trade_pdf import build_holdings_report

@@ -2328,11 +2328,12 @@ $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/opti
  const toggle=document.getElementById('guide-menu-toggle'),menu=document.getElementById('guide-menu');
  const guideHead=document.getElementById('guide-submenu-toggle'),guideBody=document.getElementById('guide-submenu');
  const reportHead=document.getElementById('reporting-submenu-toggle'),reportBody=document.getElementById('reporting-submenu');
- if(!toggle||!menu||!guideHead||!guideBody||!reportHead||!reportBody)return;
+ const otherHead=document.getElementById('other-reports-submenu-toggle'),otherBody=document.getElementById('other-reports-submenu');
+ if(!toggle||!menu||!guideHead||!guideBody||!reportHead||!reportBody||!otherHead||!otherBody)return;
  const storageKey='rhtc-dashboard-menu-v1',original=[...menu.children],root=document.createElement('div');root.id='guide-menu-items';
  const bar=document.createElement('div');bar.className='guide-menu-editbar';bar.hidden=true;bar.innerHTML='<div class="guide-menu-editbar-copy"><strong>Customize menu</strong><span id="guide-menu-edit-hint">Select items to group, drag to reorder, or tap Rename to change a name.</span></div><div class="guide-menu-editbar-actions"><button id="guide-menu-group-selected" type="button">Group selected</button><button id="guide-menu-edit-done" type="button">Done</button></div>';
  const edit=document.createElement('button');edit.id='guide-menu-customize';edit.type='button';edit.className='guide-menu-customize';edit.textContent='Customize menu';edit.setAttribute('role','menuitem');
- const map=new Map(),native=[{key:'group:reporting',head:reportHead,body:reportBody},{key:'group:documentation',head:guideHead,body:guideBody}],groupHeads=new Set(native.map(g=>g.head)),groupBodies=new Set(native.map(g=>g.body));
+ const map=new Map(),native=[{key:'group:reporting',head:reportHead,body:reportBody},{key:'group:other-reports',head:otherHead,body:otherBody},{key:'group:documentation',head:guideHead,body:guideBody}],groupHeads=new Set(native.map(g=>g.head)),groupBodies=new Set(native.map(g=>g.body));
  const itemDefaults=new Map();
  const itemLabels=new Map();
  const keyOf=el=>el.dataset.menuKey||el.id||('link:'+el.getAttribute('href'));
@@ -2397,14 +2398,26 @@ $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/opti
   if(label&&label!==original)itemLabels.set(key,label);
   else itemLabels.delete(key);
  };
+ function addLongGameMenuItem(data){
+  const item='open-long-game-report',key='group:other-reports';
+  if(data.root.includes(item)||data.groups.some(group=>group.children?.includes(item)))return data;
+  const existing=data.groups.find(group=>group.key===key||String(group.label||'').trim().toLowerCase()==='other reports');
+  if(existing)return {...data,groups:data.groups.map(group=>group===existing?{...group,children:[...(group.children||[]),item]}:group)};
+  return {...data,root:[...data.root,key],groups:[...data.groups,{key,label:'Other Reports',native:true,children:[item]}]};
+ }
  const restore=data=>{if(!data||!Array.isArray(data.root)||!Array.isArray(data.groups))return false;
+  data=addLongGameMenuItem(data);
   for(const key of itemDefaults.keys()){
    const label=data.item_labels?.[key];
    if(itemLabels.has(key)||(typeof label==='string'&&label.trim()))nameItem(key,typeof label==='string'?label.trim():'');
   }
   const keys=new Set(data.groups.map(g=>g.key));
   for(const g of [...root.children].filter(n=>n.dataset.menuGroup==='true'))if(!keys.has(g.dataset.menuKey)){for(const c of [...g.querySelector('.guide-submenu').children])root.append(c);g.remove();map.delete(g.dataset.menuKey)}
-  for(const g of data.groups)if(g.native===false&&!map.has(g.key))root.append(customGroup(g.key,g.label||'New group'));
+  for(const g of data.groups){
+   if(map.has(g.key))continue;
+   if(g.native===false)root.append(customGroup(g.key,g.label||'New group'));
+   else if(g.key==='group:other-reports')root.append(group(otherHead,otherBody,g.key,g.label));
+  }
   for(const g of data.groups){
    const head=map.get(g.key)?.querySelector('.guide-menu-parent');
    if(head&&typeof g.label==='string'&&g.label.trim())nameGroup(head,g.label);
