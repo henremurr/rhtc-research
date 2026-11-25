@@ -3680,9 +3680,43 @@ class HoldingsReportPdfInput(BaseModel):
 
 @app.get("/long-game-report", response_class=HTMLResponse)
 def long_game_report():
-    from app.options.long_game import render_long_game
+    return FileResponse(BASE / "templates" / "long_game.html", media_type="text/html",
+                        headers={"Cache-Control": "private, no-store"})
+
+
+async def long_game_quotes(watchlist):
+    symbols = sorted({row["symbol"] for row in watchlist if (row.get("quantity") or 0) > 0})
+    token = os.getenv("TRADIER_API_TOKEN", "").strip()
+    if not token or not symbols:
+        return {}
+    provider = Tradier(token)
+    batches = [symbols[index:index + 50] for index in range(0, len(symbols), 50)]
+    results = await asyncio.gather(*(
+        provider.get("/markets/quotes", {"symbols": ",".join(batch)}) for batch in batches
+    ), return_exceptions=True)
+    prices = {}
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        quotes = (result.get("quotes") or {}).get("quote") or []
+        for item in quotes if isinstance(quotes, list) else [quotes]:
+            last = item.get("last")
+            if isinstance(last, (int, float)) and math.isfinite(last) and last > 0:
+                prices[item["symbol"]] = {"last": last, "trade_timestamp_ms": item.get("trade_date"),
+                                          "source": "Tradier", "possibly_delayed": True}
+    return prices
+
+
+@app.post("/api/long-game-report/analyze")
+async def generate_long_game_analysis():
+    from openai import AsyncOpenAI
+
+    from app.options.long_game import analyze_long_game, portfolio_facts
     from app.options.news import connect_db as connect_news_db, now_pacific
 
+    key = os.getenv("OPENAI_API_KEY")
+    if not key:
+        raise HTTPException(503, "Long Game analysis is unavailable. Configure OPENAI_API_KEY in the server settings.")
     watchlist = read_watchlist()
     symbols = sorted({row["symbol"] for row in watchlist})
     stock, ceo = {}, {}
@@ -3702,15 +3736,24 @@ def long_game_report():
             ):
                 ceo.setdefault(row["symbol"], []).append(dict(row))
     with closing(connect_news_db()) as connection:
-        news = connection.execute(
-            "SELECT url, title, source, published_at, first_seen_at, peak, snippet FROM news_items "
+        news = [dict(row) for row in connection.execute(
+            "SELECT title, source, published_at, first_seen_at, peak, snippet FROM news_items "
             "ORDER BY COALESCE(NULLIF(published_at, ''), first_seen_at) DESC, url"
-        ).fetchall()
-    timestamp = now_pacific().strftime("%B %d, %Y at %I:%M %p %Z")
-    return HTMLResponse(
-        render_long_game(watchlist, stock, ceo, news, timestamp),
-        headers={"Cache-Control": "private, no-store"},
-    )
+        )]
+    prices = await long_game_quotes(watchlist)
+    now = now_pacific()
+    timestamp = now.strftime("%B %d, %Y at %I:%M %p %Z")
+    facts = portfolio_facts(watchlist, prices, now.date().isoformat())
+    try:
+        async with AsyncOpenAI(api_key=key, timeout=90, max_retries=1) as client:
+            analysis = await analyze_long_game(
+                client, os.getenv("OPENAI_ANALYSIS_MODEL", os.getenv("OPENAI_MODEL", "gpt-5-mini")),
+                facts, stock, ceo, news, timestamp,
+            )
+    except Exception as error:
+        raise HTTPException(502, "Could not complete the Long Game analysis. Try updating again.") from error
+    return JSONResponse({"analysis": analysis, "as_of": timestamp}, headers={"Cache-Control": "private, no-store"})
+
 
 
 @app.post("/api/holdings-report/pdf")
