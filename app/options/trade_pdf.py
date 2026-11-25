@@ -474,3 +474,50 @@ def build_cash_activity_report(broker, account, groups, title=""):
         story.extend([table, Spacer(1, 12)])
     doc.build(story, onFirstPage=decorate, onLaterPages=decorate)
     return output.getvalue()
+
+
+def build_holdings_report(account, timestamp, headings, rows, summary, note):
+    output = BytesIO()
+    width, height = landscape(letter)
+    title = f"Holdings Report for {account}"
+    doc = SimpleDocTemplate(output, pagesize=(width, height), title=title,
+                            leftMargin=34, rightMargin=34, topMargin=75, bottomMargin=38)
+    ink = colors.HexColor("#182229")
+    gold = colors.HexColor("#C6A45C")
+    logo = Path(__file__).parent / "static" / "apple-touch-icon.png"
+    body = ParagraphStyle("Holdings", fontName="Helvetica", fontSize=8, leading=11)
+    header = ParagraphStyle("HoldingsHeader", parent=body, fontName="Helvetica-Bold",
+                            textColor=colors.white)
+
+    def decorate(canvas, document):
+        canvas.saveState()
+        canvas.drawImage(str(logo), 38, height-55, width=34, height=34, mask="auto")
+        canvas.setFillColor(ink)
+        draw_report_title(canvas, 82, height-37, width-120, title)
+        canvas.setFont("Helvetica", 10)
+        canvas.drawString(82, height-52, f"As of {timestamp}")
+        canvas.setStrokeColor(gold)
+        canvas.line(38, height-64, width-38, height-64)
+        canvas.setFont("Helvetica", 8)
+        canvas.drawRightString(width-38, 20, f"Rocking Horse Trading Co.   |   {document.page}")
+        canvas.restoreState()
+
+    cells = [[Paragraph(escape(label), header) for label in headings]]
+    cells.extend([
+        [Paragraph(escape(value).replace("\n", "<br/>"), body) for value in row]
+        for row in rows
+    ])
+    table = LongTable(cells, colWidths=[49, 76, 49, 50, 62, 56, 66, 66, 240],
+                      repeatRows=1, splitInRow=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), ink),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LINEBELOW", (0, 0), (-1, 0), 1, gold),
+        ("LINEBELOW", (0, 1), (-1, -1), .35, colors.lightgrey),
+    ]))
+    story = [Paragraph(escape(summary), body)]
+    if note:
+        story.append(Paragraph(f"Totals exclude missing values ({escape(note)}).", body))
+    story.extend([Spacer(1, 10), table])
+    doc.build(story, onFirstPage=decorate, onLaterPages=decorate)
+    return output.getvalue()

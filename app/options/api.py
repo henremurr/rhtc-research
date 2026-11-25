@@ -3669,6 +3669,31 @@ async def purge_saved_earnings_calendars():
     return {"deleted": count}
 
 
+class HoldingsReportPdfInput(BaseModel):
+    account: str = Field(max_length=60)
+    timestamp: str = Field(max_length=80)
+    headings: list[str] = Field(min_length=9, max_length=9)
+    rows: list[list[str]] = Field(min_length=1, max_length=300)
+    summary: str = Field(max_length=250)
+    note: str = Field(default="", max_length=180)
+
+
+@app.post("/api/holdings-report/pdf")
+def create_holdings_report_pdf(data: HoldingsReportPdfInput):
+    from app.options.trade_pdf import build_holdings_report
+
+    if any(len(label) > 40 for label in data.headings) or any(
+        len(row) != len(data.headings) or any(len(value) > 12000 for value in row)
+        for row in data.rows
+    ):
+        raise HTTPException(400, "Invalid holdings report table.")
+    pdf = build_holdings_report(data.account, data.timestamp, data.headings, data.rows, data.summary, data.note)
+    return Response(pdf, media_type="application/pdf", headers={
+        "Content-Disposition": 'attachment; filename="RHTC_Holdings_Report.pdf"',
+        "Cache-Control": "private, no-store",
+    })
+
+
 @app.post("/api/ticker-report/pdf")
 async def create_ticker_report_pdf(data: TickerReportPdfInput):
     symbol = data.symbol.strip().upper()
