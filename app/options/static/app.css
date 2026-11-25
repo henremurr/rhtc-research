@@ -1861,3 +1861,16 @@ body.news-mode .news-research-title {
 .symbol-entry:not(.editing) .symbol-option-details{flex-direction:column;align-items:stretch}
 .symbol-entry:not(.editing) .symbol-option-details>small{white-space:normal}
 .symbol-extra-call{grid-column:1/-1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) auto;gap:6px;margin:0;border:1px solid currentColor;border-radius:4px}
+
+.symbols-modal .buffett-screen-controls :is(#buffett-screen-status,#ceo-risk-screen-status){
+  min-width:0;white-space:normal;overflow-wrap:anywhere
+}
+@media (min-width:761px){
+  #symbols-modal .symbol-manager-toolbar{gap:6px}
+  #symbols-modal .symbol-manager-filter{gap:4px}
+  #symbols-modal .symbol-manager-toolbar .searchbox{flex:0 1 105px;min-width:58px}
+  #symbols-modal .symbol-manager-summary{flex:0 0 auto;gap:4px}
+  #symbols-modal .symbol-total-value{gap:4px;padding:5px}
+  #symbols-modal .buffett-screen-controls button{flex-shrink:0;white-space:nowrap}
+  #symbols-modal .buffett-screen-controls :is(#buffett-screen-status,#ceo-risk-screen-status){flex:0 1 24ch}
+}
