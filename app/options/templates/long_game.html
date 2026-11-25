@@ -23,6 +23,7 @@ nav button:disabled{opacity:.6;cursor:default} #analysis p{white-space:pre-line}
 <nav aria-label="Report controls">
 <a href="/options/">Return to dashboard</a>
 <button id="run" type="button">Update analysis</button>
+<button id="resume" type="button" hidden>Resume</button>
 <button id="print" type="button" disabled>Print or save PDF</button>
 </nav>
 <main>
@@ -78,15 +79,26 @@ async function requestJson(url,options){
     ? await response.json().catch(()=>null) : null;
   if(!response.ok||!data){
     throw Object.assign(Error(data?.detail||'The report server did not return a usable response.'),{
+      httpStatus:response.status,
       retryable:response.status>=500||response.status===429||response.ok
     });
   }
   return data;
 }
-run.onclick=async()=>{
+const resume=document.getElementById('resume'),jobKey='rhtc-long-game-job';
+let jobId,shown=0;
+try{jobId=sessionStorage.getItem(jobKey);}catch{}
+resume.hidden=!jobId;
+function rememberJob(id){
+  jobId=id;
+  try{if(id)sessionStorage.setItem(jobKey,id);else sessionStorage.removeItem(jobKey);}catch{}
+}
+async function analyze(resuming){
   run.disabled=true;
+  resume.disabled=true;
+  resume.hidden=true;
   activityWindow.hidden=false;
-  activity.replaceChildren();
+  if(!resuming){activity.replaceChildren();shown=0;rememberJob(null);}
   status.textContent='Analysis in progress.';
   const started=Date.now();
   const tick=()=>{
@@ -95,11 +107,14 @@ run.onclick=async()=>{
   };
   tick();
   const timer=setInterval(tick,1000);
-  log('Submitting analysis request.');
+  log(resuming?'Requesting resume.':'Submitting analysis request.');
   try{
     const url='/options/api/long-game-report/analyze';
-    const {job_id}=await requestJson(url,{method:'POST'});
-    let shown=0,misses=0;
+    const target=resuming?url+'/'+encodeURIComponent(jobId)+'/resume':url;
+    const {job_id}=await requestJson(target,{method:'POST'});
+    if(jobId!==job_id)shown=0;
+    rememberJob(job_id);
+    let misses=0;
     while(true){
       let data;
       try{
@@ -120,20 +135,26 @@ run.onclick=async()=>{
         asOf.hidden=false;
         asOf.textContent='As of '+data.as_of;
         print.disabled=false;
-        status.textContent='Analysis complete.';
+        status.textContent=data.resumable?'Partial analysis ready. Resume to retry unfinished research.':'Analysis complete.';
+        if(!data.resumable)rememberJob(null);
         break;
       }
       await wait(2000);
     }
   }catch(error){
+    if(error.httpStatus===404)rememberJob(null);
     status.textContent=error.message;
     if(activity.lastElementChild?.textContent!==error.message)log(error.message);
   }finally{
     clearInterval(timer);
     tick();
     run.disabled=false;
+    resume.disabled=false;
+    resume.hidden=!jobId;
   }
-};
+}
+run.onclick=()=>analyze(false);
+resume.onclick=()=>analyze(true);
 </script>
 </body>
 </html>

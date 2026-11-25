@@ -1,6 +1,7 @@
 """Synthesize the Long Game plan from the dashboard's current saved records."""
 
 import asyncio
+import hashlib
 import json
 import logging
 from collections import defaultdict
@@ -119,19 +120,24 @@ def evidence_batches(stock, ceo, news):
         yield batch
 
 
-async def analyze_long_game(client, model, facts, stock, ceo, news, timestamp, activity):
+async def analyze_long_game(client, model, facts, stock, ceo, news, timestamp, activity, checkpoint):
     semaphore = asyncio.Semaphore(4)
     held = ", ".join(sorted({row["ticker"] for row in facts["positions"]}))
 
     async def response(instructions, payload, max_tokens):
+        encoded = json.dumps(payload, ensure_ascii=False)
+        key = hashlib.sha256(json.dumps([model, instructions, encoded]).encode()).hexdigest()
+        if key in checkpoint:
+            return checkpoint[key]
         async with semaphore:
             result = await client.responses.create(
-                model=model, instructions=instructions, input=json.dumps(payload, ensure_ascii=False),
+                model=model, instructions=instructions, input=encoded,
                 max_output_tokens=max_tokens, store=False, reasoning={"effort": "low"},
             )
         answer = (result.output_text or "").strip()
         if not answer or result.status == "incomplete":
             raise ValueError("The analysis returned incomplete text.")
+        checkpoint[key] = answer
         return answer
 
     async def inspect(batch):
@@ -188,4 +194,4 @@ async def analyze_long_game(client, model, facts, stock, ceo, news, timestamp, a
             f"Research coverage was incomplete. {missing_batches} of {len(batches)} saved research batches "
             f"could not be reviewed.\n\n{analysis}"
         )
-    return analysis
+    return analysis, missing_batches

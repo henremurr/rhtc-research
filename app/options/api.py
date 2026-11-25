@@ -3720,8 +3720,26 @@ async def start_long_game_analysis():
         if job["status"] == "running":
             return {"job_id": job_id}
     job_id = secrets.token_hex(16)
-    job = {"status": "running", "started": now, "activity": ["Analysis queued."]}
+    job = {"status": "running", "started": now, "activity": ["Analysis queued."], "checkpoint": {}}
     _LONG_GAME_JOBS[job_id] = job
+    job["task"] = asyncio.create_task(run_long_game_job(job))
+    return {"job_id": job_id}
+
+
+@app.post("/api/long-game-report/analyze/{job_id}/resume", status_code=202)
+async def resume_long_game_analysis(job_id: str):
+    job = _LONG_GAME_JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(404, "This analysis is no longer available. Choose Update analysis to start again.")
+    if job["status"] == "running":
+        return {"job_id": job_id}
+    if not job.get("resumable"):
+        return {"job_id": job_id}
+    if any(other["status"] == "running" for other in _LONG_GAME_JOBS.values()):
+        raise HTTPException(409, "Another Long Game analysis is running. Try Resume after it finishes.")
+    job.update(status="running", started=time.monotonic(), resumable=False)
+    job.pop("error", None)
+    job["activity"].append("Resuming from the last checkpoint.")
     job["task"] = asyncio.create_task(run_long_game_job(job))
     return {"job_id": job_id}
 
@@ -3731,29 +3749,33 @@ async def long_game_job_status(job_id: str):
     job = _LONG_GAME_JOBS.get(job_id)
     if job is None:
         raise HTTPException(404, "This analysis is no longer available. Choose Update analysis to try again.")
-    return JSONResponse({key: value for key, value in job.items() if key not in {"started", "task"}},
+    return JSONResponse({key: value for key, value in job.items() if key in {"status", "activity", "analysis", "as_of", "error", "resumable"}},
                         headers={"Cache-Control": "private, no-store"})
 
 
 async def run_long_game_job(job):
     activity = job["activity"].append
     try:
-        result = await asyncio.wait_for(generate_long_game_analysis(activity), timeout=900)
-        activity("Report ready.")
+        result = await asyncio.wait_for(generate_long_game_analysis(job, activity), timeout=900)
+        activity("Partial report ready. Resume to retry unfinished research." if result["resumable"] else "Report ready.")
         job.update(status="completed", **result)
+        if not result["resumable"]:
+            job.pop("inputs", None)
+            job.pop("checkpoint", None)
     except TimeoutError:
-        job.update(status="failed", error="Analysis exceeded 15 minutes. Choose Update analysis to retry.")
+        job.update(status="failed", error="Analysis exceeded 15 minutes. Choose Resume to continue.")
     except HTTPException as error:
         job.update(status="failed", error=str(error.detail))
     except Exception:
-        job.update(status="failed", error="The report could not be generated. Choose Update analysis to retry.")
+        job.update(status="failed", error="The report could not be generated. Choose Resume to continue.")
     finally:
         if job["status"] == "failed":
+            job["resumable"] = True
             activity(job["error"])
         job.pop("task", None)
 
 
-async def generate_long_game_analysis(activity):
+async def generate_long_game_analysis(job, activity):
     from openai import AsyncOpenAI
 
     from app.options.long_game import analyze_long_game, portfolio_facts
@@ -3762,47 +3784,50 @@ async def generate_long_game_analysis(activity):
     key = os.getenv("OPENAI_API_KEY")
     if not key:
         raise HTTPException(503, "Long Game analysis is unavailable. Configure OPENAI_API_KEY in the server settings.")
-    activity("Reading watchlist, holdings and saved calls.")
-    watchlist = read_watchlist()
-    symbols = sorted({row["symbol"] for row in watchlist})
-    stock, ceo = {}, {}
-    if symbols:
-        placeholders = ",".join("?" for _ in symbols)
-        with closing(connect_watchlist_db()) as connection:
-            for row in connection.execute(
-                "SELECT symbol, created_at, rating_label, summary, details, analysis_text "
-                f"FROM stock_analysis_reports WHERE symbol IN ({placeholders}) ORDER BY created_at DESC, report_id DESC",
-                symbols,
-            ):
-                stock.setdefault(row["symbol"], []).append(dict(row))
-            for row in connection.execute(
-                "SELECT symbol, created_at, risk_score, risk_rating, report_json "
-                f"FROM ceo_risk_reports WHERE symbol IN ({placeholders}) ORDER BY created_at DESC, report_id DESC",
-                symbols,
-            ):
-                ceo.setdefault(row["symbol"], []).append(dict(row))
-    with closing(connect_news_db()) as connection:
-        news = [dict(row) for row in connection.execute(
-            "SELECT title, source, published_at, first_seen_at, peak, snippet FROM news_items "
-            "ORDER BY COALESCE(NULLIF(published_at, ''), first_seen_at) DESC, url"
-        )]
-    activity(f"Loaded {len(symbols)} tickers, {len(news)} news articles, "
-             f"{sum(map(len, stock.values()))} stock analyses and {sum(map(len, ceo.values()))} CEO Risk reports.")
-    activity("Fetching available quotes for held tickers.")
-    prices = await long_game_quotes(watchlist)
-    activity(f"Received quotes for {len(prices)} tickers. Building the portfolio snapshot.")
-    now = now_pacific()
-    timestamp = now.strftime("%B %d, %Y at %I:%M %p %Z")
-    facts = portfolio_facts(watchlist, prices, now.date().isoformat())
+    if "inputs" not in job:
+        activity("Reading watchlist, holdings and saved calls.")
+        watchlist = read_watchlist()
+        symbols = sorted({row["symbol"] for row in watchlist})
+        stock, ceo = {}, {}
+        if symbols:
+            placeholders = ",".join("?" for _ in symbols)
+            with closing(connect_watchlist_db()) as connection:
+                for row in connection.execute(
+                    "SELECT symbol, created_at, rating_label, summary, details, analysis_text "
+                    f"FROM stock_analysis_reports WHERE symbol IN ({placeholders}) ORDER BY created_at DESC, report_id DESC",
+                    symbols,
+                ):
+                    stock.setdefault(row["symbol"], []).append(dict(row))
+                for row in connection.execute(
+                    "SELECT symbol, created_at, risk_score, risk_rating, report_json "
+                    f"FROM ceo_risk_reports WHERE symbol IN ({placeholders}) ORDER BY created_at DESC, report_id DESC",
+                    symbols,
+                ):
+                    ceo.setdefault(row["symbol"], []).append(dict(row))
+        with closing(connect_news_db()) as connection:
+            news = [dict(row) for row in connection.execute(
+                "SELECT title, source, published_at, first_seen_at, peak, snippet FROM news_items "
+                "ORDER BY COALESCE(NULLIF(published_at, ''), first_seen_at) DESC, url"
+            )]
+        activity(f"Loaded {len(symbols)} tickers, {len(news)} news articles, "
+                 f"{sum(map(len, stock.values()))} stock analyses and {sum(map(len, ceo.values()))} CEO Risk reports.")
+        activity("Fetching available quotes for held tickers.")
+        prices = await long_game_quotes(watchlist)
+        activity(f"Received quotes for {len(prices)} tickers. Building the portfolio snapshot.")
+        now = now_pacific()
+        timestamp = now.strftime("%B %d, %Y at %I:%M %p %Z")
+        facts = portfolio_facts(watchlist, prices, now.date().isoformat())
+        job["inputs"] = (facts, stock, ceo, news, timestamp)
+    facts, stock, ceo, news, timestamp = job["inputs"]
     try:
         async with AsyncOpenAI(api_key=key, timeout=90, max_retries=1) as client:
-            analysis = await analyze_long_game(
+            analysis, missing_batches = await analyze_long_game(
                 client, os.getenv("OPENAI_ANALYSIS_MODEL", os.getenv("OPENAI_MODEL", "gpt-5-mini")),
-                facts, stock, ceo, news, timestamp, activity,
+                facts, stock, ceo, news, timestamp, activity, job["checkpoint"],
             )
     except Exception as error:
-        raise HTTPException(502, "Could not complete the Long Game analysis. Try updating again.") from error
-    return {"analysis": analysis, "as_of": timestamp}
+        raise HTTPException(502, "Could not complete the Long Game analysis. Choose Resume to continue.") from error
+    return {"analysis": analysis, "as_of": timestamp, "resumable": bool(missing_batches)}
 
 
 
