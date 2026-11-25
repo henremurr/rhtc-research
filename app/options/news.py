@@ -17,7 +17,7 @@ from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 from zoneinfo import ZoneInfo
 
@@ -64,6 +64,11 @@ class NewsPeakInput(BaseModel):
 class NewsTopicInput(BaseModel):
     url: str = Field(min_length=8, max_length=2000)
     topic: str = Field(min_length=1, max_length=120)
+
+
+class NewsRelevanceInput(BaseModel):
+    url: str = Field(min_length=8, max_length=2000)
+    relevance: Literal["High", "Medium", "Low", "Automatic"]
 
 
 class NewsArtworkInput(BaseModel):
@@ -350,6 +355,7 @@ def connect_db() -> sqlite3.Connection:
         ("topic", "TEXT NOT NULL DEFAULT ''"),
         ("topic_override", "TEXT NOT NULL DEFAULT ''"),
         ("relevance_score", "INTEGER"),
+        ("relevance_override", "INTEGER"),
     ):
         if column not in existing_columns:
             connection.execute(f"ALTER TABLE news_items ADD COLUMN {column} {declaration}")
@@ -499,6 +505,7 @@ def assign_news_relevance(
 ) -> dict[str, Any]:
     """Persist scores for every supplied story, or every saved story when omitted."""
     symbols = symbols if symbols is not None else news_watchlist_symbols()
+    full_scan = rows is None
     if rows is None:
         rows = [dict(row) for row in connection.execute(
             "SELECT url,title,snippet,story_content FROM news_items ORDER BY last_seen_at DESC"
@@ -508,11 +515,18 @@ def assign_news_relevance(
         for row in rows
     ]
     if scores:
-        connection.executemany("UPDATE news_items SET relevance_score=? WHERE url=?", scores)
+        connection.executemany("UPDATE news_items SET relevance_score=COALESCE(relevance_override, ?) WHERE url=?", scores)
+    effective_scores = [score for score, _ in scores]
+    if full_scan:
+        effective_scores = [
+            row["relevance_score"] for row in connection.execute(
+                "SELECT relevance_score FROM news_items WHERE relevance_score IS NOT NULL"
+            )
+        ]
     counts = {
-        "high": sum(score >= 4 for score, _ in scores),
-        "medium": sum(2 <= score <= 3 for score, _ in scores),
-        "low": sum(score <= 1 for score, _ in scores),
+        "high": sum(score >= 4 for score in effective_scores),
+        "medium": sum(2 <= score <= 3 for score in effective_scores),
+        "low": sum(score <= 1 for score in effective_scores),
     }
     return {"ranked": len(scores), "counts": counts}
 
@@ -1093,7 +1107,7 @@ async def scan_news_topics() -> dict[str, Any]:
     """Scan stored headlines and excerpts, assign recurring topics, and save them for filtering."""
     with closing(connect_db()) as connection:
         rows = [dict(row) for row in connection.execute(
-            "SELECT url,title,snippet,story_content FROM news_items ORDER BY last_seen_at DESC"
+            "SELECT url,title,snippet,story_content,relevance_override FROM news_items ORDER BY last_seen_at DESC"
         )]
         if not rows:
             return {"status": "complete", "scanned": 0, "topic_count": 0, "topics": []}
@@ -1143,6 +1157,33 @@ async def scan_news_relevance() -> dict[str, Any]:
         "unranked": unranked,
         "scanned_at": scanned_at,
     }
+
+
+@router.patch("/relevance")
+async def update_news_relevance(data: NewsRelevanceInput) -> dict[str, Any]:
+    """Save a manual rank or restore automatic ranking for one story."""
+    url = canonical_news_url(data.url)
+    if not url:
+        raise HTTPException(400, "A valid story URL is required.")
+    override = {"High": 4, "Medium": 2, "Low": 0}.get(data.relevance)
+    with closing(connect_db()) as connection:
+        score = override
+        if score is None:
+            story = connection.execute(
+                "SELECT title,snippet,story_content FROM news_items WHERE url=?", (url,)
+            ).fetchone()
+            if story is None:
+                raise HTTPException(404, "The story is no longer in the stored news feed.")
+            score = rank_news_relevance(
+                story["title"] or "", story["story_content"] or story["snippet"] or "", news_watchlist_symbols()
+            )
+        result = connection.execute(
+            "UPDATE news_items SET relevance_score=?, relevance_override=? WHERE url=?", (score, override, url)
+        )
+        if result.rowcount == 0:
+            raise HTTPException(404, "The story is no longer in the stored news feed.")
+        connection.commit()
+    return {"status": "updated", "relevance_score": score}
 
 
 @router.patch("/peak")
@@ -1467,7 +1508,7 @@ async def deduplicate_news() -> dict[str, Any]:
 
     with closing(connect_db()) as connection:
         rows = [dict(row) for row in connection.execute(
-            "SELECT url,title,published_at,snippet,story_content,topic,topic_override,first_seen_at,last_seen_at,youtube_published,youtube_video_id,youtube_url,youtube_published_at,youtube_privacy_status,x_published,x_post_id,x_post_url,x_published_at FROM news_items ORDER BY first_seen_at,url"
+            "SELECT url,title,published_at,snippet,story_content,topic,topic_override,relevance_override,first_seen_at,last_seen_at,youtube_published,youtube_video_id,youtube_url,youtube_published_at,youtube_privacy_status,x_published,x_post_id,x_post_url,x_published_at FROM news_items ORDER BY first_seen_at,url"
         )]
         words_by_url = {row["url"]: set(content_words(row)) for row in rows}
         document_frequency: dict[str, int] = {}
@@ -1539,6 +1580,17 @@ async def deduplicate_news() -> dict[str, Any]:
                 connection.execute(
                     "UPDATE news_items SET topic=?, topic_override=? WHERE url=?",
                     (manually_assigned["topic_override"], manually_assigned["topic_override"], keep["url"]),
+                )
+            manual_rank = max(
+                (item for item in group if item["relevance_override"] is not None),
+                key=lambda item: (item["url"] == keep["url"], item["last_seen_at"]),
+                default=None,
+            )
+            if manual_rank:
+                score = manual_rank["relevance_override"]
+                connection.execute(
+                    "UPDATE news_items SET relevance_score=?, relevance_override=? WHERE url=?",
+                    (score, score, keep["url"]),
                 )
             for item in group:
                 if item["url"] != keep["url"]:
