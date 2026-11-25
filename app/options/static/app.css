@@ -1836,3 +1836,22 @@ body.news-mode .news-research-title {
     -webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;touch-action:pan-y;
   }
 }
+
+/* Keep the mobile watchlist inside the viewport, including wide summary values. */
+@media (max-width:760px){
+  #symbols-modal.open{overflow:hidden;align-items:stretch;justify-content:center}
+  #symbols-modal.open > .symbols-modal{
+    width:100%;max-width:100%;min-width:0;height:100%;max-height:100%;
+    box-sizing:border-box;overflow-y:auto;overflow-x:hidden;
+  }
+  #symbols-modal .symbol-manager-toolbar{min-width:0;max-width:100%}
+  #symbols-modal .symbol-manager-summary{
+    flex:0 0 100%;width:100%;max-width:100%;min-width:0;
+    overflow-x:auto;gap:6px;overscroll-behavior-x:contain;
+  }
+  #symbols-modal .symbol-manager-summary > *{flex-shrink:0}
+  #symbols-modal .symbol-manager-filter{min-width:0;max-width:100%}
+  #symbols-modal .symbol-manager-filter select{min-width:0;max-width:100%}
+  #symbols-modal .buffett-screen-controls{flex:none;min-width:0;max-width:100%}
+  #symbols-modal #symbol-list{flex:1 0 120px;min-height:120px;overflow-y:auto;touch-action:pan-y}
+}
