@@ -14,8 +14,8 @@ nav a,nav button{background:#e2c778;color:#171717;padding:.45rem .75rem;border:0
 nav button:disabled{opacity:.6;cursor:default} #analysis p{white-space:pre-line} #analysis li{margin:.45rem 0}
 #activity-window{margin:1rem 0;padding:1rem;border:1px solid #c7ced1;border-radius:.5rem;background:#f5f7f8}
 #activity-window h2{margin:0;border:0;font-size:1rem}
-#activity{max-height:12rem;overflow-y:auto;margin:.5rem 0 0;padding-inline-start:1.5rem;overscroll-behavior:contain}
-#activity li{margin:.25rem 0} #elapsed{color:#526168;font-variant-numeric:tabular-nums}
+#activity{max-height:12rem;overflow-y:auto;margin:.5rem 0 0;padding-inline-start:calc(var(--activity-number-width, 1ch) + 1.5rem);overscroll-behavior:contain}
+#activity li{margin:.25rem 0} #activity li::marker{font-variant-numeric:tabular-nums} #elapsed{color:#526168;font-variant-numeric:tabular-nums}
 @media print{nav,#status,#activity-window{display:none}main{padding:0}h2,h3{break-after:avoid}}
 </style>
 </head>
@@ -66,6 +66,7 @@ function log(message){
   const line=document.createElement('li');
   line.textContent=message;
   activity.append(line);
+  activity.style.setProperty('--activity-number-width', String(activity.childElementCount).length + 'ch');
   activity.scrollTop=activity.scrollHeight;
 }
 async function requestJson(url,options){
