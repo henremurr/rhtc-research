@@ -1857,3 +1857,7 @@ body.news-mode .news-research-title {
   #symbols-modal .buffett-screen-controls{flex:none;min-width:0;max-width:100%}
   #symbols-modal #symbol-list{flex:1 0 120px;min-height:120px;overflow-y:auto;touch-action:pan-y}
 }
+
+.symbol-entry:not(.editing) .symbol-option-details{flex-direction:column;align-items:stretch}
+.symbol-entry:not(.editing) .symbol-option-details>small{white-space:normal}
+.symbol-extra-call{grid-column:1/-1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) auto;gap:6px;margin:0;border:1px solid currentColor;border-radius:4px}

@@ -259,6 +259,8 @@ def connect_watchlist_db() -> sqlite3.Connection:
             "SELECT position, symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, lt_call, lt_expy, lt_qty, lt_premium, account, pg, buffett_pass, buffett_score, buffett_updated_at, buffett_criteria_json FROM symbols_old"
         )
         connection.execute("DROP TABLE symbols_old")
+    if "additional_calls_json" not in {row["name"] for row in connection.execute("PRAGMA table_info(symbols)")}:
+        connection.execute("ALTER TABLE symbols ADD COLUMN additional_calls_json TEXT NOT NULL DEFAULT '[]'")
     connection.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_symbols_symbol_account "
         "ON symbols(symbol, COALESCE(account, ''))"
@@ -323,7 +325,11 @@ def connect_watchlist_db() -> sqlite3.Connection:
 
 def read_watchlist() -> list[dict[str, Any]]:
     with closing(connect_watchlist_db()) as connection:
-        return [dict(row) for row in connection.execute("SELECT symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account, lt_call, lt_expy, lt_qty, lt_premium, pg, buffett_pass, buffett_score, buffett_updated_at, buffett_criteria_json, (SELECT COUNT(*) FROM stock_analysis_reports r WHERE r.symbol = symbols.symbol) AS stock_report_count, (SELECT COUNT(*) FROM buffett_screen_reports b WHERE b.symbol = symbols.symbol) AS buffett_report_count, (SELECT risk_score FROM ceo_risk_reports c WHERE c.symbol = symbols.symbol ORDER BY created_at DESC, report_id DESC LIMIT 1) AS ceo_risk_score, (SELECT risk_rating FROM ceo_risk_reports c WHERE c.symbol = symbols.symbol ORDER BY created_at DESC, report_id DESC LIMIT 1) AS ceo_risk_rating, (SELECT created_at FROM ceo_risk_reports c WHERE c.symbol = symbols.symbol ORDER BY created_at DESC, report_id DESC LIMIT 1) AS ceo_risk_updated_at, (SELECT COUNT(*) FROM ceo_risk_reports c WHERE c.symbol = symbols.symbol) AS ceo_risk_report_count FROM symbols ORDER BY position")]
+        rows = [dict(row) for row in connection.execute("SELECT symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account, lt_call, lt_expy, lt_qty, lt_premium, additional_calls_json, pg, buffett_pass, buffett_score, buffett_updated_at, buffett_criteria_json, (SELECT COUNT(*) FROM stock_analysis_reports r WHERE r.symbol = symbols.symbol) AS stock_report_count, (SELECT COUNT(*) FROM buffett_screen_reports b WHERE b.symbol = symbols.symbol) AS buffett_report_count, (SELECT risk_score FROM ceo_risk_reports c WHERE c.symbol = symbols.symbol ORDER BY created_at DESC, report_id DESC LIMIT 1) AS ceo_risk_score, (SELECT risk_rating FROM ceo_risk_reports c WHERE c.symbol = symbols.symbol ORDER BY created_at DESC, report_id DESC LIMIT 1) AS ceo_risk_rating, (SELECT created_at FROM ceo_risk_reports c WHERE c.symbol = symbols.symbol ORDER BY created_at DESC, report_id DESC LIMIT 1) AS ceo_risk_updated_at, (SELECT COUNT(*) FROM ceo_risk_reports c WHERE c.symbol = symbols.symbol) AS ceo_risk_report_count FROM symbols ORDER BY position")]
+        for row in rows:
+            row["additional_calls"] = json.loads(row.pop("additional_calls_json"))
+        return rows
+
 
 
 def extract_analysis_total_score(analysis: str) -> int | None:
@@ -470,6 +476,23 @@ def optional_nonnegative_integer(item: dict[str, Any], field: str) -> int | None
     return value
 
 
+def validate_watchlist_call(item: dict[str, Any]) -> dict[str, Any]:
+    strike = str(item.get("lt_call") or "").strip()
+    expiry = str(item.get("lt_expy") or "").strip()
+    if "-" in strike and not expiry:
+        strike, expiry = (part.strip() for part in strike.split("-", 1))
+    if strike.upper().startswith("C"):
+        strike = strike[1:].strip()
+    if len(strike) > 80:
+        raise HTTPException(400, "LT-Call must be 80 characters or fewer.")
+    return {
+        "lt_call": strike,
+        "lt_expy": expiry,
+        "lt_qty": optional_nonnegative_integer(item, "lt_qty"),
+        "lt_premium": optional_nonnegative_number(item, "lt_premium"),
+    }
+
+
 def validate_watchlist(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if len(rows) > 300:
         raise HTTPException(400, "The watchlist can contain at most 300 symbols.")
@@ -479,17 +502,16 @@ def validate_watchlist(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         ticker = str(item.get("symbol", "")).strip().upper()
         peak = str(item.get("peak", "Other"))
         account = str(item.get("account") or "")
-        lt_call = str(item.get("lt_call") or "").strip()
-        lt_expy = str(item.get("lt_expy") or "").strip()
-        if "-" in lt_call and not lt_expy:
-            lt_call, lt_expy = (part.strip() for part in lt_call.split("-", 1))
-        if lt_call.upper().startswith("C"):
-            lt_call = lt_call[1:].strip()
         pg = str(item.get("pg") or "").strip()
         if len(pg) > 3:
             raise HTTPException(400, "PG must be 3 characters or fewer.")
-        if len(lt_call) > 80:
-            raise HTTPException(400, "LT-Call must be 80 characters or fewer.")
+        additional_calls = item.get("additional_calls", [])
+        if not isinstance(additional_calls, list) or any(not isinstance(call, dict) for call in additional_calls):
+            raise HTTPException(400, "Additional covered calls must be a list of call details.")
+        calls = [validate_watchlist_call(call) for call in additional_calls]
+        primary_call = validate_watchlist_call(item)
+        if calls and not any(value is not None and value != "" for value in primary_call.values()):
+            primary_call = calls.pop(0)
         ticker_account = (ticker, account)
         if not SYMBOL_PATTERN.fullmatch(ticker) or peak not in VALID_PEAKS or ticker_account in seen:
             raise HTTPException(400, "Use a unique ticker/account pair and a valid Three Peaks category.")
@@ -502,10 +524,8 @@ def validate_watchlist(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "share_price": optional_nonnegative_number(item, "share_price"),
             "quantity": optional_nonnegative_number(item, "quantity"),
             "account": account or None,
-            "lt_call": lt_call,
-            "lt_expy": lt_expy,
-            "lt_qty": optional_nonnegative_integer(item, "lt_qty"),
-            "lt_premium": optional_nonnegative_number(item, "lt_premium"),
+            **primary_call,
+            "additional_calls": calls,
             "pg": pg,
         })
     return cleaned
@@ -527,12 +547,12 @@ def replace_watchlist(rows: list[dict[str, Any]]) -> None:
         }
         connection.execute("DELETE FROM symbols")
         connection.executemany(
-            "INSERT INTO symbols(position, symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account, lt_call, lt_expy, lt_qty, lt_premium, pg, buffett_pass, buffett_score, buffett_updated_at, buffett_criteria_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO symbols(position, symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account, lt_call, lt_expy, lt_qty, lt_premium, additional_calls_json, pg, buffett_pass, buffett_score, buffett_updated_at, buffett_criteria_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
                     i, row["symbol"], row["peak"], row["share_price"], row["quantity"],
                     *scores.get(row["symbol"], (None, 0, None, None, None, None, None, None))[:4],
-                    row["account"], row["lt_call"], row["lt_expy"], row["lt_qty"], row["lt_premium"], row["pg"],
+                    row["account"], row["lt_call"], row["lt_expy"], row["lt_qty"], row["lt_premium"], json.dumps(row["additional_calls"]), row["pg"],
                     *scores.get(row["symbol"], (None, 0, None, None, None, None, None, None))[4:],
                 )
                 for i, row in enumerate(rows)
@@ -1676,6 +1696,42 @@ async def update_watchlist(data: WatchlistUpdate):
     require_watchlist_storage()
     rows = validate_watchlist(data.rows)
     replace_watchlist(rows)
+    saved_rows = read_watchlist()
+    return {"rows": saved_rows, "count": len(saved_rows)}
+
+
+@app.post("/api/watchlist/{symbol}/calls")
+async def append_watchlist_call(symbol: str, data: dict[str, Any], account: str = Query(...)):
+    require_watchlist_storage()
+    symbol = symbol.strip().upper()
+    if not SYMBOL_PATTERN.fullmatch(symbol) or account not in VALID_ACCOUNTS:
+        raise HTTPException(400, "Use a valid ticker and account.")
+    call = validate_watchlist_call(data)
+    if not call["lt_call"] or not call["lt_expy"]:
+        raise HTTPException(400, "Enter a strike and expiration for the covered call.")
+
+    with closing(connect_watchlist_db()) as connection, connection:
+        connection.execute("BEGIN IMMEDIATE")
+        row = connection.execute(
+            "SELECT position, lt_call, lt_expy, lt_qty, lt_premium, additional_calls_json "
+            "FROM symbols WHERE symbol = ? AND COALESCE(account, '') = ?",
+            (symbol, account),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(404, "Watchlist entry not found for this account.")
+        primary_call = validate_watchlist_call(dict(row))
+        additional_calls = json.loads(row["additional_calls_json"])
+        if not any(value is not None and value != "" for value in primary_call.values()):
+            connection.execute(
+                "UPDATE symbols SET lt_call = ?, lt_expy = ?, lt_qty = ?, lt_premium = ? WHERE position = ?",
+                (call["lt_call"], call["lt_expy"], call["lt_qty"], call["lt_premium"], row["position"]),
+            )
+        elif call != primary_call and call not in additional_calls:
+            additional_calls.append(call)
+            connection.execute(
+                "UPDATE symbols SET additional_calls_json = ? WHERE position = ?",
+                (json.dumps(additional_calls), row["position"]),
+            )
     saved_rows = read_watchlist()
     return {"rows": saved_rows, "count": len(saved_rows)}
 
