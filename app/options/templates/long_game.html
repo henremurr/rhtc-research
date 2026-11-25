@@ -87,11 +87,11 @@ async function requestJson(url,options){
 }
 const resume=document.getElementById('resume'),jobKey='rhtc-long-game-job';
 let jobId,shown=0;
-try{jobId=sessionStorage.getItem(jobKey);}catch{}
+try{jobId=localStorage.getItem(jobKey)||sessionStorage.getItem(jobKey);}catch{}
 resume.hidden=!jobId;
 function rememberJob(id){
   jobId=id;
-  try{if(id)sessionStorage.setItem(jobKey,id);else sessionStorage.removeItem(jobKey);}catch{}
+  try{if(id)localStorage.setItem(jobKey,id);else localStorage.removeItem(jobKey);sessionStorage.removeItem(jobKey);}catch{}
 }
 async function analyze(resuming){
   run.disabled=true;
@@ -144,7 +144,7 @@ async function analyze(resuming){
   }catch(error){
     if(error.httpStatus===404)rememberJob(null);
     status.textContent=error.message;
-    if(activity.lastElementChild?.textContent!==error.message)log(error.message);
+    if(!activity.lastElementChild?.textContent.endsWith(error.message))log(error.message);
   }finally{
     clearInterval(timer);
     tick();

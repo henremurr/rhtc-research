@@ -120,7 +120,11 @@ def evidence_batches(stock, ceo, news):
         yield batch
 
 
-async def analyze_long_game(client, model, facts, stock, ceo, news, timestamp, activity, checkpoint):
+class IncompleteLongGameResponse(Exception):
+    """The analysis provider did not return a complete answer."""
+
+
+async def analyze_long_game(client, model, facts, stock, ceo, news, timestamp, activity, checkpoint, save_checkpoint, describe_error):
     semaphore = asyncio.Semaphore(4)
     held = ", ".join(sorted({row["ticker"] for row in facts["positions"]}))
 
@@ -136,11 +140,14 @@ async def analyze_long_game(client, model, facts, stock, ceo, news, timestamp, a
             )
         answer = (result.output_text or "").strip()
         if not answer or result.status == "incomplete":
-            raise ValueError("The analysis returned incomplete text.")
+            reason = getattr(getattr(result, "incomplete_details", None), "reason", None)
+            message = "The response reached its output limit." if reason == "max_output_tokens" else "The analysis provider returned no complete answer."
+            raise IncompleteLongGameResponse(message)
+        save_checkpoint(key, answer)
         checkpoint[key] = answer
         return answer
 
-    async def inspect(batch):
+    async def inspect(index, batch):
         nonlocal completed
         try:
             notes = await response(
@@ -152,7 +159,7 @@ async def analyze_long_game(client, model, facts, stock, ceo, news, timestamp, a
             )
         except Exception as error:
             logger.warning("Long Game research batch failed (%s)", type(error).__name__)
-            activity("A research batch failed. Retrying with shorter excerpts.")
+            activity(f"Batch {index} failed. {describe_error(error)} Retrying with shorter excerpts.")
             try:
                 notes = await response(
                     "Review these shortened saved research records and extract actionable, dated findings for "
@@ -161,7 +168,7 @@ async def analyze_long_game(client, model, facts, stock, ceo, news, timestamp, a
                 )
             except Exception as retry_error:
                 logger.warning("Long Game research batch retry failed (%s)", type(retry_error).__name__)
-                activity("A batch could not be reviewed. Continuing with the completed research.")
+                activity(f"Batch {index} retry failed. {describe_error(retry_error)} Continuing with completed research.")
                 return None
         completed += 1
         activity(f"Reviewed {completed} of {len(batches)} saved research batches.")
@@ -174,7 +181,7 @@ async def analyze_long_game(client, model, facts, stock, ceo, news, timestamp, a
     if len(batches) == 1:
         evidence = batches[0]
     else:
-        evidence = await asyncio.gather(*(inspect(batch) for batch in batches))
+        evidence = await asyncio.gather(*(inspect(index, batch) for index, batch in enumerate(batches, start=1)))
     missing_batches = sum(note is None for note in evidence)
     evidence = [note for note in evidence if note is not None]
     # Prevent a very large saved archive from overflowing the synthesis request.

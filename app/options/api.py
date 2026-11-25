@@ -3710,72 +3710,106 @@ async def long_game_quotes(watchlist):
 _LONG_GAME_JOBS: dict[str, dict[str, Any]] = {}
 
 
+def long_game_storage():
+    from app.options.long_game_storage import LongGameStorage
+
+    return LongGameStorage(watchlist_db_path().with_name("rhtc_long_game.sqlite3"))
+
+
 @app.post("/api/long-game-report/analyze", status_code=202)
 async def start_long_game_analysis():
-    now = time.monotonic()
-    for job_id, job in list(_LONG_GAME_JOBS.items()):
-        if job["status"] != "running" and now - job["started"] > 3600:
-            del _LONG_GAME_JOBS[job_id]
-    for job_id, job in _LONG_GAME_JOBS.items():
-        if job["status"] == "running":
-            return {"job_id": job_id}
+    for job_id in _LONG_GAME_JOBS:
+        return {"job_id": job_id}
+    storage = long_game_storage()
+    storage.prune(tuple(_LONG_GAME_JOBS))
     job_id = secrets.token_hex(16)
-    job = {"status": "running", "started": now, "activity": ["Analysis queued."], "checkpoint": {}}
+    job = {"status": "running", "activity": ["Analysis queued."], "checkpoint": {}}
+    storage.save_state(job_id, job)
     _LONG_GAME_JOBS[job_id] = job
-    job["task"] = asyncio.create_task(run_long_game_job(job))
+    job["task"] = asyncio.create_task(run_long_game_job(job_id, job, storage))
     return {"job_id": job_id}
 
 
 @app.post("/api/long-game-report/analyze/{job_id}/resume", status_code=202)
 async def resume_long_game_analysis(job_id: str):
-    job = _LONG_GAME_JOBS.get(job_id)
+    if job_id in _LONG_GAME_JOBS:
+        return {"job_id": job_id}
+    storage = long_game_storage()
+    job = storage.read_state(job_id)
     if job is None:
         raise HTTPException(404, "This analysis is no longer available. Choose Update analysis to start again.")
-    if job["status"] == "running":
-        return {"job_id": job_id}
     if not job.get("resumable"):
         return {"job_id": job_id}
-    if any(other["status"] == "running" for other in _LONG_GAME_JOBS.values()):
+    if _LONG_GAME_JOBS:
         raise HTTPException(409, "Another Long Game analysis is running. Try Resume after it finishes.")
-    job.update(status="running", started=time.monotonic(), resumable=False)
+    inputs, job["checkpoint"] = storage.load_work(job_id)
+    if inputs is not None:
+        job["inputs"] = inputs
+    job.update(status="running", resumable=False)
     job.pop("error", None)
-    job["activity"].append("Resuming from the last checkpoint.")
-    job["task"] = asyncio.create_task(run_long_game_job(job))
+    job["activity"].append("Resuming from the saved checkpoint.")
+    storage.save_state(job_id, job)
+    _LONG_GAME_JOBS[job_id] = job
+    job["task"] = asyncio.create_task(run_long_game_job(job_id, job, storage))
     return {"job_id": job_id}
 
 
 @app.get("/api/long-game-report/analyze/{job_id}")
 async def long_game_job_status(job_id: str):
-    job = _LONG_GAME_JOBS.get(job_id)
+    job = _LONG_GAME_JOBS.get(job_id) or long_game_storage().read_state(job_id)
     if job is None:
         raise HTTPException(404, "This analysis is no longer available. Choose Update analysis to try again.")
     return JSONResponse({key: value for key, value in job.items() if key in {"status", "activity", "analysis", "as_of", "error", "resumable"}},
                         headers={"Cache-Control": "private, no-store"})
 
 
-async def run_long_game_job(job):
-    activity = job["activity"].append
+def long_game_failure_reason(error):
+    from openai import APIConnectionError, APIError, APITimeoutError
+
+    from app.options.long_game import IncompleteLongGameResponse
+
+    if isinstance(error, IncompleteLongGameResponse):
+        return str(error)
+    if isinstance(error, sqlite3.Error):
+        return "The checkpoint database could not be read or written."
+    if isinstance(error, APITimeoutError):
+        return "The OpenAI request timed out."
+    if isinstance(error, APIConnectionError):
+        return "The server could not reach OpenAI."
+    if isinstance(error, APIError):
+        if (getattr(error, "status_code", None) or 0) >= 500:
+            return "OpenAI returned a temporary server error."
+        return openai_error_message(error)
+    return "An unexpected error interrupted this step."
+
+
+async def run_long_game_job(job_id, job, storage):
+    def activity(message):
+        job["activity"].append(message)
+        storage.save_state(job_id, job)
+
     try:
-        result = await asyncio.wait_for(generate_long_game_analysis(job, activity), timeout=900)
-        activity("Partial report ready. Resume to retry unfinished research." if result["resumable"] else "Report ready.")
+        result = await asyncio.wait_for(generate_long_game_analysis(job_id, job, storage, activity), timeout=900)
         job.update(status="completed", **result)
+        activity("Partial report ready. Resume to retry unfinished research." if result["resumable"] else "Report ready.")
         if not result["resumable"]:
-            job.pop("inputs", None)
-            job.pop("checkpoint", None)
+            storage.finish(job_id)
     except TimeoutError:
         job.update(status="failed", error="Analysis exceeded 15 minutes. Choose Resume to continue.")
     except HTTPException as error:
         job.update(status="failed", error=str(error.detail))
-    except Exception:
-        job.update(status="failed", error="The report could not be generated. Choose Resume to continue.")
+    except Exception as error:
+        job.update(status="failed", error=f"{long_game_failure_reason(error)} Choose Resume to continue.")
     finally:
-        if job["status"] == "failed":
-            job["resumable"] = True
-            activity(job["error"])
-        job.pop("task", None)
+        try:
+            if job["status"] == "failed":
+                job["resumable"] = True
+                activity(f'Job failed. {job["error"]}')
+        finally:
+            _LONG_GAME_JOBS.pop(job_id, None)
 
 
-async def generate_long_game_analysis(job, activity):
+async def generate_long_game_analysis(job_id, job, storage, activity):
     from openai import AsyncOpenAI
 
     from app.options.long_game import analyze_long_game, portfolio_facts
@@ -3818,15 +3852,18 @@ async def generate_long_game_analysis(job, activity):
         timestamp = now.strftime("%B %d, %Y at %I:%M %p %Z")
         facts = portfolio_facts(watchlist, prices, now.date().isoformat())
         job["inputs"] = (facts, stock, ceo, news, timestamp)
+        storage.save_inputs(job_id, job["inputs"])
     facts, stock, ceo, news, timestamp = job["inputs"]
     try:
         async with AsyncOpenAI(api_key=key, timeout=90, max_retries=1) as client:
             analysis, missing_batches = await analyze_long_game(
                 client, os.getenv("OPENAI_ANALYSIS_MODEL", os.getenv("OPENAI_MODEL", "gpt-5-mini")),
                 facts, stock, ceo, news, timestamp, activity, job["checkpoint"],
+                lambda checkpoint_key, answer: storage.save_checkpoint(job_id, checkpoint_key, answer),
+                long_game_failure_reason,
             )
     except Exception as error:
-        raise HTTPException(502, "Could not complete the Long Game analysis. Choose Resume to continue.") from error
+        raise HTTPException(502, f"{long_game_failure_reason(error)} Choose Resume to continue.") from error
     return {"analysis": analysis, "as_of": timestamp, "resumable": bool(missing_batches)}
 
 
