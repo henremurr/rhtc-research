@@ -241,9 +241,9 @@ def build_uncertainty_pdf(analysis, as_of):
     heading = ParagraphStyle("Section", parent=body, fontName="Helvetica-Bold",
                              fontSize=19, leading=24, spaceBefore=17, spaceAfter=10, keepWithNext=True,
                              backColor=colors.HexColor('#F4ECD7'), borderPadding=9)
-    subheading = ParagraphStyle("Subsection", parent=body, fontName="Helvetica-Bold", fontSize=15, leading=20, spaceBefore=18, spaceAfter=10, keepWithNext=True, textColor=colors.HexColor("#78591F"), backColor=colors.HexColor("#FAF5E8"), borderPadding=6)
-    dimension_style = ParagraphStyle("Dimension", parent=subheading, fontSize=15, leading=20, backColor=colors.HexColor("#FAF5E8"), borderPadding=6, spaceBefore=18, spaceAfter=10)
-    minor = ParagraphStyle("Minor", parent=body, fontName="Helvetica-Bold", fontSize=11.5, leading=16, spaceBefore=8, spaceAfter=4, keepWithNext=True)
+    subheading = ParagraphStyle("Subsection", parent=body, fontName="Helvetica-Bold", fontSize=15, leading=20, spaceBefore=18, spaceAfter=10, keepWithNext=True, textColor=colors.black, backColor=None, borderPadding=0)
+    dimension_style = ParagraphStyle("Dimension", parent=subheading, fontSize=15, leading=20, backColor=None, borderPadding=0, spaceBefore=18, spaceAfter=10)
+    minor = ParagraphStyle("Minor", parent=body, fontName="Helvetica-Bold", fontSize=11.5, leading=16, spaceBefore=8, spaceAfter=4, keepWithNext=True, textColor=colors.black)
     bullets = [ParagraphStyle(f"List{depth}", parent=body, leftIndent=18 + 22*depth,
                               firstLineIndent=-14, spaceAfter=7) for depth in range(7)]
     logo = Path(__file__).parent / "static" / "apple-touch-icon.png"
