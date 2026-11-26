@@ -34,6 +34,8 @@ Use reliable income for repayment and reassess at months three and six.
 """
 
 FINAL_INSTRUCTIONS = """
+Account policy: Fidelity Brokerage is taxable and margin-enabled; Fidelity IRA, Schwab PRCA, Vanguard 401k and Vanguard IRA-M are non-taxable for current in-account trading and cash-only. Retirement distributions may be taxable. Never infer actual margin borrowing from margin eligibility. Apply margin costs and maintenance risk only to Fidelity Brokerage; cash accounts require available cash. Consider realized gains/losses, holding periods, option taxation and cross-account wash-sale risk, including IRA purchases. Do not treat retirement assets as freely transferable collateral. Distinguish gross trading performance from taxable income; do not estimate taxes without sufficient data. Unassigned holdings have unknown account status.
+
 Act as the RHTC portfolio strategy analyst. Give an updated, decision-ready
 opinion for implementing and managing the Long Game. Write only the requested
 section in plain Markdown. The application supplies its section heading.
@@ -79,6 +81,8 @@ def portfolio_facts(watchlist, prices, today):
             continue
         account = row.get("account") or "No account"
         totals = accounts[account]
+        status = {"tax_status": "Taxable", "funding_status": "Margin"} if account == "Fidelity Brokerage" else ({"tax_status": "Non-taxable", "funding_status": "Cash"} if account in {"Fidelity IRA", "Schwab PRCA", "Vanguard 401k", "Vanguard IRA-M"} else {"tax_status": "Unknown", "funding_status": "Unknown"})
+        totals.update(status)
         price = prices.get(row["symbol"])
         if shares and shares > 0:
             totals["recorded_cost"] += shares * (row.get("share_price") or 0)
@@ -88,7 +92,7 @@ def portfolio_facts(watchlist, prices, today):
         totals["saved_premiums"] += sum(call["saved_premium"] or 0 for call in calls)
         dated_contracts = sum(call["contracts"] or 0 for call in calls
                               if len(call["expiry"]) == 10 and not call["expiry_passed"])
-        holdings.append({"ticker": row["symbol"], "peak": row["peak"], "account": account,
+        holdings.append({"ticker": row["symbol"], "peak": row["peak"], "account": account, **status,
                          "saved_unexpired_call_share_equivalent": dated_contracts * 100,
                          "shares": shares, "cost_per_share": row.get("share_price"), "quote": price, "saved_calls": calls})
     return {"watchlist": sorted({(row["symbol"], row["peak"]) for row in watchlist}),
