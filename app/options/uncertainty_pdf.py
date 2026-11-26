@@ -40,6 +40,31 @@ def normalize_pdf_text(value):
     return "".join(result)
 
 
+DIMENSION_NAMES = ("Technological", "Economic", "Monetary", "Geopolitical", "Energy", "Societal", "Financial")
+DIMENSION_ALIASES = (
+    r"technolog(?:ical|y)|innovation",
+    r"economic|macroeconomic|economy|macro",
+    r"monetary|interest rates?|monetary policy",
+    r"geopolitical|geopolitics|geopolitical and trade",
+    r"energy|energy and infrastructure|power and energy",
+    r"societal|social|society|social and labor",
+    r"financial|financial markets?|capital markets?|financial and market",
+)
+
+
+def dimension_heading(line):
+    """Recognize legacy labels, including abbreviated and parenthesized headings."""
+    candidate = line.replace("**", "").replace("__", "").strip()
+    candidate = re.sub(r"^(?:(?:#{1,6}|[-*•])\s+|(?:dimension\s+)?\(?\d+(?:\.\d+)*[.)\]:-]?\s+)+", "", candidate, flags=re.I)
+    for index, alias in enumerate(DIMENSION_ALIASES):
+        match = re.match(rf"^({alias})(?:\s+(?:structural\s+)?(?:uncertainty|risk|dimension))?\s*(?=$|[:—–-]|\()", candidate, re.I)
+        if match:
+            tail = candidate[match.end():].strip()
+            tail = re.sub(r"^[:—–-]\s*", "", tail)
+            return index, tail
+    return None
+
+
 def narrative_blocks(analysis):
     """Recognize explicit headings and short prose labels without dropping content."""
     in_dimensions = False
@@ -50,15 +75,18 @@ def narrative_blocks(analysis):
             continue
         match = re.match(r"^(#{1,6})\s+(.+)", line)
         if match and len(match[1]) <= 2:
+            if in_dimensions:
+                missing = [name for i, name in enumerate(DIMENSION_NAMES) if i not in seen_dimensions]
+                if missing:
+                    yield "body", "Navigation note: no distinct heading could be located in this saved section for " + ", ".join(missing) + ". The original narrative is retained below or above as supplied; regenerate if coverage is incomplete."
             in_dimensions = bool(re.search(r"seven dimensions of structural uncertainty", match[2], re.I))
             seen_dimensions.clear()
         if in_dimensions:
-            candidate = re.sub(r"^(?:#{1,6}\s+|[-*]\s+|\d+(?:\.\d+)*[.)]?\s+)", "", line).replace("**", "")
-            dimension = re.match(r"^(Technological|Economic|Monetary|Geopolitical|Energy|Societal|Financial)\s+uncertainty(?:\s*(?:[:—–-]|$))", candidate, re.I)
-            if dimension and dimension[1].lower() not in seen_dimensions:
-                seen_dimensions.add(dimension[1].lower())
-                yield "dimension", dimension[0].rstrip(" :—–-")
-                tail = candidate[dimension.end():].strip()
+            dimension = dimension_heading(line)
+            if dimension and dimension[0] not in seen_dimensions:
+                index, tail = dimension
+                seen_dimensions.add(index)
+                yield "dimension", DIMENSION_NAMES[index] + " uncertainty"
                 if tail:
                     yield "body", tail
                 continue

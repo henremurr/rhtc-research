@@ -85,11 +85,20 @@ function render(text){
     const heading=line.match(/^(#{1,6})\s+(.+)/);
     const bold=line.match(/^\*\*([^*]{1,120})\*\*:?$/);
     const bullet=line.match(/^([-*]|\d+\.)\s+(.+)/);
-    if(heading&&heading[1].length<=2){inDimensions=/seven dimensions of structural uncertainty/i.test(heading[2]);seenDimensions.clear();}
+    if(heading&&heading[1].length<=2){if(inDimensions&&seenDimensions.size<7){const names=["Technological","Economic","Monetary","Geopolitical","Energy","Societal","Financial"];append("p","Navigation note: no distinct heading could be located for "+names.filter((_,i)=>!seenDimensions.has(i)).join(", ")+". Original narrative retained.");}inDimensions=/seven dimensions of structural uncertainty/i.test(heading[2]);seenDimensions.clear();}
     if(inDimensions){
-      const candidate=line.replace(/^(?:#{1,6}\s+|[-*]\s+|\d+(?:\.\d+)*[.)]?\s+)/, "").replace(/\*\*/g,"");
-      const dim=candidate.match(/^(Technological|Economic|Monetary|Geopolitical|Energy|Societal|Financial)\s+uncertainty(?:\s*(?:[:—–-]|$))/i);
-      if(dim&&!seenDimensions.has(dim[1].toLowerCase())){list=null;const name=dim[1].toLowerCase();seenDimensions.add(name);const n=["technological","economic","monetary","geopolitical","energy","societal","financial"].indexOf(name)+1;append("h3",section+"."+n+" "+name[0].toUpperCase()+name.slice(1)+" Uncertainty").className="dimension-heading";const tail=candidate.slice(dim[0].length).trim();if(tail)append("p",tail);continue;}
+      const candidate=line.replace(/\*\*|__/g,"").trim().replace(/^(?:(?:#{1,6}|[-*•])\s+|(?:dimension\s+)?\(?\d+(?:\.\d+)*[.)\]:-]?\s+)+/i,"");
+      const aliases=[/^(technolog(?:ical|y)|innovation)/i,/^(economic|macroeconomic|economy|macro)/i,/^(monetary policy|monetary|interest rates?)/i,/^(geopolitical and trade|geopolitical|geopolitics)/i,/^(energy and infrastructure|power and energy|energy)/i,/^(social and labor|societal|social|society)/i,/^(financial and market|financial markets?|capital markets?|financial)/i];
+      const names=["Technological","Economic","Monetary","Geopolitical","Energy","Societal","Financial"];
+      let matched=false;
+      for(let i=0;i<aliases.length;i++){
+        const dim=candidate.match(aliases[i]);if(!dim||seenDimensions.has(i))continue;
+        const rest=candidate.slice(dim[0].length).replace(/^\s+(?:structural\s+)?(?:uncertainty|risk|dimension)\b/i,"").trim();
+        if(rest&&!/^[:—–-]|\(/.test(rest))continue;
+        seenDimensions.add(i);list=null;append("h3",section+"."+(i+1)+" "+names[i]+" Uncertainty").className="dimension-heading";
+        const tail=rest.replace(/^[:—–-]\s*/,"");if(tail)append("p",tail);matched=true;break;
+      }
+      if(matched)continue;
     }
     if(heading||bold){
       list=null;
