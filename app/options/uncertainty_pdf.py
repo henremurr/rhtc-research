@@ -223,7 +223,7 @@ class NarrativeDocument(SimpleDocTemplate):
             self.canv.bookmarkPage(key)
             level = getattr(flowable, "outline_level", 0)
             self.canv.addOutlineEntry(title, key, level=level, closed=False)
-            self.notify("TOCEntry", (level, title, self.page, key))
+            self.notify("TOCEntry", (level, escape(title), self.page, key))
 
 
 def build_uncertainty_pdf(analysis, as_of):
@@ -361,5 +361,5 @@ def build_uncertainty_pdf(analysis, as_of):
         kwargs["pageCompression"] = 0
         return Canvas(*args, **kwargs)
 
-    doc.multiBuild(story, onFirstPage=cover, onLaterPages=decorate, canvasmaker=canvas_factory)
+    doc.multiBuild(story, maxPasses=30, onFirstPage=cover, onLaterPages=decorate, canvasmaker=canvas_factory)
     return output.getvalue()

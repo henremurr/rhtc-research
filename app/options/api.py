@@ -3950,7 +3950,12 @@ def uncertainty_report_pdf(job_id: str, download: bool = False):
     job = uncertainty_storage().read_state(job_id)
     if not job or not job.get("analysis"):
         raise HTTPException(404, "No saved report is available for this analysis.")
-    pdf = build_uncertainty_pdf(job["analysis"], job.get("as_of", "Unknown date"))
+    try:
+        pdf = build_uncertainty_pdf(job["analysis"], job.get("as_of", "Unknown date"))
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Uncertainty PDF rendering failed for job %s", job_id)
+        raise HTTPException(500, "PDF rendering failed. Your saved analysis is intact; return to the report and retry printing. No rebuild is necessary.")
     filename = f"RHTC_Age_of_Structural_Uncertainty_{job_id[:12]}.pdf"
     disposition = "attachment" if download else "inline"
     return Response(pdf, media_type="application/pdf", headers={
