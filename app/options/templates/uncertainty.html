@@ -69,7 +69,7 @@ history.onchange=async()=>{
 };
 function render(text){
   const fragment=document.createDocumentFragment();
-  let list=null,section=0,subsection=0,inDimensions=false; const seenDimensions=new Set();
+  let list=null,section=0,subsection=0,detail=0,inDimensions=false; const seenDimensions=new Set();
   function append(tag,value){
     const el=document.createElement(tag);
     value.split(/(\*\*.+?\*\*)/g).forEach(part=>{
@@ -79,8 +79,16 @@ function render(text){
     fragment.append(el);
     return el;
   }
-  for(const raw of text.split('\n')){
-    const line=raw.trim();
+  const lines=text.split('\n');
+  function subhead(value){subsection++;detail=0;append('h3',section?section+'.'+subsection+' '+value:value);}
+  function minorhead(value){if(section&&subsection){detail++;append('h4',section+'.'+subsection+'.'+detail+' '+value);}else if(section&&!inDimensions)subhead(value);else append('h4',value);}
+  function plainHeading(line,pos){
+    const following=lines.slice(pos+1,pos+4).find(s=>s.trim())?.trim()||'';
+    const words=line.split(/\s+/).length;
+    return (pos===0||!lines[pos-1].trim())&&following&&line.length<=140&&words>=3&&words<=20&&/^[A-Z0-9]/.test(line)&&!/[.!?;]$|^(?:https?:\/\/|www\.|\|)/.test(line)&&!/^(?:This|These|Those|There|It|They|We|I|The report|The portfolio|For example)\b/i.test(line)&&!/\b(?:is|are|was|were|has|have|will|should|must|can|could|would|may|might)\b/i.test(line)&&(following.length>line.length||/^(?:\*\*|[A-Z][^:]{2,100}:)/.test(following));
+  }
+  for(let pos=0;pos<lines.length;pos++){
+    const line=lines[pos].trim();
     if(!line){list=null;continue;}
     const heading=line.match(/^(#{1,6})\s+(.+)/);
     const bold=line.match(/^\*\*([^*]{1,120})\*\*:?$/);
@@ -95,7 +103,7 @@ function render(text){
       if(compound){
         const i=leads.findIndex(r=>r.test(compound.groups.lead));
         if(i>=0&&!seenDimensions.has(i)){
-          seenDimensions.add(i);list=null;
+          seenDimensions.add(i);list=null;subsection=i+1;detail=0;
           append("h3",section+"."+(i+1)+" "+names[i]+" Uncertainty").className="dimension-heading";
           const original=compound[0].trim(), rest=candidate.slice(compound[0].length).trim().replace(/^[:—–-]\s*/,"");
           const tail=original.toLowerCase()=== (names[i]+" uncertainty").toLowerCase()?rest:original+(rest?" — "+rest:"");
@@ -108,16 +116,16 @@ function render(text){
         const dim=candidate.match(aliases[i]);if(!dim||seenDimensions.has(i))continue;
         const rest=candidate.slice(dim[0].length).replace(/^\s+(?:structural\s+)?(?:uncertainty|risk|dimension)\b/i,"").trim();
         if(rest&&!/^[:—–-]|\(/.test(rest))continue;
-        seenDimensions.add(i);list=null;append("h3",section+"."+(i+1)+" "+names[i]+" Uncertainty").className="dimension-heading";
+        seenDimensions.add(i);list=null;subsection=i+1;detail=0;append("h3",section+"."+(i+1)+" "+names[i]+" Uncertainty").className="dimension-heading";
         const tail=rest.replace(/^[:—–-]\s*/,"");if(tail)append("p",tail);matched=true;break;
       }
       if(matched)continue;
     }
     if(heading||bold){
       list=null;
-      if(heading&&heading[1].length<=2){section++;subsection=0;append('h2',section+'. '+heading[2]);}
-      else if(bold||heading[1].length===3){subsection++;append('h3',(section?section+'.'+subsection+' ':'')+(bold?bold[1]:heading[2]));}
-      else append('h4',heading[2]);
+      if(heading&&heading[1].length<=2){section++;subsection=detail=0;append('h2',section+'. '+heading[2]);}
+      else if(bold||heading[1].length===3){if(inDimensions)minorhead(bold?bold[1]:heading[2]);else subhead(bold?bold[1]:heading[2]);}
+      else minorhead(heading[2]);
     }else if(/^[-*_]{3,}$/.test(line)){list=null;fragment.append(document.createElement('hr'));}
     else if(bullet){
       const tag=/^\d/.test(bullet[1])?'ol':'ul';
@@ -126,7 +134,8 @@ function render(text){
     }else{
       list=null;
       const label=line.match(/^(\*\*[^*]{2,100}\*\*:?|[A-Z][^.!?;:]{2,85}:)\s+(.+)$/);
-      if(label){append('h4',label[1]);append('p',label[2]);}
+      if(!inDimensions&&plainHeading(line,pos))subhead(line);
+      else if(label){minorhead(label[1]);append('p',label[2]);}
       else append('p',line);
     }
   }

@@ -89,11 +89,25 @@ def dimension_heading(line):
     return None
 
 
+def plain_subheading(line, separated, following):
+    """Conservative recognition of standalone legacy title lines."""
+    if not separated or not following or len(line) > 140 or not 3 <= len(line.split()) <= 20:
+        return False
+    if not re.match(r"^[A-Z0-9]", line) or re.search(r"[.!?;]$|^(?:https?://|www\.|\|)", line):
+        return False
+    if re.match(r"^(?:This|These|Those|There|It|They|We|I|The report|The portfolio|For example)\b", line, re.I):
+        return False
+    if re.search(r"\b(?:is|are|was|were|has|have|will|should|must|can|could|would|may|might)\b", line, re.I):
+        return False
+    return len(following) > len(line) or bool(re.match(r"^(?:\*\*|[A-Z][^:]{2,100}:)", following))
+
+
 def narrative_blocks(analysis):
     """Recognize explicit headings and short prose labels without dropping content."""
     in_dimensions = False
     seen_dimensions = set()
-    for raw in analysis.splitlines():
+    lines = analysis.splitlines()
+    for pos, raw in enumerate(lines):
         line = raw.strip()
         if not line:
             continue
@@ -125,6 +139,11 @@ def narrative_blocks(analysis):
             continue
         if re.match(r"^(?:[-*]|\d+\.)\s+", line):
             yield "list", line
+            continue
+        separated = pos == 0 or not lines[pos-1].strip()
+        following = next((s.strip() for s in lines[pos+1:pos+4] if s.strip()), "")
+        if not in_dimensions and plain_subheading(line, separated, following):
+            yield "subsection", line
             continue
         label = re.match(r"^(\*\*[^*]{2,100}\*\*:?|[A-Z][^.!?;:]{2,85}:)\s+(.+)$", line)
         if label:
@@ -224,32 +243,50 @@ def build_uncertainty_pdf(analysis, as_of):
     if any(kind == "section" for kind, _ in blocks):
         story.append(Paragraph("Table of Contents", heading))
         toc = TableOfContents()
+        toc.dotsMinLevel = 0
         toc.levelStyles = [ParagraphStyle("ContentsEntry", parent=body, fontSize=10.5,
                                           leading=15, spaceAfter=4, leftIndent=12,
-                                          firstLineIndent=-12), ParagraphStyle("ContentsDimension", parent=body, fontSize=10, leading=14, leftIndent=28, spaceAfter=3)]
+                                          firstLineIndent=-12), ParagraphStyle("ContentsSubsection", parent=body, fontSize=10, leading=14, leftIndent=28, spaceAfter=3), ParagraphStyle("ContentsMinor", parent=body, fontSize=9, leading=12, leftIndent=43, spaceAfter=2)]
         story.extend([toc, PageBreak()])
-    section = 0
-    subsection = 0
+    section = subsection = detail = 0
+    in_dimensions = False
+    outline_serial = 0
+
+    def add_heading(label, style, level):
+        nonlocal outline_serial
+        outline_serial += 1
+        para = Paragraph(markup(label), style)
+        para.outline_key = f"heading-{outline_serial}"
+        para.outline_level = level
+        story.append(para)
+
     for kind, line in blocks:
         if kind == "section":
             section += 1
-            subsection = 0
-            para = Paragraph(markup(f"{section}. {line}"), heading)
-            para.outline_key = f"section-{section}"
-            story.append(para)
+            subsection = detail = 0
+            in_dimensions = "seven dimensions of structural uncertainty" in line.lower()
+            add_heading(f"{section}. {line}", heading, 0)
         elif kind == "dimension":
-            names = ("technological", "economic", "monetary", "geopolitical", "energy", "societal", "financial")
-            number = names.index(line.split()[0].lower()) + 1
-            para = Paragraph(markup(f"{section}.{number} {line.title()}"), dimension_style)
-            para.outline_key = f"dimension-{section}-{number}"
-            para.outline_level = 1
-            story.append(para)
-        elif kind == "subsection":
+            subsection = DIMENSION_NAMES.index(line.split()[0].capitalize()) + 1
+            detail = 0
+            add_heading(f"{section}.{subsection} {line.title()}", dimension_style, 1)
+        elif kind == "subsection" and not in_dimensions:
             subsection += 1
-            prefix = f"{section}.{subsection} " if section and not (section == 2 and any(k == "dimension" for k, _ in blocks)) else ""
-            story.append(Paragraph(markup(prefix + line), subheading))
-        elif kind == "minor":
-            story.append(Paragraph(markup(line), minor))
+            detail = 0
+            if section:
+                add_heading(f"{section}.{subsection} {line}", subheading, 1)
+            else:
+                story.append(Paragraph(markup(line), subheading))
+        elif kind in ("minor", "subsection"):
+            detail += 1
+            if section and subsection:
+                add_heading(f"{section}.{subsection}.{detail} {line}", minor, 2)
+            elif section and not in_dimensions:
+                subsection += 1
+                detail = 0
+                add_heading(f"{section}.{subsection} {line}", subheading, 1)
+            else:
+                story.append(Paragraph(markup(line), minor))
         elif kind == "rule":
             story.append(HRFlowable(width="100%", thickness=0.6, color=gold, spaceBefore=7, spaceAfter=7))
         else:
