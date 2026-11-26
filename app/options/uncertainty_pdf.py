@@ -97,6 +97,38 @@ def build_uncertainty_pdf(analysis, as_of):
     bullet = ParagraphStyle("List", parent=body, leftIndent=16, firstLineIndent=-12)
     logo = Path(__file__).parent / "static" / "apple-touch-icon.png"
 
+    def cover(canvas, document):
+        canvas.saveState()
+        canvas.setStrokeColor(gold)
+        canvas.setLineWidth(1.2)
+        canvas.rect(36, 36, width-72, height-72, stroke=1, fill=0)
+        canvas.setFillColor(ink)
+        canvas.setFont("Helvetica-Bold", 11)
+        canvas.drawCentredString(width/2, height-86, "ROCKING HORSE TRADING CO.")
+        canvas.drawImage(str(logo), (width-126)/2, height-252, width=126, height=126, mask="auto")
+        canvas.setFillColor(colors.HexColor("#78591F"))
+        canvas.setFont("Helvetica-Bold", 12)
+        canvas.drawCentredString(width/2, height-290, "THREE PEAKS RESEARCH")
+        canvas.line(100, height-309, width-100, height-309)
+        canvas.setFillColor(ink)
+        canvas.setFont("Helvetica-Bold", 29)
+        canvas.drawCentredString(width/2, height-363, "Investing in the Age of")
+        canvas.drawCentredString(width/2, height-399, "Structural Uncertainty")
+        canvas.setFont("Helvetica", 15)
+        canvas.drawCentredString(width/2, height-445, "Expanded Strategic Investment Report")
+        canvas.setFont("Helvetica", 11)
+        canvas.drawCentredString(width/2, height-478, "Portfolio Strategy | Risk | Opportunity | The Long Game")
+        canvas.setFont("Helvetica-Bold", 10)
+        canvas.drawCentredString(width/2, 202, "REPORT GENERATION DATE")
+        canvas.setFont("Helvetica", 12)
+        canvas.drawCentredString(width/2, 182, str(as_of))
+        canvas.setStrokeColor(gold)
+        canvas.line(100, 126, width-100, 126)
+        canvas.setFont("Helvetica", 9)
+        canvas.drawCentredString(width/2, 103, "RHTC | Investment research and strategic analysis")
+        canvas.drawCentredString(width/2, 88, "Informational research; not an instruction to execute trades.")
+        canvas.restoreState()
+
     def decorate(canvas, document):
         canvas.saveState()
         canvas.drawImage(str(logo), 48, height-58, width=38, height=38, mask="auto")
@@ -119,9 +151,9 @@ def build_uncertainty_pdf(analysis, as_of):
                        else escape(p) for p in parts)
 
     blocks = list(narrative_blocks(analysis))
-    story = []
+    story = [Spacer(1, 1), PageBreak()]
     if any(kind == "section" for kind, _ in blocks):
-        story.append(Paragraph("Contents", heading))
+        story.append(Paragraph("Table of Contents", heading))
         toc = TableOfContents()
         toc.levelStyles = [ParagraphStyle("ContentsEntry", parent=body, fontSize=10.5,
                                           leading=15, spaceAfter=4, leftIndent=12,
@@ -146,12 +178,12 @@ def build_uncertainty_pdf(analysis, as_of):
             story.append(HRFlowable(width="100%", thickness=0.6, color=gold, spaceBefore=7, spaceAfter=7))
         else:
             story.append(Paragraph(markup(line), bullet if kind == "list" else body))
-    if not story:
+    if not blocks:
         story.append(Paragraph("No analysis text available.", body))
 
     def canvas_factory(*args, **kwargs):
         kwargs["pageCompression"] = 0
         return Canvas(*args, **kwargs)
 
-    doc.multiBuild(story, onFirstPage=decorate, onLaterPages=decorate, canvasmaker=canvas_factory)
+    doc.multiBuild(story, onFirstPage=cover, onLaterPages=decorate, canvasmaker=canvas_factory)
     return output.getvalue()
