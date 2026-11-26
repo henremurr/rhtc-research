@@ -175,7 +175,7 @@ def narrative_blocks(analysis):
             continue
         label = colon_heading(line)
         if label:
-            yield "minor", label[0]
+            yield ("minor" if in_dimensions else "subsection"), label[0]
             if label[1]:
                 yield "body", label[1]
         else:
