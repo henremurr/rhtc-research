@@ -8,8 +8,9 @@ from xml.sax.saxutils import escape
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable, PageBreak
 from reportlab.pdfgen.canvas import Canvas
+from reportlab.platypus.tableofcontents import TableOfContents
 
 
 def normalize_pdf_text(value):
@@ -39,6 +40,43 @@ def normalize_pdf_text(value):
     return "".join(result)
 
 
+def narrative_blocks(analysis):
+    """Recognize explicit headings and short prose labels without dropping content."""
+    for raw in analysis.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        match = re.match(r"^(#{1,6})\s+(.+)", line)
+        if match:
+            yield ("section" if len(match[1]) <= 2 else "subsection" if len(match[1]) == 3 else "minor", match[2])
+            continue
+        if re.fullmatch(r"[-*_]{3,}", line):
+            yield "rule", line
+            continue
+        if re.fullmatch(r"\*\*[^*]{1,120}\*\*:?",""+line):
+            yield "subsection", line.strip("*").rstrip(":").rstrip("*")
+            continue
+        if re.match(r"^(?:[-*]|\d+\.)\s+", line):
+            yield "list", line
+            continue
+        label = re.match(r"^(\*\*[^*]{2,100}\*\*:?|[A-Z][^.!?;:]{2,85}:)\s+(.+)$", line)
+        if label:
+            yield "minor", label[1]
+            yield "body", label[2]
+        else:
+            yield "body", line
+
+
+class NarrativeDocument(SimpleDocTemplate):
+    def afterFlowable(self, flowable):
+        if isinstance(flowable, Paragraph) and getattr(flowable, "outline_key", None):
+            key = flowable.outline_key
+            title = flowable.getPlainText()
+            self.canv.bookmarkPage(key)
+            self.canv.addOutlineEntry(title, key, level=0, closed=False)
+            self.notify("TOCEntry", (0, title, self.page, key))
+
+
 def build_uncertainty_pdf(analysis, as_of):
     analysis = normalize_pdf_text(analysis)
     as_of = normalize_pdf_text(as_of)
@@ -47,13 +85,15 @@ def build_uncertainty_pdf(analysis, as_of):
     ink = colors.HexColor("#182229")
     gold = colors.HexColor("#C6A45C")
     width, height = letter
-    doc = SimpleDocTemplate(output, pagesize=letter, leftMargin=48, rightMargin=48,
+    doc = NarrativeDocument(output, pagesize=letter, leftMargin=50, rightMargin=50,
                             topMargin=82, bottomMargin=42, title=title, author="Rocking Horse Trading Co.")
-    body = ParagraphStyle("Narrative", fontName="Helvetica", fontSize=10.5, leading=15,
-                          spaceAfter=8, textColor=ink, splitLongWords=True)
+    body = ParagraphStyle("Narrative", fontName="Helvetica", fontSize=11, leading=16,
+                          spaceAfter=10, textColor=ink, splitLongWords=True)
     heading = ParagraphStyle("Section", parent=body, fontName="Helvetica-Bold",
-                             fontSize=15, leading=19, spaceBefore=15, spaceAfter=8, keepWithNext=True)
-    subheading = ParagraphStyle("Subsection", parent=heading, fontSize=12, leading=16)
+                             fontSize=19, leading=24, spaceBefore=17, spaceAfter=10, keepWithNext=True,
+                             backColor=colors.HexColor('#F4ECD7'), borderPadding=9)
+    subheading = ParagraphStyle("Subsection", parent=body, fontName="Helvetica-Bold", fontSize=14, leading=19, spaceBefore=15, spaceAfter=7, keepWithNext=True, textColor=colors.HexColor("#78591F"))
+    minor = ParagraphStyle("Minor", parent=body, fontName="Helvetica-Bold", fontSize=11.5, leading=16, spaceBefore=8, spaceAfter=4, keepWithNext=True)
     bullet = ParagraphStyle("List", parent=body, leftIndent=16, firstLineIndent=-12)
     logo = Path(__file__).parent / "static" / "apple-touch-icon.png"
 
@@ -78,18 +118,34 @@ def build_uncertainty_pdf(analysis, as_of):
         return "".join("<b>" + escape(p[2:-2]) + "</b>" if p.startswith("**") and p.endswith("**")
                        else escape(p) for p in parts)
 
+    blocks = list(narrative_blocks(analysis))
     story = []
-    for raw in analysis.splitlines():
-        line = raw.strip()
-        if not line:
-            continue
-        match = re.match(r"^(#{1,6})\s+(.+)", line)
-        if match:
-            story.append(Paragraph(markup(match.group(2)), heading if len(match.group(1)) <= 2 else subheading))
-        elif re.match(r"^(?:[-*]|\d+\.)\s+", line):
-            story.append(Paragraph(markup(line), bullet))
+    if any(kind == "section" for kind, _ in blocks):
+        story.append(Paragraph("Contents", heading))
+        toc = TableOfContents()
+        toc.levelStyles = [ParagraphStyle("ContentsEntry", parent=body, fontSize=10.5,
+                                          leading=15, spaceAfter=4, leftIndent=12,
+                                          firstLineIndent=-12)]
+        story.extend([toc, PageBreak()])
+    section = 0
+    subsection = 0
+    for kind, line in blocks:
+        if kind == "section":
+            section += 1
+            subsection = 0
+            para = Paragraph(markup(f"{section}. {line}"), heading)
+            para.outline_key = f"section-{section}"
+            story.append(para)
+        elif kind == "subsection":
+            subsection += 1
+            prefix = f"{section}.{subsection} " if section else ""
+            story.append(Paragraph(markup(prefix + line), subheading))
+        elif kind == "minor":
+            story.append(Paragraph(markup(line), minor))
+        elif kind == "rule":
+            story.append(HRFlowable(width="100%", thickness=0.6, color=gold, spaceBefore=7, spaceAfter=7))
         else:
-            story.append(Paragraph(markup(line), body))
+            story.append(Paragraph(markup(line), bullet if kind == "list" else body))
     if not story:
         story.append(Paragraph("No analysis text available.", body))
 
@@ -97,5 +153,5 @@ def build_uncertainty_pdf(analysis, as_of):
         kwargs["pageCompression"] = 0
         return Canvas(*args, **kwargs)
 
-    doc.build(story, onFirstPage=decorate, onLaterPages=decorate, canvasmaker=canvas_factory)
+    doc.multiBuild(story, onFirstPage=decorate, onLaterPages=decorate, canvasmaker=canvas_factory)
     return output.getvalue()

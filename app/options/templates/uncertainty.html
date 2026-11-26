@@ -11,7 +11,7 @@ header{display:flex;gap:1rem;align-items:center} h1,h2,h3{line-height:1.2}
 h2{margin-top:2rem;border-bottom:1px solid #c6a45c;padding-bottom:.4rem}
 nav{display:flex;flex-wrap:wrap;gap:.5rem;padding:.65rem 1rem;background:#182229;position:sticky;top:0}
 nav a,nav button,nav select{background:#e2c778;color:#171717;padding:.45rem .75rem;border:0;border-radius:.35rem;text-decoration:none;font:inherit;cursor:pointer}
-nav button:disabled{opacity:.6;cursor:default} #analysis p{white-space:pre-line} #analysis li{margin:.45rem 0}
+nav button:disabled{opacity:.6;cursor:default} #analysis p{white-space:pre-line;margin:.65rem 0 1rem;line-height:1.65} #analysis li{margin:.55rem 0} #analysis h2{background:#f4ecd7;border-left:4px solid #c6a45c;padding:.8rem;margin:2rem 0 1rem;font-size:1.4rem} #analysis h3{color:#78591f;margin:1.5rem 0 .65rem;font-size:1.18rem} #analysis h4{margin:1rem 0 .35rem;font-size:1.05rem} #analysis hr{border:0;border-top:1px solid #c6a45c;margin:1rem 0}
 #activity-window{margin:1rem 0;padding:1rem;border:1px solid #c7ced1;border-radius:.5rem;background:#f5f7f8}
 #activity-window h2{margin:0;border:0;font-size:1rem}
 #activity{max-height:12rem;overflow-y:auto;margin:.5rem 0 0;padding-inline-start:calc(var(--activity-number-width, 1ch) + 1.5rem);overscroll-behavior:contain}
@@ -69,21 +69,38 @@ history.onchange=async()=>{
 };
 function render(text){
   const fragment=document.createDocumentFragment();
-  let list=null;
-  for(const raw of text.split('\n')){
-    const line=raw.trim();
-    if(!line){list=null;continue;}
-    const heading=line.match(/^#{1,6}\s+(.+)/);
-    const bullet=line.match(/^(?:[-*]|\d+\.)\s+(.+)/);
-    const el=document.createElement(heading?(line.startsWith('###')?'h3':'h2'):bullet?'li':'p');
-    (heading?.[1]||bullet?.[1]||line).split(/(\*\*.+?\*\*)/g).forEach(part=>{
+  let list=null,section=0,subsection=0;
+  function append(tag,value){
+    const el=document.createElement(tag);
+    value.split(/(\*\*.+?\*\*)/g).forEach(part=>{
       if(part.startsWith('**')&&part.endsWith('**')){const strong=document.createElement('strong');strong.textContent=part.slice(2,-2);el.append(strong);}
       else el.append(part);
     });
-    if(bullet){
-      if(!list){list=document.createElement('ul');fragment.append(list);}
-      list.append(el);
-    }else{list=null;fragment.append(el);}
+    fragment.append(el);
+    return el;
+  }
+  for(const raw of text.split('\n')){
+    const line=raw.trim();
+    if(!line){list=null;continue;}
+    const heading=line.match(/^(#{1,6})\s+(.+)/);
+    const bold=line.match(/^\*\*([^*]{1,120})\*\*:?$/);
+    const bullet=line.match(/^([-*]|\d+\.)\s+(.+)/);
+    if(heading||bold){
+      list=null;
+      if(heading&&heading[1].length<=2){section++;subsection=0;append('h2',section+'. '+heading[2]);}
+      else if(bold||heading[1].length===3){subsection++;append('h3',(section?section+'.'+subsection+' ':'')+(bold?bold[1]:heading[2]));}
+      else append('h4',heading[2]);
+    }else if(/^[-*_]{3,}$/.test(line)){list=null;fragment.append(document.createElement('hr'));}
+    else if(bullet){
+      const tag=/^\d/.test(bullet[1])?'ol':'ul';
+      if(!list||list.tagName.toLowerCase()!==tag){list=document.createElement(tag);if(tag==='ol')list.start=parseInt(bullet[1],10);fragment.append(list);}
+      const li=document.createElement('li');li.textContent=bullet[2];list.append(li);
+    }else{
+      list=null;
+      const label=line.match(/^(\*\*[^*]{2,100}\*\*:?|[A-Z][^.!?;:]{2,85}:)\s+(.+)$/);
+      if(label){append('h4',label[1]);append('p',label[2]);}
+      else append('p',line);
+    }
   }
   analysis.replaceChildren(fragment);
 }
