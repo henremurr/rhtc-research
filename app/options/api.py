@@ -3716,7 +3716,7 @@ _LONG_GAME_JOBS: dict[str, dict[str, Any]] = {}
 def long_game_storage():
     from app.options.long_game_storage import LongGameStorage
 
-    return LongGameStorage(watchlist_db_path().with_name("rhtc_long_game.sqlite3"))
+    return LongGameStorage(watchlist_db_path().with_name("rhtc_long_game.sqlite3"), retain_reports=True)
 
 
 @app.post("/api/long-game-report/analyze", status_code=202)
@@ -3760,7 +3760,7 @@ async def resume_long_game_analysis(job_id: str):
 @app.get("/api/long-game-report/analyze/latest")
 async def latest_long_game_analysis():
     job_id = next(iter(_LONG_GAME_JOBS), None) or long_game_storage().latest_job_id()
-    return JSONResponse({"job_id": job_id}, headers={"Cache-Control": "private, no-store"})
+    return JSONResponse({"job_id": job_id, "completed_job_id": long_game_storage().latest_completed_job_id()}, headers={"Cache-Control": "private, no-store"})
 
 
 @app.get("/api/long-game-report/analyze/{job_id}")
@@ -3770,6 +3770,31 @@ async def long_game_job_status(job_id: str):
         raise HTTPException(404, "This analysis is no longer available. Choose Update analysis to try again.")
     return JSONResponse({key: value for key, value in job.items() if key in {"status", "activity", "analysis", "as_of", "error", "resumable"}},
                         headers={"Cache-Control": "private, no-store"})
+
+
+@app.get("/api/long-game-report/history")
+def long_game_report_history():
+    return JSONResponse({"reports": long_game_storage().completed_reports()}, headers={"Cache-Control": "private, no-store"})
+
+
+@app.get("/api/long-game-report/pdf/{job_id}")
+def long_game_report_pdf(job_id: str, download: bool = False):
+    from app.options.uncertainty_pdf import build_uncertainty_pdf
+    job = long_game_storage().read_state(job_id)
+    if not job or not job.get("analysis"):
+        raise HTTPException(404, "No saved report is available for this analysis.")
+    try:
+        pdf = build_uncertainty_pdf(job["analysis"], job.get("as_of", "Unknown date"), long_game=True)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Long Game PDF rendering failed for job %s", job_id)
+        raise HTTPException(500, "PDF rendering failed. Your saved analysis is intact; return to the report and retry printing. No rebuild is necessary.")
+    filename = f"RHTC_Long_Game_{job_id[:12]}.pdf"
+    disposition = "attachment" if download else "inline"
+    return Response(pdf, media_type="application/pdf", headers={
+        "Content-Disposition": f'{disposition}; filename="{filename}"',
+        "Cache-Control": "private, no-store",
+    })
 
 
 def long_game_failure_reason(error):
