@@ -226,11 +226,11 @@ class NarrativeDocument(SimpleDocTemplate):
             self.notify("TOCEntry", (level, escape(title), self.page, key))
 
 
-def build_uncertainty_pdf(analysis, as_of):
+def build_uncertainty_pdf(analysis, as_of, *, long_game=False):
     analysis = normalize_pdf_text(analysis)
     as_of = normalize_pdf_text(as_of)
     output = BytesIO()
-    title = "Age of Structural Uncertainty"
+    title = "Long Game Report" if long_game else "Age of Structural Uncertainty"
     ink = colors.HexColor("#182229")
     gold = colors.HexColor("#C6A45C")
     width, height = letter
@@ -263,10 +263,13 @@ def build_uncertainty_pdf(analysis, as_of):
         canvas.line(100, height-309, width-100, height-309)
         canvas.setFillColor(ink)
         canvas.setFont("Helvetica-Bold", 29)
-        canvas.drawCentredString(width/2, height-363, "Investing in the Age of")
-        canvas.drawCentredString(width/2, height-399, "Structural Uncertainty")
+        if long_game:
+            canvas.drawCentredString(width/2, height-381, title)
+        else:
+            canvas.drawCentredString(width/2, height-363, "Investing in the Age of")
+            canvas.drawCentredString(width/2, height-399, "Structural Uncertainty")
         canvas.setFont("Helvetica", 15)
-        canvas.drawCentredString(width/2, height-445, "Expanded Strategic Investment Report")
+        canvas.drawCentredString(width/2, height-445, "Strategy, Action Plan and Rationale" if long_game else "Expanded Strategic Investment Report")
         canvas.setFont("Helvetica", 11)
         canvas.drawCentredString(width/2, height-478, "Portfolio Strategy | Risk | Opportunity | The Long Game")
         canvas.setFont("Helvetica-Bold", 10)
