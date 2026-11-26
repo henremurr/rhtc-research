@@ -1,5 +1,6 @@
 """Render a stored investment strategy report without calling the analysis provider."""
 import re
+import unicodedata
 from io import BytesIO
 from pathlib import Path
 from xml.sax.saxutils import escape
@@ -11,7 +12,36 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.pdfgen.canvas import Canvas
 
 
+def normalize_pdf_text(value):
+    """Map typography outside WinAnsi to printable equivalents for Helvetica."""
+    substitutions = {
+        0x2010: "-", 0x2011: "-", 0x2012: "-", 0x2212: "-",
+        0x00AD: None, 0x200B: None, 0x2060: None, 0xFEFF: None,
+        0x202F: " ", 0x2009: " ", 0x2007: " ", 0x00A0: " ",
+        0x2192: "->", 0x2190: "<-", 0x2264: "<=", 0x2265: ">=",
+        0x2248: "~", 0x2260: "!=", 0x2044: "/", 0x25AA: "-",
+    }
+    value = unicodedata.normalize("NFKC", str(value)).translate(substitutions)
+    result = []
+    for ch in value:
+        if ch in "\n\r\t":
+            result.append(ch)
+            continue
+        if unicodedata.category(ch) in ("Cf", "Cc"):
+            continue
+        try:
+            ch.encode("cp1252")
+            result.append(ch)
+        except UnicodeEncodeError:
+            # Keep otherwise unsupported characters identifiable, rather than
+            # silently losing them or rendering an opaque missing-glyph box.
+            result.append("[U+%04X]" % ord(ch))
+    return "".join(result)
+
+
 def build_uncertainty_pdf(analysis, as_of):
+    analysis = normalize_pdf_text(analysis)
+    as_of = normalize_pdf_text(as_of)
     output = BytesIO()
     title = "Age of Structural Uncertainty"
     ink = colors.HexColor("#182229")
