@@ -2464,15 +2464,15 @@ $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/opti
   if(label&&label!==original)itemLabels.set(key,label);
   else itemLabels.delete(key);
  };
- function addLongGameMenuItem(data){
-  const item='open-long-game-report',key='group:other-reports';
+ function addLongGameMenuItem(data,item='open-long-game-report'){
+  const key='group:other-reports';
   if(data.root.includes(item)||data.groups.some(group=>group.children?.includes(item)))return data;
   const existing=data.groups.find(group=>group.key===key||String(group.label||'').trim().toLowerCase()==='other reports');
   if(existing)return {...data,groups:data.groups.map(group=>group===existing?{...group,children:[...(group.children||[]),item]}:group)};
   return {...data,root:[...data.root,key],groups:[...data.groups,{key,label:'Other Reports',native:true,children:[item]}]};
  }
  const restore=data=>{if(!data||!Array.isArray(data.root)||!Array.isArray(data.groups))return false;
-  data=addLongGameMenuItem(data);
+  data=addLongGameMenuItem(addLongGameMenuItem(data),'open-uncertainty-report');
   for(const key of itemDefaults.keys()){
    const label=data.item_labels?.[key];
    if(itemLabels.has(key)||(typeof label==='string'&&label.trim()))nameItem(key,typeof label==='string'?label.trim():'');

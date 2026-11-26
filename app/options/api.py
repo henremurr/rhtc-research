@@ -3872,6 +3872,177 @@ async def generate_long_game_analysis(job_id, job, storage, activity):
         raise HTTPException(502, f"{long_game_failure_reason(error)} Choose Resume to continue.") from error
     return {"analysis": analysis, "as_of": timestamp, "resumable": bool(missing_batches)}
 
+@app.get("/uncertainty-report", response_class=HTMLResponse)
+def uncertainty_report():
+    return FileResponse(BASE / "templates" / "uncertainty.html", media_type="text/html", headers={"Cache-Control": "private, no-store"})
+
+
+_UNCERTAINTY_JOBS: dict[str, dict[str, Any]] = {}
+
+
+def uncertainty_storage():
+    from app.options.long_game_storage import LongGameStorage
+
+    return LongGameStorage(watchlist_db_path().with_name("rhtc_uncertainty.sqlite3"))
+
+
+@app.post("/api/uncertainty-report/analyze", status_code=202)
+async def start_uncertainty_analysis():
+    for job_id in _UNCERTAINTY_JOBS:
+        return {"job_id": job_id}
+    storage = uncertainty_storage()
+    storage.prune(tuple(_UNCERTAINTY_JOBS))
+    job_id = secrets.token_hex(16)
+    job = {"status": "running", "activity": ["Analysis queued."], "checkpoint": {}}
+    storage.save_state(job_id, job)
+    _UNCERTAINTY_JOBS[job_id] = job
+    job["task"] = asyncio.create_task(run_uncertainty_job(job_id, job, storage))
+    return {"job_id": job_id}
+
+
+@app.post("/api/uncertainty-report/analyze/{job_id}/resume", status_code=202)
+async def resume_uncertainty_analysis(job_id: str):
+    if job_id in _UNCERTAINTY_JOBS:
+        return {"job_id": job_id}
+    storage = uncertainty_storage()
+    job = storage.read_state(job_id)
+    if job is None:
+        raise HTTPException(404, "This analysis is no longer available. Choose Update analysis to start again.")
+    if not job.get("resumable"):
+        return {"job_id": job_id}
+    if _UNCERTAINTY_JOBS:
+        raise HTTPException(409, "Another Age of Structural Uncertainty analysis is running. Try Resume after it finishes.")
+    inputs, job["checkpoint"] = storage.load_work(job_id)
+    if inputs is not None:
+        job["inputs"] = inputs
+    job.update(status="running", resumable=False)
+    job.pop("error", None)
+    job["activity"].append("Resuming from the saved checkpoint.")
+    storage.save_state(job_id, job)
+    _UNCERTAINTY_JOBS[job_id] = job
+    job["task"] = asyncio.create_task(run_uncertainty_job(job_id, job, storage))
+    return {"job_id": job_id}
+
+
+@app.get("/api/uncertainty-report/analyze/latest")
+async def latest_uncertainty_analysis():
+    job_id = next(iter(_UNCERTAINTY_JOBS), None) or uncertainty_storage().latest_job_id()
+    return JSONResponse({"job_id": job_id}, headers={"Cache-Control": "private, no-store"})
+
+
+@app.get("/api/uncertainty-report/analyze/{job_id}")
+async def uncertainty_job_status(job_id: str):
+    job = _UNCERTAINTY_JOBS.get(job_id) or uncertainty_storage().read_state(job_id)
+    if job is None:
+        raise HTTPException(404, "This analysis is no longer available. Choose Update analysis to try again.")
+    return JSONResponse({key: value for key, value in job.items() if key in {"status", "activity", "analysis", "as_of", "error", "resumable"}},
+                        headers={"Cache-Control": "private, no-store"})
+
+
+def uncertainty_failure_reason(error):
+    from openai import APIConnectionError, APIError, APITimeoutError
+
+    from app.options.long_game import IncompleteLongGameResponse
+
+    if isinstance(error, IncompleteLongGameResponse):
+        return str(error)
+    if isinstance(error, sqlite3.Error):
+        return "The checkpoint database could not be read or written."
+    if isinstance(error, APITimeoutError):
+        return "The OpenAI request timed out."
+    if isinstance(error, APIConnectionError):
+        return "The server could not reach OpenAI."
+    if isinstance(error, APIError):
+        if (getattr(error, "status_code", None) or 0) >= 500:
+            return "OpenAI returned a temporary server error."
+        return openai_error_message(error)
+    return "An unexpected error interrupted this step."
+
+
+async def run_uncertainty_job(job_id, job, storage):
+    def activity(message):
+        job["activity"].append(message)
+        storage.save_state(job_id, job)
+
+    try:
+        result = await asyncio.wait_for(generate_uncertainty_analysis(job_id, job, storage, activity), timeout=3600)
+        job.update(status="completed", **result)
+        activity("Partial report ready. Resume to retry unfinished research." if result["resumable"] else "Report ready.")
+        if not result["resumable"]:
+            storage.finish(job_id)
+    except TimeoutError:
+        job.update(status="failed", error="Analysis exceeded 15 minutes. Choose Resume to continue.")
+    except HTTPException as error:
+        job.update(status="failed", error=str(error.detail))
+    except Exception as error:
+        job.update(status="failed", error=f"{uncertainty_failure_reason(error)} Choose Resume to continue.")
+    finally:
+        try:
+            if job["status"] == "failed":
+                job["resumable"] = True
+                activity(f'Job failed. {job["error"]}')
+        finally:
+            _UNCERTAINTY_JOBS.pop(job_id, None)
+
+
+async def generate_uncertainty_analysis(job_id, job, storage, activity):
+    from openai import AsyncOpenAI
+
+    from app.options.uncertainty import analyze_uncertainty
+    from app.options.long_game import portfolio_facts
+    from app.options.news import connect_db as connect_news_db, now_pacific
+
+    key = os.getenv("OPENAI_API_KEY")
+    if not key:
+        raise HTTPException(503, "Age of Structural Uncertainty analysis is unavailable. Configure OPENAI_API_KEY in the server settings.")
+    if "inputs" not in job:
+        activity("Reading watchlist, holdings and saved calls.")
+        watchlist = read_watchlist()
+        symbols = sorted({row["symbol"] for row in watchlist})
+        stock, ceo = {}, {}
+        if symbols:
+            placeholders = ",".join("?" for _ in symbols)
+            with closing(connect_watchlist_db()) as connection:
+                for row in connection.execute(
+                    "SELECT symbol, created_at, rating_label, summary, details, analysis_text "
+                    f"FROM stock_analysis_reports WHERE symbol IN ({placeholders}) ORDER BY created_at DESC, report_id DESC",
+                    symbols,
+                ):
+                    stock.setdefault(row["symbol"], []).append(dict(row))
+                for row in connection.execute(
+                    "SELECT symbol, created_at, risk_score, risk_rating, report_json "
+                    f"FROM ceo_risk_reports WHERE symbol IN ({placeholders}) ORDER BY created_at DESC, report_id DESC",
+                    symbols,
+                ):
+                    ceo.setdefault(row["symbol"], []).append(dict(row))
+        with closing(connect_news_db()) as connection:
+            news = [dict(row) for row in connection.execute(
+                "SELECT title, source, published_at, first_seen_at, peak, snippet FROM news_items "
+                "ORDER BY COALESCE(NULLIF(published_at, ''), first_seen_at) DESC, url"
+            )]
+        activity(f"Loaded {len(symbols)} tickers, {len(news)} news articles, "
+                 f"{sum(map(len, stock.values()))} stock analyses and {sum(map(len, ceo.values()))} CEO Risk reports.")
+        activity("Fetching available quotes for held tickers.")
+        prices = await long_game_quotes(watchlist)
+        activity(f"Received quotes for {len(prices)} tickers. Building the portfolio snapshot.")
+        now = now_pacific()
+        timestamp = now.strftime("%B %d, %Y at %I:%M %p %Z")
+        facts = portfolio_facts(watchlist, prices, now.date().isoformat())
+        job["inputs"] = (facts, stock, ceo, news, timestamp)
+        storage.save_inputs(job_id, job["inputs"])
+    facts, stock, ceo, news, timestamp = job["inputs"]
+    try:
+        async with AsyncOpenAI(api_key=key, timeout=90, max_retries=1) as client:
+            analysis, missing_batches = await analyze_uncertainty(
+                client, os.getenv("OPENAI_ANALYSIS_MODEL", os.getenv("OPENAI_MODEL", "gpt-5-mini")),
+                facts, stock, ceo, news, timestamp, activity, job["checkpoint"],
+                lambda checkpoint_key, answer: storage.save_checkpoint(job_id, checkpoint_key, answer),
+                uncertainty_failure_reason,
+            )
+    except Exception as error:
+        raise HTTPException(502, f"{uncertainty_failure_reason(error)} Choose Resume to continue.") from error
+    return {"analysis": analysis, "as_of": timestamp, "resumable": bool(missing_batches)}
+
 
 
 @app.post("/api/holdings-report/pdf")

@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Age of Structural Uncertainty · RHTC</title>
+<style>
+:root{color-scheme:light;font:16px/1.55 system-ui,sans-serif;color:#182229;background:#eef0f1}
+body{margin:0} main{max-width:68rem;min-height:75vh;margin:auto;background:white;padding:clamp(1rem,4vw,3rem)}
+header{display:flex;gap:1rem;align-items:center} h1,h2,h3{line-height:1.2}
+h2{margin-top:2rem;border-bottom:1px solid #c6a45c;padding-bottom:.4rem}
+nav{display:flex;flex-wrap:wrap;gap:.5rem;padding:.65rem 1rem;background:#182229;position:sticky;top:0}
+nav a,nav button{background:#e2c778;color:#171717;padding:.45rem .75rem;border:0;border-radius:.35rem;text-decoration:none;font:inherit;cursor:pointer}
+nav button:disabled{opacity:.6;cursor:default} #analysis p{white-space:pre-line} #analysis li{margin:.45rem 0}
+#activity-window{margin:1rem 0;padding:1rem;border:1px solid #c7ced1;border-radius:.5rem;background:#f5f7f8}
+#activity-window h2{margin:0;border:0;font-size:1rem}
+#activity{max-height:12rem;overflow-y:auto;margin:.5rem 0 0;padding-inline-start:calc(var(--activity-number-width, 1ch) + 1.5rem);overscroll-behavior:contain}
+#activity li{margin:.25rem 0} #activity li::marker{font-variant-numeric:tabular-nums} #elapsed{color:#526168;font-variant-numeric:tabular-nums}
+@media print{nav,#status,#activity-window{display:none}main{padding:0}h2,h3{break-after:avoid}}
+</style>
+</head>
+<body>
+<nav aria-label="Report controls">
+<a href="/options/">Return to dashboard</a>
+<button id="run" type="button">Update analysis</button>
+<button id="resume" type="button" hidden>Resume</button>
+<button id="print" type="button" disabled>Print or save PDF</button>
+</nav>
+<main>
+<header><img src="/options/static/apple-touch-icon.png" width="54" height="54" alt="RHTC"><div><h1>Age of Structural Uncertainty</h1><p id="as-of" hidden></p></div></header>
+<p id="status" role="status">Preparing the expanded investment strategy report.</p>
+<section id="activity-window" aria-labelledby="activity-title" hidden>
+<h2 id="activity-title">Analysis activity</h2>
+<span id="elapsed"></span>
+<ol id="activity" role="log" aria-label="Analysis progress" tabindex="0"></ol>
+</section>
+<article id="analysis" aria-label="Structural uncertainty investment strategy"></article>
+</main>
+<script>
+const run=document.getElementById('run'),print=document.getElementById('print');
+const status=document.getElementById('status'),asOf=document.getElementById('as-of'),analysis=document.getElementById('analysis');
+print.onclick=()=>window.print();
+function render(text){
+  const fragment=document.createDocumentFragment();
+  let list=null;
+  for(const raw of text.split('\n')){
+    const line=raw.trim();
+    if(!line){list=null;continue;}
+    const heading=line.match(/^#{1,6}\s+(.+)/);
+    const bullet=line.match(/^(?:[-*]|\d+\.)\s+(.+)/);
+    const el=document.createElement(heading?(line.startsWith('###')?'h3':'h2'):bullet?'li':'p');
+    (heading?.[1]||bullet?.[1]||line).split(/(\*\*.+?\*\*)/g).forEach(part=>{
+      if(part.startsWith('**')&&part.endsWith('**')){const strong=document.createElement('strong');strong.textContent=part.slice(2,-2);el.append(strong);}
+      else el.append(part);
+    });
+    if(bullet){
+      if(!list){list=document.createElement('ul');fragment.append(list);}
+      list.append(el);
+    }else{list=null;fragment.append(el);}
+  }
+  analysis.replaceChildren(fragment);
+}
+const activity=document.getElementById('activity'),activityWindow=document.getElementById('activity-window');
+const elapsed=document.getElementById('elapsed');
+const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+function log(message){
+  const line=document.createElement('li');
+  line.textContent=message;
+  activity.append(line);
+  activity.style.setProperty('--activity-number-width', String(activity.childElementCount).length + 'ch');
+  activity.scrollTop=activity.scrollHeight;
+}
+async function requestJson(url,options){
+  let response;
+  try{response=await fetch(url,options);}
+  catch{throw Object.assign(Error('Connection interrupted while contacting the report server.'),{retryable:true});}
+  if(response.status===401)throw Error('Your session expired. Sign in again to continue.');
+  const data=response.headers.get('Content-Type')?.includes('application/json')
+    ? await response.json().catch(()=>null) : null;
+  if(!response.ok||!data){
+    throw Object.assign(Error(data?.detail||'The report server did not return a usable response.'),{
+      httpStatus:response.status,
+      retryable:response.status>=500||response.status===429||response.ok
+    });
+  }
+  return data;
+}
+const resume=document.getElementById('resume'),jobKey='rhtc-uncertainty-job';
+const analysisUrl='/options/api/uncertainty-report/analyze';
+let jobId,shown=0;
+try{jobId=localStorage.getItem(jobKey)||sessionStorage.getItem(jobKey);}catch{}
+resume.hidden=!jobId;
+function rememberJob(id){
+  jobId=id;
+  try{if(id)localStorage.setItem(jobKey,id);else localStorage.removeItem(jobKey);sessionStorage.removeItem(jobKey);}catch{}
+}
+async function analyze(resuming){
+  run.disabled=true;
+  resume.disabled=true;
+  resume.hidden=true;
+  activityWindow.hidden=false;
+  if(!resuming){activity.replaceChildren();shown=0;rememberJob(null);}
+  status.textContent='Analysis in progress.';
+  const started=Date.now();
+  const tick=()=>{
+    const seconds=Math.floor((Date.now()-started)/1000);
+    elapsed.textContent=`Elapsed ${Math.floor(seconds/60)}m ${String(seconds%60).padStart(2,'0')}s`;
+  };
+  tick();
+  const timer=setInterval(tick,1000);
+  log(resuming?'Requesting resume.':'Submitting analysis request.');
+  try{
+    const url=analysisUrl;
+    const target=resuming?url+'/'+encodeURIComponent(jobId)+'/resume':url;
+    const {job_id}=await requestJson(target,{method:'POST'});
+    if(jobId!==job_id)shown=0;
+    rememberJob(job_id);
+    let misses=0;
+    while(true){
+      let data;
+      try{
+        data=await requestJson(url+'/'+encodeURIComponent(job_id),{cache:'no-store'});
+        if(misses)log('Connection restored.');
+        misses=0;
+      }catch(error){
+        if(!error.retryable||++misses>=5)throw error;
+        if(misses===1)log('Connection interrupted. Retrying the status check.');
+        await wait(4000);
+        continue;
+      }
+      for(const line of data.activity.slice(shown))log(line);
+      shown=data.activity.length;
+      if(data.status==='failed')throw Error(data.error);
+      if(data.status==='completed'){
+        render(data.analysis);
+        asOf.hidden=false;
+        asOf.textContent='As of '+data.as_of;
+        print.disabled=false;
+        status.textContent=data.resumable?'Partial analysis ready. Resume to retry unfinished research.':'Analysis complete.';
+        if(!data.resumable)rememberJob(null);
+        break;
+      }
+      await wait(2000);
+    }
+  }catch(error){
+    if(error.httpStatus===404)rememberJob(null);
+    status.textContent=error.message;
+    if(!activity.lastElementChild?.textContent.endsWith(error.message))log(error.message);
+  }finally{
+    clearInterval(timer);
+    tick();
+    run.disabled=false;
+    resume.disabled=false;
+    resume.hidden=!jobId;
+  }
+}
+async function restoreSavedJob(){
+  run.disabled=true;
+  resume.disabled=true;
+  try{
+    const latest=await requestJson(analysisUrl+'/latest',{cache:'no-store'});
+    rememberJob(latest.job_id);
+    if(!jobId)return;
+    resume.hidden=false;
+    const data=await requestJson(analysisUrl+'/'+encodeURIComponent(jobId),{cache:'no-store'});
+    activityWindow.hidden=false;
+    for(const line of data.activity)log(line);
+    shown=data.activity.length;
+    if(data.analysis){
+      render(data.analysis);
+      asOf.hidden=false;
+      asOf.textContent='As of '+data.as_of;
+      print.disabled=false;
+    }
+    if(data.status==='failed')status.textContent=data.error;
+    else if(data.status==='running')status.textContent='An analysis is running. Choose Resume to follow its progress.';
+    else if(data.resumable)status.textContent='Partial analysis ready. Resume to retry unfinished research.';
+    else{
+      status.textContent='Analysis complete.';
+      rememberJob(null);
+    }
+  }catch(error){
+    if(error.httpStatus===404)rememberJob(null);
+    status.textContent=error.message;
+  }finally{
+    run.disabled=false;
+    resume.disabled=false;
+    resume.hidden=!jobId;
+  }
+}
+run.onclick=()=>analyze(false);
+resume.onclick=()=>analyze(true);
+void restoreSavedJob().then(()=>{ if(!jobId) void analyze(false); else if(status.textContent.includes("running")) void analyze(true); });
+</script>
+</body>
+</html>
