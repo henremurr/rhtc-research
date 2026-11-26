@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 from collections import defaultdict
+from app.options.account_policy import account_status, ANALYSIS_POLICY
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +34,7 @@ maintenance excess = market value × (1 − maintenance rate) − margin debt.
 Use reliable income for repayment and reassess at months three and six.
 """
 
-FINAL_INSTRUCTIONS = """
-Account policy: Fidelity Brokerage is taxable and margin-enabled; Fidelity IRA, Schwab PRCA, Vanguard 401k and Vanguard IRA-M are non-taxable for current in-account trading and cash-only. Retirement distributions may be taxable. Never infer actual margin borrowing from margin eligibility. Apply margin costs and maintenance risk only to Fidelity Brokerage; cash accounts require available cash. Consider realized gains/losses, holding periods, option taxation and cross-account wash-sale risk, including IRA purchases. Do not treat retirement assets as freely transferable collateral. Distinguish gross trading performance from taxable income; do not estimate taxes without sufficient data. Unassigned holdings have unknown account status.
+FINAL_INSTRUCTIONS = ANALYSIS_POLICY + "\n" + """
 
 Act as the RHTC portfolio strategy analyst. Give an updated, decision-ready
 opinion for implementing and managing the Long Game. Write only the requested
@@ -81,7 +81,7 @@ def portfolio_facts(watchlist, prices, today):
             continue
         account = row.get("account") or "No account"
         totals = accounts[account]
-        status = {"tax_status": "Taxable", "funding_status": "Margin"} if account == "Fidelity Brokerage" else ({"tax_status": "Non-taxable", "funding_status": "Cash"} if account in {"Fidelity IRA", "Schwab PRCA", "Vanguard 401k", "Vanguard IRA-M"} else {"tax_status": "Unknown", "funding_status": "Unknown"})
+        status = account_status(account)
         totals.update(status)
         price = prices.get(row["symbol"])
         if shares and shares > 0:
