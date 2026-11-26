@@ -4836,7 +4836,7 @@ async def analyze_symbol(data: SymbolAnalysisInput):
     )
     prompt = (
         f"Analyze ticker {symbol} (RHTC theme: {peak}).\n"
-        f"Recorded accounts for this ticker (not verified balances): {[{k: r.get(k) for k in (\'account\', \'tax_status\', \'funding_status\', \'quantity\')} for r in read_watchlist() if r.get(\'symbol\') == symbol and (r.get(\'quantity\') or 0) > 0]}\n"
+        f"Recorded accounts for this ticker (not verified balances): {[{k: r.get(k) for k in ('account', 'tax_status', 'funding_status', 'quantity')} for r in read_watchlist() if r.get('symbol') == symbol and (r.get('quantity') or 0) > 0]}\n"
         f"Current dashboard quote/options snapshot, if available: {screen_json}\n"
         "Search current public information, including the next earnings date, recent filings, guidance, and company news."
     )
