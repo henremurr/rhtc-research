@@ -142,7 +142,7 @@ def list_levels(analysis):
             stack.clear()
             continue
         indent = len(match[1].expandtabs(4))
-        marker, content = match[2:]
+        marker, content = match.group(2, 3)
         ordered = marker[0].isdigit()
         while stack and indent < stack[-1]["indent"]:
             stack.pop()
