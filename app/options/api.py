@@ -3883,7 +3883,7 @@ _UNCERTAINTY_JOBS: dict[str, dict[str, Any]] = {}
 def uncertainty_storage():
     from app.options.long_game_storage import LongGameStorage
 
-    return LongGameStorage(watchlist_db_path().with_name("rhtc_uncertainty.sqlite3"))
+    return LongGameStorage(watchlist_db_path().with_name("rhtc_uncertainty.sqlite3"), retain_reports=True)
 
 
 @app.post("/api/uncertainty-report/analyze", status_code=202)
@@ -3927,7 +3927,7 @@ async def resume_uncertainty_analysis(job_id: str):
 @app.get("/api/uncertainty-report/analyze/latest")
 async def latest_uncertainty_analysis():
     job_id = next(iter(_UNCERTAINTY_JOBS), None) or uncertainty_storage().latest_job_id()
-    return JSONResponse({"job_id": job_id}, headers={"Cache-Control": "private, no-store"})
+    return JSONResponse({"job_id": job_id, "completed_job_id": uncertainty_storage().latest_completed_job_id()}, headers={"Cache-Control": "private, no-store"})
 
 
 @app.get("/api/uncertainty-report/analyze/{job_id}")
@@ -3937,6 +3937,26 @@ async def uncertainty_job_status(job_id: str):
         raise HTTPException(404, "This analysis is no longer available. Choose Update analysis to try again.")
     return JSONResponse({key: value for key, value in job.items() if key in {"status", "activity", "analysis", "as_of", "error", "resumable"}},
                         headers={"Cache-Control": "private, no-store"})
+
+
+@app.get("/api/uncertainty-report/history")
+def uncertainty_report_history():
+    return JSONResponse({"reports": uncertainty_storage().completed_reports()}, headers={"Cache-Control": "private, no-store"})
+
+
+@app.get("/api/uncertainty-report/pdf/{job_id}")
+def uncertainty_report_pdf(job_id: str, download: bool = False):
+    from app.options.uncertainty_pdf import build_uncertainty_pdf
+    job = uncertainty_storage().read_state(job_id)
+    if not job or not job.get("analysis"):
+        raise HTTPException(404, "No saved report is available for this analysis.")
+    pdf = build_uncertainty_pdf(job["analysis"], job.get("as_of", "Unknown date"))
+    filename = f"RHTC_Age_of_Structural_Uncertainty_{job_id[:12]}.pdf"
+    disposition = "attachment" if download else "inline"
+    return Response(pdf, media_type="application/pdf", headers={
+        "Content-Disposition": f'{disposition}; filename="{filename}"',
+        "Cache-Control": "private, no-store",
+    })
 
 
 def uncertainty_failure_reason(error):
