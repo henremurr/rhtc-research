@@ -87,6 +87,19 @@ function render(text){
     const words=line.split(/\s+/).length;
     return (pos===0||!lines[pos-1].trim())&&following&&line.length<=140&&words>=3&&words<=20&&/^[A-Z0-9]/.test(line)&&!/[.!?;]$|^(?:https?:\/\/|www\.|\|)/.test(line)&&!/^(?:This|These|Those|There|It|They|We|I|The report|The portfolio|For example)\b/i.test(line)&&!/\b(?:is|are|was|were|has|have|will|should|must|can|could|would|may|might)\b/i.test(line)&&(following.length>line.length||/^(?:\*\*|[A-Z][^:]{2,100}:)/.test(following));
   }
+  function colonHeading(line){
+    const label=line.match(/^(\*\*[^*]{2,100}\*\*:?|[A-Z][^.!?;:]{2,85}:)\s+(.+)$/);
+    if(!label)return null;
+    const explicit=label[1].startsWith("**"),rest=label[2];
+    if(explicit&&label[1].replace(/:$/,"").replace(/\*\*/g,"").includes(":"))return [label[1].replace(/\*\*/g,""),rest];
+    const prefix=label[1].replace(/\*\*/g,"").replace(/:$/,"").trim();
+    const boundary=rest.match(/^(.{2,140}?)[.!?]\s+([A-Z0-9].+)$/);
+    const verb=/\b(?:is|are|was|were|has|have|will|should|must|can|could|would|may|might)\b/i;
+    const question=/^(?:what|why|how|when|where|which|whether)\b/i;
+    if(boundary&&boundary[1].split(/\s+/).length<=20&&(question.test(boundary[1])||!verb.test(boundary[1]))&&(/^[a-z]/.test(boundary[1])||question.test(boundary[1])))return [prefix+": "+boundary[1],boundary[2]];
+    if(rest.length<=140&&rest.split(/\s+/).length<=20&&!/[.!?]$/.test(rest)&&!verb.test(rest))return [prefix+": "+rest,""];
+    return explicit?[prefix+":",rest]:null;
+  }
   for(let pos=0;pos<lines.length;pos++){
     const line=lines[pos].trim();
     if(!line){list=null;continue;}
@@ -133,9 +146,9 @@ function render(text){
       const li=document.createElement('li');li.textContent=bullet[2];list.append(li);
     }else{
       list=null;
-      const label=line.match(/^(\*\*[^*]{2,100}\*\*:?|[A-Z][^.!?;:]{2,85}:)\s+(.+)$/);
+      const label=colonHeading(line);
       if(!inDimensions&&plainHeading(line,pos))subhead(line);
-      else if(label){minorhead(label[1]);append('p',label[2]);}
+      else if(label){minorhead(label[0]);if(label[1])append('p',label[1]);}
       else append('p',line);
     }
   }

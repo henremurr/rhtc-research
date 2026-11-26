@@ -102,6 +102,34 @@ def plain_subheading(line, separated, following):
     return len(following) > len(line) or bool(re.match(r"^(?:\*\*|[A-Z][^:]{2,100}:)", following))
 
 
+def colon_heading(line):
+    """Keep title qualifiers attached to their heading; preserve ambiguous prose inline."""
+    label = re.match(r"^(\*\*[^*]{2,100}\*\*:?|[A-Z][^.!?;:]{2,85}:)\s+(.+)$", line)
+    if not label:
+        return None
+    prefix, rest = label.groups()
+    # Explicit bold spans already encode the author's intended boundary.
+    if prefix.startswith("**") and ":" in prefix.rstrip(":").strip("*"):
+        return prefix.replace("**", ""), rest
+    prefix = prefix.replace("**", "").rstrip(":").strip()
+    # A short topic qualifier followed by a sentence is part of the title.
+    boundary = re.match(r"^(.{2,140}?)[.!?]\s+([A-Z0-9].+)$", rest)
+    if boundary:
+        qualifier, body = boundary.groups()
+        if (len(qualifier.split()) <= 20 and
+                (re.match(r"^(?:what|why|how|when|where|which|whether)\b", qualifier, re.I)
+                 or not re.search(r"\b(?:is|are|was|were|has|have|will|should|must|can|could|would|may|might)\b", qualifier, re.I))
+                and (qualifier[0].islower() or re.match(r"^(?:what|why|how|when|where|which|whether)\b", qualifier, re.I))):
+            return prefix + ": " + qualifier, body
+    if len(rest) <= 140 and len(rest.split()) <= 20 and not re.search(r"[.!?]$", rest):
+        if not re.search(r"\b(?:is|are|was|were|has|have|will|should|must|can|could|would|may|might)\b", rest, re.I):
+            return prefix + ": " + rest, ""
+    # Explicit bold label is reliable; an unmarked colon is not a heading boundary.
+    if label[1].startswith("**"):
+        return prefix + ":", rest
+    return None
+
+
 def narrative_blocks(analysis):
     """Recognize explicit headings and short prose labels without dropping content."""
     in_dimensions = False
@@ -145,12 +173,14 @@ def narrative_blocks(analysis):
         if not in_dimensions and plain_subheading(line, separated, following):
             yield "subsection", line
             continue
-        label = re.match(r"^(\*\*[^*]{2,100}\*\*:?|[A-Z][^.!?;:]{2,85}:)\s+(.+)$", line)
+        label = colon_heading(line)
         if label:
-            yield "minor", label[1]
-            yield "body", label[2]
+            yield "minor", label[0]
+            if label[1]:
+                yield "body", label[1]
         else:
             yield "body", line
+
 
 
 class NarrativeDocument(SimpleDocTemplate):
