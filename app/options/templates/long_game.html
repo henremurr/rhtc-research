@@ -10,7 +10,7 @@ body{margin:0} main{max-width:68rem;min-height:75vh;margin:auto;background:white
 header{display:flex;gap:1rem;align-items:center} h1,h2,h3{line-height:1.2}
 h2{margin-top:2rem;border-bottom:1px solid #c6a45c;padding-bottom:.4rem}
 nav{display:flex;flex-wrap:wrap;gap:.5rem;padding:.65rem 1rem;background:#182229;position:sticky;top:0}
-nav a,nav button{background:#e2c778;color:#171717;padding:.45rem .75rem;border:0;border-radius:.35rem;text-decoration:none;font:inherit;cursor:pointer}
+nav a,nav button,nav select{background:#e2c778;color:#171717;padding:.45rem .75rem;border:0;border-radius:.35rem;text-decoration:none;font:inherit;cursor:pointer}
 nav button:disabled{opacity:.6;cursor:default} #analysis p{white-space:pre-line} #analysis li{margin:.45rem 0}
 #activity-window{margin:1rem 0;padding:1rem;border:1px solid #c7ced1;border-radius:.5rem;background:#f5f7f8}
 #activity-window h2{margin:0;border:0;font-size:1rem}
@@ -24,7 +24,9 @@ nav button:disabled{opacity:.6;cursor:default} #analysis p{white-space:pre-line}
 <a href="/options/">Return to dashboard</a>
 <button id="run" type="button">Update analysis</button>
 <button id="resume" type="button" hidden>Resume</button>
-<button id="print" type="button" disabled>Print or save PDF</button>
+<button id="print" type="button" disabled>View / Print PDF</button>
+<button id="download" type="button" disabled>Save PDF</button>
+<select id="history" aria-label="Saved reports"><option value="">Report history</option></select>
 </nav>
 <main>
 <header><img src="/options/static/apple-touch-icon.png" width="54" height="54" alt="RHTC"><div><h1>Long Game Report</h1><p id="as-of" hidden></p></div></header>
@@ -39,7 +41,32 @@ nav button:disabled{opacity:.6;cursor:default} #analysis p{white-space:pre-line}
 <script>
 const run=document.getElementById('run'),print=document.getElementById('print');
 const status=document.getElementById('status'),asOf=document.getElementById('as-of'),analysis=document.getElementById('analysis');
-print.onclick=()=>window.print();
+const download=document.getElementById('download'),history=document.getElementById('history');
+let reportId=null;
+function setReport(id,data){
+  if(!data.analysis)return;
+  reportId=id;
+  render(data.analysis);
+  asOf.hidden=false;
+  asOf.textContent='As of '+data.as_of;
+  print.disabled=download.disabled=false;
+}
+function pdfUrl(save){return '/options/api/long-game-report/pdf/'+encodeURIComponent(reportId)+(save?'?download=true':'');}
+print.onclick=()=>{if(reportId)location.assign(pdfUrl(false));};
+download.onclick=()=>{if(reportId)location.assign(pdfUrl(true));};
+async function refreshHistory(){
+  try{
+    const data=await requestJson('/options/api/long-game-report/history',{cache:'no-store'});
+    history.replaceChildren(new Option('Report history',''));
+    for(const report of data.reports)history.add(new Option(report.as_of+(report.partial?' (partial)':''),report.job_id));
+    history.value=reportId||'';
+  }catch(error){log('Report history: '+error.message);}
+}
+history.onchange=async()=>{
+  if(!history.value)return;
+  try{const id=history.value;const data=await requestJson(analysisUrl+'/'+encodeURIComponent(id),{cache:'no-store'});setReport(id,data);if(!run.disabled)status.textContent='Saved report opened. Choose Update analysis to rebuild.';}
+  catch(error){status.textContent=error.message;}
+};
 function render(text){
   const fragment=document.createDocumentFragment();
   let list=null;
@@ -132,10 +159,9 @@ async function analyze(resuming){
       shown=data.activity.length;
       if(data.status==='failed')throw Error(data.error);
       if(data.status==='completed'){
-        render(data.analysis);
-        asOf.hidden=false;
-        asOf.textContent='As of '+data.as_of;
-        print.disabled=false;
+        setReport(job_id,data);
+        void refreshHistory();
+        if(!data.resumable)activityWindow.hidden=true;
         status.textContent=data.resumable?'Partial analysis ready. Resume to retry unfinished research.':'Analysis complete.';
         if(!data.resumable)rememberJob(null);
         break;
@@ -160,23 +186,26 @@ async function restoreSavedJob(){
   try{
     const latest=await requestJson(analysisUrl+'/latest',{cache:'no-store'});
     rememberJob(latest.job_id);
-    if(!jobId)return;
+    if(latest.completed_job_id){
+      const saved=await requestJson(analysisUrl+'/'+encodeURIComponent(latest.completed_job_id),{cache:'no-store'});
+      setReport(latest.completed_job_id,saved);
+    }
+    await refreshHistory();
+    if(!jobId){status.textContent=reportId?'Saved report opened. Choose Update analysis to rebuild.':'No saved report yet. Choose Update analysis to generate one.';return;}
     resume.hidden=false;
     const data=await requestJson(analysisUrl+'/'+encodeURIComponent(jobId),{cache:'no-store'});
     activityWindow.hidden=false;
     for(const line of data.activity)log(line);
     shown=data.activity.length;
     if(data.analysis){
-      render(data.analysis);
-      asOf.hidden=false;
-      asOf.textContent='As of '+data.as_of;
-      print.disabled=false;
+      setReport(jobId,data);
     }
     if(data.status==='failed')status.textContent=data.error;
     else if(data.status==='running')status.textContent='An analysis is running. Choose Resume to follow its progress.';
     else if(data.resumable)status.textContent='Partial analysis ready. Resume to retry unfinished research.';
     else{
-      status.textContent='Analysis complete.';
+      status.textContent='Saved report opened. Choose Update analysis to rebuild.';
+      activityWindow.hidden=true;
       rememberJob(null);
     }
   }catch(error){
@@ -190,7 +219,7 @@ async function restoreSavedJob(){
 }
 run.onclick=()=>analyze(false);
 resume.onclick=()=>analyze(true);
-void restoreSavedJob();
+void restoreSavedJob().then(()=>{ if(jobId && status.textContent.includes("running")) void analyze(true); });
 </script>
 </body>
 </html>
