@@ -1658,7 +1658,6 @@ async def analyze_news_story(data: NewsAnalysisInput) -> dict[str, Any]:
 
     # Import at request time to avoid the news router <-> dashboard module import cycle.
     from app.options.api import openai_error_message, read_watchlist
-    from app.options.account_policy import account_status, ANALYSIS_POLICY
 
     watchlist = [{"symbol": item["symbol"], "peak": item["peak"]} for item in read_watchlist()]
     canonical_url = canonical_news_url(data.url)
@@ -1792,6 +1791,7 @@ async def get_news_summary_job(job_id: str) -> dict[str, Any]:
 
 async def _build_news_summary(data: NewsSummaryInput, job_id: str | None = None) -> dict[str, Any]:
     """Create a printable, cited synthesis of the stories currently in the feed."""
+    from app.options.account_policy import account_status, ANALYSIS_POLICY
     def set_progress(progress: int, phase: str, completed: int | None = None, total: int | None = None) -> None:
         if not job_id:
             return
