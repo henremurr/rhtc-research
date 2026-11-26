@@ -130,11 +130,43 @@ def colon_heading(line):
     return None
 
 
+def list_levels(analysis):
+    """Preserve explicit list depth and infer numbered children after colon-led bullets."""
+    stack = []
+    levels = {}
+    for pos, raw in enumerate(analysis.splitlines()):
+        if not raw.strip():
+            continue
+        match = re.match(r"^([ \t]*)([-*+]|\d+[.)])\s+(.+)$", raw)
+        if not match:
+            stack.clear()
+            continue
+        indent = len(match[1].expandtabs(4))
+        marker, content = match[2:]
+        ordered = marker[0].isdigit()
+        while stack and indent < stack[-1]["indent"]:
+            stack.pop()
+        if not stack:
+            stack.append({"indent": indent, "ordered": ordered, "level": 0, "parent": False, "inferred": False})
+        elif indent > stack[-1]["indent"]:
+            stack.append({"indent": indent, "ordered": ordered, "level": stack[-1]["level"] + 1, "parent": False, "inferred": False})
+        elif stack[-1]["inferred"] and not ordered:
+            stack.pop()
+        elif ordered and not stack[-1]["ordered"] and stack[-1]["parent"]:
+            stack.append({"indent": indent, "ordered": True, "level": stack[-1]["level"] + 1, "parent": False, "inferred": True})
+        current = stack[-1]
+        current["ordered"] = ordered
+        current["parent"] = not ordered and content.rstrip().endswith(":")
+        levels[pos] = min(current["level"], 6)
+    return levels
+
+
 def narrative_blocks(analysis):
     """Recognize explicit headings and short prose labels without dropping content."""
     in_dimensions = False
     seen_dimensions = set()
     lines = analysis.splitlines()
+    levels = list_levels(analysis)
     for pos, raw in enumerate(lines):
         line = raw.strip()
         if not line:
@@ -165,8 +197,8 @@ def narrative_blocks(analysis):
         if re.fullmatch(r"\*\*[^*]{1,120}\*\*:?",""+line):
             yield "subsection", line.strip("*").rstrip(":").rstrip("*")
             continue
-        if re.match(r"^(?:[-*]|\d+\.)\s+", line):
-            yield "list", line
+        if pos in levels:
+            yield f"list:{levels[pos]}", line
             continue
         separated = pos == 0 or not lines[pos-1].strip()
         following = next((s.strip() for s in lines[pos+1:pos+4] if s.strip()), "")
@@ -212,7 +244,8 @@ def build_uncertainty_pdf(analysis, as_of):
     subheading = ParagraphStyle("Subsection", parent=body, fontName="Helvetica-Bold", fontSize=15, leading=20, spaceBefore=18, spaceAfter=10, keepWithNext=True, textColor=colors.HexColor("#78591F"), backColor=colors.HexColor("#FAF5E8"), borderPadding=6)
     dimension_style = ParagraphStyle("Dimension", parent=subheading, fontSize=15, leading=20, backColor=colors.HexColor("#FAF5E8"), borderPadding=6, spaceBefore=18, spaceAfter=10)
     minor = ParagraphStyle("Minor", parent=body, fontName="Helvetica-Bold", fontSize=11.5, leading=16, spaceBefore=8, spaceAfter=4, keepWithNext=True)
-    bullet = ParagraphStyle("List", parent=body, leftIndent=16, firstLineIndent=-12)
+    bullets = [ParagraphStyle(f"List{depth}", parent=body, leftIndent=18 + 22*depth,
+                              firstLineIndent=-14, spaceAfter=7) for depth in range(7)]
     logo = Path(__file__).parent / "static" / "apple-touch-icon.png"
 
     def cover(canvas, document):
@@ -320,7 +353,7 @@ def build_uncertainty_pdf(analysis, as_of):
         elif kind == "rule":
             story.append(HRFlowable(width="100%", thickness=0.6, color=gold, spaceBefore=7, spaceAfter=7))
         else:
-            story.append(Paragraph(markup(line), bullet if kind == "list" else body))
+            story.append(Paragraph(markup(line), bullets[int(kind.split(":")[1])] if kind.startswith("list:") else body))
     if not blocks:
         story.append(Paragraph("No analysis text available.", body))
 

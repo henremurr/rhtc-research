@@ -11,7 +11,7 @@ header{display:flex;gap:1rem;align-items:center} h1,h2,h3{line-height:1.2}
 h2{margin-top:2rem;border-bottom:1px solid #c6a45c;padding-bottom:.4rem}
 nav{display:flex;flex-wrap:wrap;gap:.5rem;padding:.65rem 1rem;background:#182229;position:sticky;top:0}
 nav a,nav button,nav select{background:#e2c778;color:#171717;padding:.45rem .75rem;border:0;border-radius:.35rem;text-decoration:none;font:inherit;cursor:pointer}
-nav button:disabled{opacity:.6;cursor:default} #analysis p{white-space:pre-line;margin:.65rem 0 1rem;line-height:1.65} #analysis li{margin:.55rem 0} #analysis h2{background:#f4ecd7;border-left:4px solid #c6a45c;padding:.8rem;margin:2rem 0 1rem;font-size:1.4rem} #analysis h3{color:#78591f;background:#faf5e8;border-left:3px solid #c6a45c;padding:.65rem .8rem;font-size:1.25rem;margin:1.8rem 0 .8rem} #analysis .dimension-heading{background:#faf5e8;border-left:3px solid #c6a45c;padding:.65rem .8rem;font-size:1.25rem;margin:1.8rem 0 .8rem} #analysis h4{margin:1rem 0 .35rem;font-size:1.05rem} #analysis hr{border:0;border-top:1px solid #c6a45c;margin:1rem 0}
+nav button:disabled{opacity:.6;cursor:default} #analysis p{white-space:pre-line;margin:.65rem 0 1rem;line-height:1.65} #analysis li{margin:.55rem 0} #analysis ul,#analysis ol{padding-inline-start:1.5rem} #analysis li>ul,#analysis li>ol{margin:.4rem 0 .6rem;padding-inline-start:1.5rem} #analysis h2{background:#f4ecd7;border-left:4px solid #c6a45c;padding:.8rem;margin:2rem 0 1rem;font-size:1.4rem} #analysis h3{color:#78591f;background:#faf5e8;border-left:3px solid #c6a45c;padding:.65rem .8rem;font-size:1.25rem;margin:1.8rem 0 .8rem} #analysis .dimension-heading{background:#faf5e8;border-left:3px solid #c6a45c;padding:.65rem .8rem;font-size:1.25rem;margin:1.8rem 0 .8rem} #analysis h4{margin:1rem 0 .35rem;font-size:1.05rem} #analysis hr{border:0;border-top:1px solid #c6a45c;margin:1rem 0}
 #activity-window{margin:1rem 0;padding:1rem;border:1px solid #c7ced1;border-radius:.5rem;background:#f5f7f8}
 #activity-window h2{margin:0;border:0;font-size:1rem}
 #activity{max-height:12rem;overflow-y:auto;margin:.5rem 0 0;padding-inline-start:calc(var(--activity-number-width, 1ch) + 1.5rem);overscroll-behavior:contain}
@@ -80,6 +80,33 @@ function render(text){
     return el;
   }
   const lines=text.split('\n');
+  const listStack=[];
+  let nesting=[];
+  function listItem(raw){
+    const m=raw.match(/^([ \t]*)([-*+]|\d+[.)])\s+(.+)$/);
+    if(!m)return;
+    const indent=m[1].replace(/\t/g,"    ").length, ordered=/^\d/.test(m[2]);
+    while(listStack.length&&indent<listStack.at(-1).indent)listStack.pop();
+    if(!listStack.length)listStack.push({indent,ordered,level:0,parent:false,inferred:false});
+    else if(indent>listStack.at(-1).indent)listStack.push({indent,ordered,level:listStack.at(-1).level+1,parent:false,inferred:false});
+    else if(listStack.at(-1).inferred&&!ordered)listStack.pop();
+    else if(ordered&&!listStack.at(-1).ordered&&listStack.at(-1).parent)listStack.push({indent,ordered,level:listStack.at(-1).level+1,parent:false,inferred:true});
+    const current=listStack.at(-1);
+    current.ordered=ordered;current.parent=!ordered&&m[3].trimEnd().endsWith(":");
+    const depth=Math.min(current.level,6),tag=ordered?"ol":"ul";
+    nesting.length=Math.min(nesting.length,depth+1);
+    let group=nesting[depth];
+    if(!group||group.tagName.toLowerCase()!==tag){
+      group=document.createElement(tag);
+      if(ordered)group.start=parseInt(m[2],10);
+      const parent=depth?nesting[depth-1]?.lastElementChild:null;
+      (parent||fragment).append(group);nesting[depth]=group;
+    }
+    const li=document.createElement("li");li.textContent=m[3];
+    if(ordered)li.value=parseInt(m[2],10);
+    group.append(li);
+  }
+  function resetLists(){listStack.length=0;nesting=[];}
   function subhead(value){subsection++;detail=0;append('h3',section?section+'.'+subsection+' '+value:value);}
   function minorhead(value){if(section&&subsection){detail++;append('h4',section+'.'+subsection+'.'+detail+' '+value);}else if(section&&!inDimensions)subhead(value);else append('h4',value);}
   function plainHeading(line,pos){
@@ -105,7 +132,8 @@ function render(text){
     if(!line){list=null;continue;}
     const heading=line.match(/^(#{1,6})\s+(.+)/);
     const bold=line.match(/^\*\*([^*]{1,120})\*\*:?$/);
-    const bullet=line.match(/^([-*]|\d+\.)\s+(.+)/);
+    const bullet=line.match(/^([-*+]|\d+[.)])\s+(.+)/);
+    if(!bullet)resetLists();
     if(heading&&heading[1].length<=2){if(inDimensions&&seenDimensions.size<7){const names=["Technological","Economic","Monetary","Geopolitical","Energy","Societal","Financial"];append("p","Navigation note: no distinct heading could be located for "+names.filter((_,i)=>!seenDimensions.has(i)).join(", ")+". Original narrative retained.");}inDimensions=/seven dimensions of structural uncertainty/i.test(heading[2]);seenDimensions.clear();}
     if(inDimensions){
       const candidate=line.replace(/\*\*|__/g,"").trim().replace(/^(?:(?:#{1,6}|[-*•])\s+|(?:dimension\s+)?\(?\d+(?:\.\d+)*[.)\]:-]?\s+)+/i,"");
@@ -141,9 +169,7 @@ function render(text){
       else minorhead(heading[2]);
     }else if(/^[-*_]{3,}$/.test(line)){list=null;fragment.append(document.createElement('hr'));}
     else if(bullet){
-      const tag=/^\d/.test(bullet[1])?'ol':'ul';
-      if(!list||list.tagName.toLowerCase()!==tag){list=document.createElement(tag);if(tag==='ol')list.start=parseInt(bullet[1],10);fragment.append(list);}
-      const li=document.createElement('li');li.textContent=bullet[2];list.append(li);
+      listItem(lines[pos]);
     }else{
       list=null;
       const label=colonHeading(line);
