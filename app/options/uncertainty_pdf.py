@@ -52,15 +52,39 @@ DIMENSION_ALIASES = (
 )
 
 
+DIMENSION_LEADS = (
+    r"technolog(?:ical|y)|innovation",
+    r"macroeconomic|economic|economy|macro",
+    r"monetary|interest rates?",
+    r"geopolitical|geopolitics",
+    r"energy|power",
+    r"societal|social|society",
+    r"financial|capital markets?",
+)
+DIMENSION_COMPOUND = re.compile(r"""^(?P<lead>technolog(?:ical|y)|innovation|macroeconomic|economic|economy|macro|monetary|interest rates?|geopolitical|geopolitics|energy|power|societal|social|society|financial|capital markets?)\b(?P<qualifier>[^:\n—–]{0,100}?)\b(?:uncertaint(?:y|ies)|risks?|dimensions?)\s*(?=$|[:—–-]|\()""", re.I)
+
+
 def dimension_heading(line):
-    """Recognize legacy labels, including abbreviated and parenthesized headings."""
+    """Identify compound headings and preserve their original qualifiers."""
     candidate = line.replace("**", "").replace("__", "").strip()
     candidate = re.sub(r"^(?:(?:#{1,6}|[-*•])\s+|(?:dimension\s+)?\(?\d+(?:\.\d+)*[.)\]:-]?\s+)+", "", candidate, flags=re.I)
+    match = DIMENSION_COMPOUND.match(candidate)
+    if match:
+        lead = match["lead"]
+        for index, alias in enumerate(DIMENSION_LEADS):
+            if re.fullmatch(alias, lead, re.I):
+                tail = candidate[match.end():].strip()
+                tail = re.sub(r"^[:—–-]\s*", "", tail)
+                label = candidate[:match.end()].strip()
+                canonical = DIMENSION_NAMES[index] + " uncertainty"
+                if label.casefold() != canonical.casefold():
+                    tail = label + (" — " + tail if tail else "")
+                return index, tail
+    # Legacy short labels without an explicit uncertainty/risk suffix.
     for index, alias in enumerate(DIMENSION_ALIASES):
         match = re.match(rf"^({alias})(?:\s+(?:structural\s+)?(?:uncertainty|risk|dimension))?\s*(?=$|[:—–-]|\()", candidate, re.I)
         if match:
-            tail = candidate[match.end():].strip()
-            tail = re.sub(r"^[:—–-]\s*", "", tail)
+            tail = re.sub(r"^[:—–-]\s*", "", candidate[match.end():].strip())
             return index, tail
     return None
 

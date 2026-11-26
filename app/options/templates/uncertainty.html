@@ -90,6 +90,19 @@ function render(text){
       const candidate=line.replace(/\*\*|__/g,"").trim().replace(/^(?:(?:#{1,6}|[-*•])\s+|(?:dimension\s+)?\(?\d+(?:\.\d+)*[.)\]:-]?\s+)+/i,"");
       const aliases=[/^(technolog(?:ical|y)|innovation)/i,/^(economic|macroeconomic|economy|macro)/i,/^(monetary policy|monetary|interest rates?)/i,/^(geopolitical and trade|geopolitical|geopolitics)/i,/^(energy and infrastructure|power and energy|energy)/i,/^(social and labor|societal|social|society)/i,/^(financial and market|financial markets?|capital markets?|financial)/i];
       const names=["Technological","Economic","Monetary","Geopolitical","Energy","Societal","Financial"];
+      const compound=candidate.match(/^(?<lead>technolog(?:ical|y)|innovation|macroeconomic|economic|economy|macro|monetary|interest rates?|geopolitical|geopolitics|energy|power|societal|social|society|financial|capital markets?)\b(?<qualifier>[^:\n—–]{0,100}?)\b(?:uncertaint(?:y|ies)|risks?|dimensions?)\s*(?=$|[:—–-]|\()/i);
+      const leads=[/^(technolog(?:ical|y)|innovation)$/i,/^(macroeconomic|economic|economy|macro)$/i,/^(monetary|interest rates?)$/i,/^(geopolitical|geopolitics)$/i,/^(energy|power)$/i,/^(societal|social|society)$/i,/^(financial|capital markets?)$/i];
+      if(compound){
+        const i=leads.findIndex(r=>r.test(compound.groups.lead));
+        if(i>=0&&!seenDimensions.has(i)){
+          seenDimensions.add(i);list=null;
+          append("h3",section+"."+(i+1)+" "+names[i]+" Uncertainty").className="dimension-heading";
+          const original=compound[0].trim(), rest=candidate.slice(compound[0].length).trim().replace(/^[:—–-]\s*/,"");
+          const tail=original.toLowerCase()=== (names[i]+" uncertainty").toLowerCase()?rest:original+(rest?" — "+rest:"");
+          if(tail)append("p",tail);
+          continue;
+        }
+      }
       let matched=false;
       for(let i=0;i<aliases.length;i++){
         const dim=candidate.match(aliases[i]);if(!dim||seenDimensions.has(i))continue;
