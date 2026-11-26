@@ -14,6 +14,7 @@ from html import escape
 from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 from .trade_pdf import build_cash_activity_report, build_report
+from .account_policy import import_status, status_label
 from .trade_pdf import build_tax_lot_report, build_open_tax_lot_report, weekly_income_rows, weekly_income_totals
 from starlette.concurrency import run_in_threadpool
 
@@ -467,6 +468,19 @@ def tax_lot_summary(lots):
 
 
 def register(app, database_path):
+    def report_status(db, account):
+        if not account:
+            return import_status(None)
+        columns = {col[1] for col in db.execute("PRAGMA table_info(trading_transactions)")}
+        if not columns:
+            return import_status(None)
+        broker_col = "broker" if "broker" in columns else "\'Fidelity\'"
+        statuses = {status_label(import_status(row[0])) for row in db.execute(f"SELECT DISTINCT {broker_col} FROM trading_transactions WHERE account=?", (account,))}
+        if len(statuses) == 1:
+            tax, funding = next(iter(statuses)).split(" / ")
+            return {"tax_status": tax, "funding_status": funding}
+        return import_status(None)
+
     @app.get("/api/trade-report")
     def trade_report(account: str = "", year: int = 0):
         with closing(sqlite3.connect(database_path())) as db:
@@ -475,7 +489,7 @@ def register(app, database_path):
             periods = db.execute("SELECT DISTINCT account, substr(trade_date,1,4) FROM trading_transactions ORDER BY account, 2 DESC").fetchall()
             summaries = {}
             groups = trade_rows(db, account, year, summaries) if account and 0 <= year <= 9998 else {}
-            return {"periods": periods, "groups": groups, "summaries": summaries}
+            return {"periods": periods, "groups": groups, "summaries": summaries, "account_status": report_status(db, account)}
 
     @app.get("/api/trade-report/pdf")
     def trade_pdf(account: str, year: int, download: bool = False, title: str = ""):
@@ -484,7 +498,7 @@ def register(app, database_path):
             raise HTTPException(404, "No trades for this account and year.")
         disposition = "attachment" if download else "inline"
         filename = f"RHTC_Trade_Report_{year or 'All'}_{account}.pdf"
-        return Response(build_report(account, year or "All years", report["groups"], report["summaries"], title=title), media_type="application/pdf",
+        return Response(build_report(account, year or "All years", report["groups"], report["summaries"], title=title, account_classification=status_label(report["account_status"])), media_type="application/pdf",
                         headers={"Content-Disposition": f'{disposition}; filename="{filename}"',
                                  "Cache-Control": "private, no-store"})
 
@@ -508,8 +522,8 @@ def register(app, database_path):
                 if not 1 <= year <= 9998:
                     raise HTTPException(422, "Select a tax year for the weekly report.")
                 weeks = weekly_income_rows(lots, year, include_details=weekly_detail)
-                return {"periods": periods, "weeks": weeks, "totals": weekly_income_totals(weeks)}
-            return {"periods": periods, "lots": lots, "tickers": tickers, "summary": tax_lot_summary(lots)}
+                return {"periods": periods, "weeks": weeks, "totals": weekly_income_totals(weeks), "account_status": report_status(db, account)}
+            return {"periods": periods, "lots": lots, "tickers": tickers, "summary": tax_lot_summary(lots), "account_status": report_status(db, account)}
 
     @app.get("/api/tax-lot-report/pdf")
     def tax_lot_pdf(account: str, year: int, ticker: str = "", weekly_income: bool = False, download: bool = False, weekly_detail: bool = False, title: str = ""):
@@ -525,7 +539,7 @@ def register(app, database_path):
         else:
             ticker_suffix = f"_{ticker}" if ticker else ""
             filename = f"RHTC_Form_8949_{year or 'All'}{ticker_suffix}_{account}.pdf"
-        return Response(build_tax_lot_report(account, year or "All years", report["lots"], ticker=ticker, weekly_income=weekly_income, weekly_detail=weekly_detail, title=title), media_type="application/pdf",
+        return Response(build_tax_lot_report(account, year or "All years", report["lots"], ticker=ticker, weekly_income=weekly_income, weekly_detail=weekly_detail, title=title, account_classification=status_label(report["account_status"])), media_type="application/pdf",
                         headers={"Content-Disposition": f'{disposition}; filename="{filename}"',
                                  "Cache-Control": "private, no-store"})
 
@@ -538,7 +552,7 @@ def register(app, database_path):
             periods = [(account_id, str(period_year)) for account_id, first, last in bounds
                        for period_year in range(int(last), int(first) - 1, -1)]
             lots = tax_lot_rows(db, account, year, open_only=True) if account and 0 <= year <= 9998 else []
-            return {"periods": periods, "lots": [{k: v for k, v in lot.items() if k != "_sources"} for lot in lots]}
+            return {"periods": periods, "lots": [{k: v for k, v in lot.items() if k != "_sources"} for lot in lots], "account_status": report_status(db, account)}
 
     @app.post("/api/open-tax-lot-report/delete")
     def delete_open_tax_lots(payload: dict):
@@ -562,7 +576,7 @@ def register(app, database_path):
             raise HTTPException(404, "No open tax lots for this account as of the selected year end.")
         disposition = "attachment" if download else "inline"
         filename = f"RHTC_Open_Tax_Lots_{year or 'Latest'}_{account}.pdf"
-        return Response(build_open_tax_lot_report(account, year or "Latest available", report["lots"], title=title), media_type="application/pdf",
+        return Response(build_open_tax_lot_report(account, year or "Latest available", report["lots"], title=title, account_classification=status_label(report["account_status"])), media_type="application/pdf",
                         headers={"Content-Disposition": f'{disposition}; filename="{filename}"',
                                  "Cache-Control": "private, no-store"})
 
@@ -586,7 +600,7 @@ def register(app, database_path):
                     (broker, account),
                 )
                 groups = cash_activity_groups(rows)
-            return {"accounts": accounts, "groups": groups}
+            return {"accounts": accounts, "groups": groups, "account_status": import_status(broker)}
 
     @app.get("/api/cash-activity-report/pdf")
     def cash_activity_pdf(broker: str, account: str, download: bool = False, title: str = ""):
@@ -594,7 +608,7 @@ def register(app, database_path):
         if not groups:
             raise HTTPException(404, "No cash activity for this account.")
         disposition = "attachment" if download else "inline"
-        return Response(build_cash_activity_report(broker, account, groups, title=title), media_type="application/pdf",
+        return Response(build_cash_activity_report(broker, account, groups, title=title, account_classification=status_label(import_status(broker))), media_type="application/pdf",
                         headers={"Content-Disposition": f'{disposition}; filename="RHTC_Cash_Activity_Report.pdf"',
                                  "Cache-Control": "private, no-store"})
 

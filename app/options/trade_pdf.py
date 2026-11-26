@@ -21,7 +21,7 @@ def draw_report_title(canvas, x, y, width, title):
     canvas.drawString(x, y, title)
 
 
-def build_report(account, year, groups, summaries, title=""):
+def build_report(account, year, groups, summaries, title="", account_classification="Unknown / Unknown"):
     title = title.strip()[:300] or "Transaction report"
     output = BytesIO()
     width, height = landscape(letter)
@@ -39,7 +39,7 @@ def build_report(account, year, groups, summaries, title=""):
         canvas.setFillColor(ink)
         draw_report_title(canvas, 82, height-37, width-120, title)
         canvas.setFont("Helvetica", 10)
-        canvas.drawString(82, height-52, f"Account {account}   |   {year}")
+        canvas.drawString(82, height-52, f"Account {account}   |   {year}   |   {account_classification}")
         canvas.setStrokeColor(gold)
         canvas.line(38, height-64, width-38, height-64)
         canvas.setFont("Helvetica", 8)
@@ -127,13 +127,17 @@ def weekly_income_totals(weeks):
     return totals
 
 
-def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False, weekly_detail=False, title=""):
+def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False, weekly_detail=False, title="", account_classification="Unknown / Unknown"):
     """Create a printable Form 8949 style tax lot schedule."""
     if weekly_income:
         default_title = "Weekly Income Detail Report" if weekly_detail else "Weekly Income Summary Report"
     else:
         default_title = "Ticker tax lot report · Form 8949" if ticker else "Tax lot report · Form 8949"
     title = title.strip()[:300] or default_title
+    if not weekly_income and account_classification == "Non-taxable / Cash":
+        title = title.replace("Form 8949", "Internal performance only")
+        if "Internal performance only" not in title:
+            title += " - Internal performance only"
     output = BytesIO()
     width, height = landscape(letter)
     doc = SimpleDocTemplate(output, pagesize=(width, height), leftMargin=28,
@@ -151,7 +155,7 @@ def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False, we
         draw_report_title(canvas, 78, height-37, width-112, title)
         canvas.setFont("Helvetica", 10)
         scope = f"Account {account}   |   Tax year {year}" + (f"   |   Ticker {ticker}" if ticker else "")
-        canvas.drawString(78, height-52, scope)
+        canvas.drawString(78, height-52, scope + "   |   " + account_classification)
         canvas.setStrokeColor(gold)
         canvas.line(34, height-64, width-34, height-64)
         canvas.setFont("Helvetica", 8)
@@ -281,7 +285,7 @@ def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False, we
     return output.getvalue()
 
 
-def build_open_tax_lot_report(account, year, lots, title=""):
+def build_open_tax_lot_report(account, year, lots, title="", account_classification="Unknown / Unknown"):
     """Create a printable inventory of tax lots still open at year end."""
     title = title.strip()[:300] or "Open tax lot report"
     output = BytesIO()
@@ -300,7 +304,7 @@ def build_open_tax_lot_report(account, year, lots, title=""):
         canvas.setFillColor(ink)
         draw_report_title(canvas, 82, height-37, width-120, title)
         canvas.setFont("Helvetica", 10)
-        canvas.drawString(82, height-52, f"Account {account}   |   As of {year}{' year-end' if str(year).isdigit() else ''}")
+        canvas.drawString(82, height-52, f"Account {account}   |   As of {year}{' year-end' if str(year).isdigit() else ''}   |   {account_classification}")
         canvas.setStrokeColor(gold)
         canvas.line(38, height-64, width-38, height-64)
         canvas.setFont("Helvetica", 8)
@@ -388,7 +392,7 @@ def build_open_tax_lot_report(account, year, lots, title=""):
     return output.getvalue()
 
 
-def build_cash_activity_report(broker, account, groups, title=""):
+def build_cash_activity_report(broker, account, groups, title="", account_classification="Unknown / Unknown"):
     output = BytesIO()
     width, height = landscape(letter)
     title = title.strip()[:300] or "Cash Activity Report"
@@ -408,7 +412,7 @@ def build_cash_activity_report(broker, account, groups, title=""):
         canvas.setFillColor(ink)
         draw_report_title(canvas, 82, height-37, width-120, title)
         canvas.setFont("Helvetica", 10)
-        canvas.drawString(82, height-52, f"{broker}   |   Account {account}   |   All dates")
+        canvas.drawString(82, height-52, f"{broker}   |   Account {account}   |   All dates   |   {account_classification}")
         canvas.setStrokeColor(gold)
         canvas.line(38, height-64, width-38, height-64)
         canvas.setFont("Helvetica", 8)

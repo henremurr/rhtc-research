@@ -174,6 +174,8 @@ GROUPS = {
 }
 WATCHLIST = [{"symbol": s, "peak": peak} for peak, symbols in GROUPS.items() for s in symbols.split()]
 VALID_PEAKS = {"AI/I", "EFM/I", "DS/I", "Other"}
+from app.options.account_policy import account_status, ANALYSIS_POLICY
+
 VALID_ACCOUNTS = {"", "Fidelity Brokerage", "Fidelity IRA", "Schwab PRCA", "Vanguard 401k", "Vanguard IRA-M"}
 SYMBOL_PATTERN = re.compile(r"^[A-Z][A-Z0-9.-]{0,9}$")
 
@@ -328,6 +330,7 @@ def read_watchlist() -> list[dict[str, Any]]:
         rows = [dict(row) for row in connection.execute("SELECT symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account, lt_call, lt_expy, lt_qty, lt_premium, additional_calls_json, pg, buffett_pass, buffett_score, buffett_updated_at, buffett_criteria_json, (SELECT COUNT(*) FROM stock_analysis_reports r WHERE r.symbol = symbols.symbol) AS stock_report_count, (SELECT COUNT(*) FROM buffett_screen_reports b WHERE b.symbol = symbols.symbol) AS buffett_report_count, (SELECT risk_score FROM ceo_risk_reports c WHERE c.symbol = symbols.symbol ORDER BY created_at DESC, report_id DESC LIMIT 1) AS ceo_risk_score, (SELECT risk_rating FROM ceo_risk_reports c WHERE c.symbol = symbols.symbol ORDER BY created_at DESC, report_id DESC LIMIT 1) AS ceo_risk_rating, (SELECT created_at FROM ceo_risk_reports c WHERE c.symbol = symbols.symbol ORDER BY created_at DESC, report_id DESC LIMIT 1) AS ceo_risk_updated_at, (SELECT COUNT(*) FROM ceo_risk_reports c WHERE c.symbol = symbols.symbol) AS ceo_risk_report_count FROM symbols ORDER BY position")]
         for row in rows:
             row["additional_calls"] = json.loads(row.pop("additional_calls_json"))
+            row.update(account_status(row.get("account")))
         return rows
 
 
@@ -3545,7 +3548,7 @@ async def summarize(data: SummaryInput):
                 "do not infer the user's holdings or suitability. Treat nulls and errors as missing data. "
                 "Mention that bid-yield is bid divided by share price and is not an expected return. "
                 "If data source is demo, prominently state that all values are illustrative, not live."),
-            input=f"Source: {data.source}. Options rows (JSON): {payload}",
+            input=f"Source: {data.source}. Options rows (JSON): {payload}. Account policy: {ANALYSIS_POLICY}",
             max_output_tokens=240,
         )
         text = response.output_text.strip() or basic_summary(rows, data.source)
@@ -4674,7 +4677,7 @@ async def analyze_stock(data: StockAnalysisInput):
             model=os.getenv("OPENAI_ANALYSIS_MODEL", os.getenv("OPENAI_MODEL", "gpt-5-mini")),
             tools=[{"type": "web_search"}],
             reasoning={"effort": "low"},
-            instructions=instructions,
+            instructions=instructions + "\n" + ANALYSIS_POLICY,
             input=prompt,
             max_output_tokens=7000,
             max_tool_calls=6,
@@ -4833,6 +4836,7 @@ async def analyze_symbol(data: SymbolAnalysisInput):
     )
     prompt = (
         f"Analyze ticker {symbol} (RHTC theme: {peak}).\n"
+        f"Recorded accounts for this ticker (not verified balances): {[{k: r.get(k) for k in (\'account\', \'tax_status\', \'funding_status\', \'quantity\')} for r in read_watchlist() if r.get(\'symbol\') == symbol and (r.get(\'quantity\') or 0) > 0]}\n"
         f"Current dashboard quote/options snapshot, if available: {screen_json}\n"
         "Search current public information, including the next earnings date, recent filings, guidance, and company news."
     )
@@ -4843,7 +4847,7 @@ async def analyze_symbol(data: SymbolAnalysisInput):
             model=os.getenv("OPENAI_ANALYSIS_MODEL", os.getenv("OPENAI_MODEL", "gpt-5-mini")),
             tools=[{"type": "web_search"}],
             reasoning={"effort": "low"},
-            instructions=instructions,
+            instructions=instructions + "\n" + ANALYSIS_POLICY,
             input=prompt,
             # Reasoning tokens count against this budget. Reserve enough room for
             # search/reasoning plus the visible brief.

@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 from collections import defaultdict
+from app.options.account_policy import account_status, ANALYSIS_POLICY
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,8 @@ maintenance excess = market value × (1 − maintenance rate) − margin debt.
 Use reliable income for repayment and reassess at months three and six.
 """
 
-FINAL_INSTRUCTIONS = """
+FINAL_INSTRUCTIONS = ANALYSIS_POLICY + "\n" + """
+
 Act as the RHTC portfolio strategy analyst. Give an updated, decision-ready
 opinion for implementing and managing the Long Game. Write only the requested
 section in plain Markdown. The application supplies its section heading.
@@ -79,6 +81,8 @@ def portfolio_facts(watchlist, prices, today):
             continue
         account = row.get("account") or "No account"
         totals = accounts[account]
+        status = account_status(account)
+        totals.update(status)
         price = prices.get(row["symbol"])
         if shares and shares > 0:
             totals["recorded_cost"] += shares * (row.get("share_price") or 0)
@@ -88,7 +92,7 @@ def portfolio_facts(watchlist, prices, today):
         totals["saved_premiums"] += sum(call["saved_premium"] or 0 for call in calls)
         dated_contracts = sum(call["contracts"] or 0 for call in calls
                               if len(call["expiry"]) == 10 and not call["expiry_passed"])
-        holdings.append({"ticker": row["symbol"], "peak": row["peak"], "account": account,
+        holdings.append({"ticker": row["symbol"], "peak": row["peak"], "account": account, **status,
                          "saved_unexpired_call_share_equivalent": dated_contracts * 100,
                          "shares": shares, "cost_per_share": row.get("share_price"), "quote": price, "saved_calls": calls})
     return {"watchlist": sorted({(row["symbol"], row["peak"]) for row in watchlist}),
