@@ -11,7 +11,7 @@ header{display:flex;gap:1rem;align-items:center} h1,h2,h3{line-height:1.2}
 h2{margin-top:2rem;border-bottom:1px solid #c6a45c;padding-bottom:.4rem}
 nav{display:flex;flex-wrap:wrap;gap:.5rem;padding:.65rem 1rem;background:#182229;position:sticky;top:0}
 nav a,nav button,nav select{background:#e2c778;color:#171717;padding:.45rem .75rem;border:0;border-radius:.35rem;text-decoration:none;font:inherit;cursor:pointer}
-nav button:disabled{opacity:.6;cursor:default} #analysis p{white-space:pre-line;margin:.65rem 0 1rem;line-height:1.65} #analysis li{margin:.55rem 0} #analysis h2{background:#f4ecd7;border-left:4px solid #c6a45c;padding:.8rem;margin:2rem 0 1rem;font-size:1.4rem} #analysis h3{color:#78591f;margin:1.5rem 0 .65rem;font-size:1.18rem} #analysis h4{margin:1rem 0 .35rem;font-size:1.05rem} #analysis hr{border:0;border-top:1px solid #c6a45c;margin:1rem 0}
+nav button:disabled{opacity:.6;cursor:default} #analysis p{white-space:pre-line;margin:.65rem 0 1rem;line-height:1.65} #analysis li{margin:.55rem 0} #analysis h2{background:#f4ecd7;border-left:4px solid #c6a45c;padding:.8rem;margin:2rem 0 1rem;font-size:1.4rem} #analysis h3{color:#78591f;margin:1.5rem 0 .65rem;font-size:1.18rem} #analysis .dimension-heading{background:#faf5e8;border-left:3px solid #c6a45c;padding:.65rem .8rem;font-size:1.25rem;margin:1.8rem 0 .8rem} #analysis h4{margin:1rem 0 .35rem;font-size:1.05rem} #analysis hr{border:0;border-top:1px solid #c6a45c;margin:1rem 0}
 #activity-window{margin:1rem 0;padding:1rem;border:1px solid #c7ced1;border-radius:.5rem;background:#f5f7f8}
 #activity-window h2{margin:0;border:0;font-size:1rem}
 #activity{max-height:12rem;overflow-y:auto;margin:.5rem 0 0;padding-inline-start:calc(var(--activity-number-width, 1ch) + 1.5rem);overscroll-behavior:contain}
@@ -69,7 +69,7 @@ history.onchange=async()=>{
 };
 function render(text){
   const fragment=document.createDocumentFragment();
-  let list=null,section=0,subsection=0;
+  let list=null,section=0,subsection=0,inDimensions=false; const seenDimensions=new Set();
   function append(tag,value){
     const el=document.createElement(tag);
     value.split(/(\*\*.+?\*\*)/g).forEach(part=>{
@@ -85,6 +85,12 @@ function render(text){
     const heading=line.match(/^(#{1,6})\s+(.+)/);
     const bold=line.match(/^\*\*([^*]{1,120})\*\*:?$/);
     const bullet=line.match(/^([-*]|\d+\.)\s+(.+)/);
+    if(heading&&heading[1].length<=2){inDimensions=/seven dimensions of structural uncertainty/i.test(heading[2]);seenDimensions.clear();}
+    if(inDimensions){
+      const candidate=line.replace(/^(?:#{1,6}\s+|[-*]\s+|\d+(?:\.\d+)*[.)]?\s+)/, "").replace(/\*\*/g,"");
+      const dim=candidate.match(/^(Technological|Economic|Monetary|Geopolitical|Energy|Societal|Financial)\s+uncertainty(?:\s*(?:[:—–-]|$))/i);
+      if(dim&&!seenDimensions.has(dim[1].toLowerCase())){list=null;const name=dim[1].toLowerCase();seenDimensions.add(name);const n=["technological","economic","monetary","geopolitical","energy","societal","financial"].indexOf(name)+1;append("h3",section+"."+n+" "+name[0].toUpperCase()+name.slice(1)+" Uncertainty").className="dimension-heading";const tail=candidate.slice(dim[0].length).trim();if(tail)append("p",tail);continue;}
+    }
     if(heading||bold){
       list=null;
       if(heading&&heading[1].length<=2){section++;subsection=0;append('h2',section+'. '+heading[2]);}

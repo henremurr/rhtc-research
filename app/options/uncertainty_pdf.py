@@ -42,11 +42,26 @@ def normalize_pdf_text(value):
 
 def narrative_blocks(analysis):
     """Recognize explicit headings and short prose labels without dropping content."""
+    in_dimensions = False
+    seen_dimensions = set()
     for raw in analysis.splitlines():
         line = raw.strip()
         if not line:
             continue
         match = re.match(r"^(#{1,6})\s+(.+)", line)
+        if match and len(match[1]) <= 2:
+            in_dimensions = bool(re.search(r"seven dimensions of structural uncertainty", match[2], re.I))
+            seen_dimensions.clear()
+        if in_dimensions:
+            candidate = re.sub(r"^(?:#{1,6}\s+|[-*]\s+|\d+(?:\.\d+)*[.)]?\s+)", "", line).replace("**", "")
+            dimension = re.match(r"^(Technological|Economic|Monetary|Geopolitical|Energy|Societal|Financial)\s+uncertainty(?:\s*(?:[:—–-]|$))", candidate, re.I)
+            if dimension and dimension[1].lower() not in seen_dimensions:
+                seen_dimensions.add(dimension[1].lower())
+                yield "dimension", dimension[0].rstrip(" :—–-")
+                tail = candidate[dimension.end():].strip()
+                if tail:
+                    yield "body", tail
+                continue
         if match:
             yield ("section" if len(match[1]) <= 2 else "subsection" if len(match[1]) == 3 else "minor", match[2])
             continue
@@ -73,8 +88,9 @@ class NarrativeDocument(SimpleDocTemplate):
             key = flowable.outline_key
             title = flowable.getPlainText()
             self.canv.bookmarkPage(key)
-            self.canv.addOutlineEntry(title, key, level=0, closed=False)
-            self.notify("TOCEntry", (0, title, self.page, key))
+            level = getattr(flowable, "outline_level", 0)
+            self.canv.addOutlineEntry(title, key, level=level, closed=False)
+            self.notify("TOCEntry", (level, title, self.page, key))
 
 
 def build_uncertainty_pdf(analysis, as_of):
@@ -93,6 +109,7 @@ def build_uncertainty_pdf(analysis, as_of):
                              fontSize=19, leading=24, spaceBefore=17, spaceAfter=10, keepWithNext=True,
                              backColor=colors.HexColor('#F4ECD7'), borderPadding=9)
     subheading = ParagraphStyle("Subsection", parent=body, fontName="Helvetica-Bold", fontSize=14, leading=19, spaceBefore=15, spaceAfter=7, keepWithNext=True, textColor=colors.HexColor("#78591F"))
+    dimension_style = ParagraphStyle("Dimension", parent=subheading, fontSize=15, leading=20, backColor=colors.HexColor("#FAF5E8"), borderPadding=6, spaceBefore=18, spaceAfter=10)
     minor = ParagraphStyle("Minor", parent=body, fontName="Helvetica-Bold", fontSize=11.5, leading=16, spaceBefore=8, spaceAfter=4, keepWithNext=True)
     bullet = ParagraphStyle("List", parent=body, leftIndent=16, firstLineIndent=-12)
     logo = Path(__file__).parent / "static" / "apple-touch-icon.png"
@@ -157,7 +174,7 @@ def build_uncertainty_pdf(analysis, as_of):
         toc = TableOfContents()
         toc.levelStyles = [ParagraphStyle("ContentsEntry", parent=body, fontSize=10.5,
                                           leading=15, spaceAfter=4, leftIndent=12,
-                                          firstLineIndent=-12)]
+                                          firstLineIndent=-12), ParagraphStyle("ContentsDimension", parent=body, fontSize=10, leading=14, leftIndent=28, spaceAfter=3)]
         story.extend([toc, PageBreak()])
     section = 0
     subsection = 0
@@ -168,9 +185,16 @@ def build_uncertainty_pdf(analysis, as_of):
             para = Paragraph(markup(f"{section}. {line}"), heading)
             para.outline_key = f"section-{section}"
             story.append(para)
+        elif kind == "dimension":
+            names = ("technological", "economic", "monetary", "geopolitical", "energy", "societal", "financial")
+            number = names.index(line.split()[0].lower()) + 1
+            para = Paragraph(markup(f"{section}.{number} {line.title()}"), dimension_style)
+            para.outline_key = f"dimension-{section}-{number}"
+            para.outline_level = 1
+            story.append(para)
         elif kind == "subsection":
             subsection += 1
-            prefix = f"{section}.{subsection} " if section else ""
+            prefix = f"{section}.{subsection} " if section and not (section == 2 and any(k == "dimension" for k, _ in blocks)) else ""
             story.append(Paragraph(markup(prefix + line), subheading))
         elif kind == "minor":
             story.append(Paragraph(markup(line), minor))
