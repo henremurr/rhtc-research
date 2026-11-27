@@ -35,3 +35,21 @@ class PredictionMarketTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     await discover(client)
         asyncio.run(run())
+
+    def test_portfolio_mapping_is_account_specific(self):
+        from app.options.prediction_markets import map_portfolio, validate_research
+        row = normalize({"id":"1","question":"New reactor approval"})
+        row["research"] = validate_research({"tickers":["OKLO","NEW"],"topics":["EFM/I"],"relevance":9})
+        watchlist = [{"symbol":"OKLO","account":"Cash","quantity":100,"peak":"EFM/I"},
+                     {"symbol":"OKLO","account":"Margin","quantity":0,"peak":"EFM/I"},
+                     {"symbol":"SMR","account":"Cash","quantity":100,"peak":"EFM/I"}]
+        mapped = map_portfolio([row],watchlist)[0]
+        self.assertEqual(mapped["watchlist_matches"],["OKLO"])
+        self.assertEqual(mapped["outside_candidates"],["NEW"])
+        self.assertEqual([h["account"] for h in mapped["holdings"]],["Cash"])
+        self.assertIn("SMR",mapped["thematic_exposure"])
+
+    def test_relevance_is_bounded(self):
+        from app.options.prediction_markets import validate_research
+        self.assertEqual(validate_research({"relevance":20})["relevance"],10)
+        self.assertEqual(validate_research({"relevance":-4})["relevance"],0)
