@@ -294,25 +294,43 @@ async def research_scheduler():
             log.exception("Prediction research cycle failed")
         await asyncio.sleep(900)
 
+def snapshot_info(db,include_partial=False):
+    scan=db.execute("SELECT stamp,count FROM scans ORDER BY stamp DESC LIMIT 1").fetchone()
+    if include_partial:
+        cp=db.execute("SELECT stamp FROM scan_checkpoint WHERE id=1").fetchone()
+        if cp:
+            count=db.execute("SELECT COUNT(*) FROM snapshots WHERE stamp=?",(cp["stamp"],)).fetchone()[0]
+            if count:
+                scan={"stamp":cp["stamp"],"count":count,"partial":True}
+    return dict(scan) if scan else None
+
+def hydrate_many(db, raw):
+    keys=list({key for p in raw if (key:=json.loads(p).get("_metadata"))})
+    metadata={}
+    for i in range(0,len(keys),500):
+        chunk=keys[i:i+500]
+        metadata.update((r["key"],r["payload"]) for r in db.execute("SELECT key,payload FROM market_metadata WHERE key IN ("+",".join("?" for _ in chunk)+")",chunk))
+    return [hydrate_snapshot(p,metadata) for p in raw]
+
 def latest(include_partial=False):
     with closing(connect()) as db:
-        scan = db.execute("SELECT stamp,count FROM scans ORDER BY stamp DESC LIMIT 1").fetchone()
-        if include_partial:
-            cp=db.execute("SELECT stamp FROM scan_checkpoint WHERE id=1").fetchone()
-            if cp:
-                count=db.execute("SELECT COUNT(*) FROM snapshots WHERE stamp=?",(cp["stamp"],)).fetchone()[0]
-                if count:
-                    scan={"stamp":cp["stamp"],"count":count,"partial":True}
+        scan=snapshot_info(db,include_partial)
         if not scan:
-            return None, []
-        # Load referenced metadata in bounded chunks; no per-row SQL lookups.
-        raw=[r[0] for r in db.execute("SELECT payload FROM snapshots WHERE stamp=?", (scan["stamp"],))]
-        keys=list({key for p in raw if (key:=json.loads(p).get("_metadata"))})
-        metadata={}
-        for i in range(0,len(keys),500):
-            chunk=keys[i:i+500]
-            metadata.update((r["key"],r["payload"]) for r in db.execute("SELECT key,payload FROM market_metadata WHERE key IN ("+",".join("?" for _ in chunk)+")",chunk))
-        return dict(scan),[hydrate_snapshot(p,metadata) for p in raw]
+            return None,[]
+        raw=[r[0] for r in db.execute("SELECT payload FROM snapshots WHERE stamp=?",(scan["stamp"],))]
+        return scan,hydrate_many(db,raw)
+
+def latest_reviewed():
+    """Use the research-ID index to select only markets with a cached review.
+    Fingerprints are still validated against the selected snapshot after hydration.
+    """
+    with closing(connect()) as db:
+        scan=snapshot_info(db)
+        if not scan:
+            return None,[]
+        raw=[r[0] for r in db.execute("SELECT s.payload FROM (SELECT DISTINCT id FROM market_research) AS r JOIN snapshots AS s ON s.stamp=? AND s.id=r.id",(scan["stamp"],))]
+        rows=hydrate_many(db,raw)
+    return scan,[r for r in attach_research(rows) if r["research"] is not None]
 
 # Classification is cached by question and rules, not by fluctuating prices.
 def fingerprint(row):
@@ -557,7 +575,16 @@ def add_history(scan, rows):
             # Do not pass off a distant observation as the requested lookback.
             old = {}
             if prior and target-datetime.fromisoformat(prior)<=timedelta(hours=12):
-                old = {r["id"]:json.loads(r["payload"])["probabilities"] for r in db.execute("SELECT id,payload FROM snapshots WHERE stamp=?",(prior,))}
+                ids=list(dict.fromkeys(r["id"] for r in rows))
+                # Small research/report requests use indexed point reads.
+                # A large discovery queue still benefits from a sequential scan.
+                if len(ids)<=2000:
+                    for i in range(0,len(ids),500):
+                        chunk=ids[i:i+500]
+                        sql="SELECT id,json_extract(payload,'$.probabilities') AS probabilities FROM snapshots WHERE stamp=? AND id IN ("+",".join("?" for _ in chunk)+")"
+                        old.update((r["id"],json.loads(r["probabilities"] or "{}")) for r in db.execute(sql,(prior,*chunk)))
+                else:
+                    old={r["id"]:json.loads(r["probabilities"] or "{}") for r in db.execute("SELECT id,json_extract(payload,'$.probabilities') AS probabilities FROM snapshots WHERE stamp=?",(prior,))}
             for row in rows:
                 row.setdefault("changes_pp",{})[str(days)] = {k:round((v-old[row["id"]][k])*100,2) for k,v in row["probabilities"].items() if row["id"] in old and k in old[row["id"]]}
     return rows
@@ -597,17 +624,16 @@ def priority(row):
 def research_context():
     """Compact saved prediction evidence for existing report generators."""
     try:
-        scan, rows = latest()
+        scan, rows = latest_reviewed()
         if not scan:
             return {"status":"No completed prediction scan"}
-        attach_research(rows)
-        reviewed=sum(r["research"] is not None for r in rows)
+        reviewed=len(rows)
         from app.options.api import read_watchlist
         eligible=[r for r in rows if (r["research"] or {}).get("relevance",0)>=5]
         ranked=sorted(map_portfolio(add_history(scan,eligible),read_watchlist()),key=priority,reverse=True)[:20]
         keys = ("id","title","topics","probabilities","changes_pp","quality","end_date","resolution_source","research","watchlist_matches","outside_candidates","holdings")
         return {"as_of":scan["stamp"],"stale":(datetime.now(timezone.utc)-datetime.fromisoformat(scan["stamp"])).total_seconds()>43200,
-                "scanned":len(rows),"semantically_reviewed":reviewed,
+                "scanned":scan["count"],"semantically_reviewed":reviewed,
                 "selected":[{k:r[k] for k in keys} for r in ranked],
                 "warning":"Unverified market expectations and candidate mappings, not facts or standalone trade signals. Corroborate with independent research; selected subset only."}
     except Exception:
