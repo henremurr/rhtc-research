@@ -210,6 +210,12 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
  #preview-pages .tax-lot-columns tbody .tax-date-divider{border-bottom:3px solid #56636c}
  #preview-pages .tax-lot-columns .tax-date-divider > td{border-bottom:0}
 }
+#preview-pages .income-period-toggle{gap:.4rem}
+#preview-pages .income-period-toggle::before{content:"▸"}
+#preview-pages .income-period-toggle[aria-expanded="true"]::before{content:"▾"}
+#preview-pages tr.income-period-child[hidden]{display:none}
+#preview-pages .income-period-child td:first-child{padding-inline-start:1.5rem}
+#preview-pages .income-period-grandchild td:first-child{padding-inline-start:2.5rem}
 #preview-pages .weekly-ticker-subtotal td{font-weight:700;border-top:1px solid #c6a45c;background:#f0f2f3;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 #preview-pages .cash-activity-columns{width:100%;min-width:640px;text-align:left}
 #preview-pages .cash-activity-columns :is(thead,tbody,tfoot) tr > :last-child{text-align:right}
@@ -580,16 +586,42 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
    header.append(cell);
   });
   const body=table.createTBody();
-  for(const period of periods){
+  function addPeriod(period,level=0){
    const row=body.insertRow();
+   const periodType=level===0?periodHeading:period.week?'Week':'Month';
+   const periodName=period.label??(level?'Week '+period.week:period.week);
+   if(level)row.classList.add('income-period-child');
+   if(level===2)row.classList.add('income-period-grandchild');
    const amounts=['proceeds','basis','gain'].map(key=>period[key]==null?'—':dollars.format(Number(period[key])));
-   [period.label??period.week,period.dates,period.count,...amounts].forEach((value,index)=>{
+   [periodName,period.dates,period.count,...amounts].forEach((value,index)=>{
     const cell=row.insertCell();
-    cell.dataset.label=labels[index];
+    cell.dataset.label=index===0?periodType:labels[index];
     cell.textContent=value;
     if(index>=2)cell.style.textAlign='right';
    });
+
+   const children=(period.children||[]).map(child=>addPeriod(child,level+1));
+   let expanded=false;
+   if(children.length){
+    const toggle=document.createElement('button');
+    toggle.type='button';
+    toggle.className='trade-action income-period-toggle';
+    toggle.textContent=periodName;
+    toggle.setAttribute('aria-expanded','false');
+    toggle.onclick=()=>{
+     expanded=!expanded;
+     toggle.setAttribute('aria-expanded',String(expanded));
+     children.forEach(setVisible=>setVisible(expanded));
+    };
+    row.cells[0].replaceChildren(toggle);
+   }
+   row.hidden=level!==0;
+   return visible=>{
+    row.hidden=!visible;
+    children.forEach(setVisible=>setVisible(visible&&expanded));
+   };
   }
+  periods.forEach(period=>addPeriod(period));
   const footer=table.createTFoot().insertRow();
   const totalLabel=document.createElement('th');
   totalLabel.scope='row';
