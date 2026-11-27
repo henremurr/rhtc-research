@@ -14,6 +14,8 @@ from app.models import BatchRequest
 from app.options.api import app as options_app
 from app.legal import router as legal_router
 from app.options.news import start_daily_news_scheduler
+from app.options.prediction_markets import router as prediction_router, scheduler as prediction_scheduler
+
 from app.perplexity_client import analyze_one
 from app.reporting import create_pdf
 from app.three_peaks import (
@@ -29,6 +31,7 @@ app = FastAPI(
     version="1.0.0",
     description="Three Peaks batch research, classification, and PDF reporting.",
 )
+options_app.include_router(prediction_router)
 app.mount("/options", options_app)
 app.include_router(legal_router)
 
@@ -36,6 +39,15 @@ app.include_router(legal_router)
 @app.on_event("startup")
 async def start_news_scheduler() -> None:
     app.state.news_scheduler = start_daily_news_scheduler()
+    app.state.prediction_scheduler = asyncio.create_task(prediction_scheduler())
+
+
+@app.on_event("shutdown")
+async def stop_prediction_scheduler():
+    task = getattr(app.state, "prediction_scheduler", None)
+    if task:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
 HOLDINGS_PATH = Path("config/holdings.json")
 REPORT_DIR = Path("reports")
