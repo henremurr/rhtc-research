@@ -328,7 +328,13 @@ def connect_watchlist_db() -> sqlite3.Connection:
 def read_watchlist() -> list[dict[str, Any]]:
     with closing(connect_watchlist_db()) as connection:
         rows = [dict(row) for row in connection.execute("SELECT symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account, lt_call, lt_expy, lt_qty, lt_premium, additional_calls_json, pg, buffett_pass, buffett_score, buffett_updated_at, buffett_criteria_json, (SELECT COUNT(*) FROM stock_analysis_reports r WHERE r.symbol = symbols.symbol) AS stock_report_count, (SELECT COUNT(*) FROM buffett_screen_reports b WHERE b.symbol = symbols.symbol) AS buffett_report_count, (SELECT risk_score FROM ceo_risk_reports c WHERE c.symbol = symbols.symbol ORDER BY created_at DESC, report_id DESC LIMIT 1) AS ceo_risk_score, (SELECT risk_rating FROM ceo_risk_reports c WHERE c.symbol = symbols.symbol ORDER BY created_at DESC, report_id DESC LIMIT 1) AS ceo_risk_rating, (SELECT created_at FROM ceo_risk_reports c WHERE c.symbol = symbols.symbol ORDER BY created_at DESC, report_id DESC LIMIT 1) AS ceo_risk_updated_at, (SELECT COUNT(*) FROM ceo_risk_reports c WHERE c.symbol = symbols.symbol) AS ceo_risk_report_count FROM symbols ORDER BY position")]
+        from app.options.forward_intelligence import latest_fis
+        try:
+            assessments=latest_fis()
+        except Exception:
+            assessments={}
         for row in rows:
+            row["forward_intelligence"]=assessments.get(row["symbol"])
             row["additional_calls"] = json.loads(row.pop("additional_calls_json"))
             row.update(account_status(row.get("account")))
         return rows
@@ -3228,6 +3234,7 @@ async def opportunities(
         row["quantity"] = holding.get("quantity")
         row["call_score"] = holding.get("call_score")
         row["stock_score"] = holding.get("stock_score")
+        row["forward_intelligence"] = holding.get("forward_intelligence")
         row["stock_rating_label"] = holding.get("stock_rating_label")
         row["stock_report_count"] = int(holding.get("stock_report_count") or 0)
         row["coverage_status"] = "Needs review" if row.get("open_interest", 0) < 25 else "Liquid enough to review"
@@ -4667,7 +4674,7 @@ async def analyze_stock(data: StockAnalysisInput):
     if not key:
         raise HTTPException(503, "Stock analysis is unavailable. Configure OPENAI_API_KEY in the server settings.")
 
-    from app.options.forward_intelligence import ticker_context, POLICY
+    from app.options.forward_intelligence import ticker_context, POLICY, extract_fis_candidate, assess_fis_candidate, persist_fis
     prediction = await asyncio.to_thread(ticker_context,symbol,"stock")
     quote_fields = (
         "symbol", "description", "source", "quote_time", "price", "change", "change_pct", "bid", "ask",
@@ -4702,6 +4709,12 @@ async def analyze_stock(data: StockAnalysisInput):
         "the prose; citations will be shown separately. Do not give a personalized trade instruction."
     )
     instructions += "\n" + POLICY + " Investigate company-specific and thematic forward catalysts, earnings implications and emerging risks. In Detailed analysis include a short Forward intelligence paragraph with verification status when material. Preserve the existing rating scale; only independently verified facts may influence it."
+    instructions += ("\\nAfter the prose, append exactly one line FIS_CANDIDATE: followed by a JSON object or null. "
+        "Use null unless a direct ticker market has independently corroborated material impact NOT already reflected in the rating. "
+        "Object keys: market_id, source_url (exact independent web citation), direction (positive or negative), rationale, "
+        "corroborated (boolean), already_reflected (boolean), economic_impact and corroboration (numbers 0 to 1, null if unknown). "
+        "Economic impact: 0 immaterial, 0.5 material to a business segment, 1 potentially thesis-changing. "
+        "Corroboration: 0 unsupported, 0.5 reliable indirect evidence, 1 direct primary evidence. Never invent evidence.")
     prompt = (
         f"Analyze {symbol} for the RHTC Three Peaks research framework.\n"
         f"Quote and company metrics supplied by the dashboard: {quote_json}\n"
@@ -4742,6 +4755,7 @@ async def analyze_stock(data: StockAnalysisInput):
     if not analysis:
         raise HTTPException(502, "The stock analysis returned no readable text. Please try again.")
 
+    analysis, fis_raw = extract_fis_candidate(analysis)
     rating_match = re.search(
         r"(?im)^\s*\*{0,2}Rating:\s*([1-5])\s*[—–-]\s*(Avoid|Sell|Watch|Grow|Bargain)\b",
         analysis,
@@ -4754,7 +4768,14 @@ async def analyze_stock(data: StockAnalysisInput):
     saved_report = save_stock_analysis_report(
         symbol, rating, rating_label, summary, details, citations, quote, analysis,
     )
+    assessment = None
+    try:
+        assessment = assess_fis_candidate(symbol,fis_raw,prediction,citations)
+        persist_fis(symbol,assessment,saved_report["report_id"])
+    except Exception:
+        __import__("logging").getLogger(__name__).exception("FIS persistence failed for %s",symbol)
     return {
+        "forward_intelligence": assessment,
         "symbol": symbol, "rating": rating, "rating_label": rating_label,
         "summary": summary, "details": details, "citations": citations,
         "mode": "openai", **saved_report,
