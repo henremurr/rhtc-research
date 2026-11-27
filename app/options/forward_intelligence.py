@@ -102,8 +102,7 @@ def active_adjustments():
         for row in rows:
             item=json.loads(row["payload"])
             if now-datetime.fromisoformat(item["as_of"]) <= timedelta(hours=12) and now-datetime.fromisoformat(item["reviewed_at"]) <= timedelta(hours=12):
-                item["report_id"]=row["report_id"]
-        result[row["symbol"]]=item
+                result[row["symbol"]]=item
         return result
     except Exception:
         log.exception("Forward adjustment unavailable")
@@ -132,7 +131,7 @@ def composite_score(stock,call,assessment=None):
     # Only an independently reviewed, explicitly approved, current overlay
     # may alter ranking; unverified AI hypotheses remain informational.
     adjustment=0
-    if assessment and assessment.get("review_approved") is True and (assessment.get("fis") or 0)>=75:
+    if assessment and eligible_adjustment(assessment):
         value=assessment.get("adjustment")
         if value in (-.25,.25):
             adjustment=value
@@ -203,6 +202,7 @@ def latest_fis():
             item["stale"]=not timedelta(0)<=age<=timedelta(hours=12)
         except (ValueError,TypeError,KeyError):
             item["stale"]=True
+        item["report_id"]=row["report_id"]
         result[row["symbol"]]=item
     return result
 
@@ -226,3 +226,23 @@ def review_fis(symbol,report_id,approved,note):
         item.update(review_approved=approved,review_note=note.strip()[:1000],reviewed_at=datetime.now(timezone.utc).isoformat(),status="approved" if approved else "rejected")
         db.execute("UPDATE forward_assessments SET payload=? WHERE report_id=?",(json.dumps(item),report_id))
     return item | {"report_id":report_id,"stale":not timedelta(0)<=age<=timedelta(hours=12)}
+
+
+def eligible_adjustment(assessment):
+    if not isinstance(assessment,dict) or assessment.get("review_approved") is not True:
+        return False
+    try:
+        now=datetime.now(timezone.utc)
+        return (timedelta(0)<=now-datetime.fromisoformat(assessment["as_of"])<=timedelta(hours=12)
+                and timedelta(0)<=now-datetime.fromisoformat(assessment["reviewed_at"])<=timedelta(hours=12)
+                and forward_score(assessment["factors"])==assessment["fis"]
+                and assessment["fis"]>=75 and assessment["adjustment"] in (-.25,.25)
+                and bool(assessment.get("review_note")))
+    except (ValueError,TypeError,KeyError):
+        return False
+
+def score_fields(stock,call,assessment):
+    base=composite_score(stock,call)
+    total=composite_score(stock,call,assessment)
+    return {"rhtc_base_score":base,"rhtc_composite_score":total,
+            "forward_adjustment":round(total-base,2) if total is not None and base is not None else 0}
