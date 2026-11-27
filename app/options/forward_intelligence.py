@@ -50,8 +50,9 @@ def ticker_context(symbol, purpose, expiry=None):
             candidates.append((direct,row))
         candidates.sort(key=lambda p:(p[0],(p[1]["research"] or {}).get("relevance",0),p[1]["quality"]=="higher liquidity",p[1]["liquidity"] or 0),reverse=True)
         selected=[]
+        pm.add_history(scan,[row for _,row in candidates[:8]])
         for direct,row in candidates[:8]:
-            selected.append({k:row.get(k) for k in ("id","title","probabilities","quality","end_date","resolution_source","observed_at","research","slug")} | {"association":"candidate ticker" if direct else "broad theme","rules":row["description"][:1200]})
+            selected.append({k:row.get(k) for k in ("id","title","probabilities","quality","end_date","resolution_source","observed_at","research","slug","changes_pp")} | {"association":"candidate ticker" if direct else "broad theme","rules":row["description"][:1200]})
         return {"status":"available","as_of":scan["stamp"],"selected":selected,"warning":POLICY}
     except Exception:
         log.exception("Ticker prediction context unavailable")
@@ -148,3 +149,58 @@ def assess_forward_factors(event):
             "market_quality":1 if event.get("quality")=="higher liquidity" else None,
             "probability_movement":min(1,max(moves)/20) if moves else None,
             "event_proximity":max(0,1-days/90) if days is not None and days>=0 else None}
+
+
+def assess_fis_candidate(symbol, raw, context, citations):
+    """Compute only from complete, current evidence; model claims need human review."""
+    if not isinstance(raw,dict):
+        return None
+    candidate=validate_adjustment(raw,context,citations)
+    if not candidate:
+        return None
+    event=next(r for r in context["selected"] if r["id"]==candidate["market_id"])
+    factors=assess_forward_factors(event)
+    factors["economic_impact"]=raw.get("economic_impact")
+    # This is a model-proposed corroboration strength, not independent certification.
+    factors["corroboration"]=raw.get("corroboration")
+    fis=forward_score(factors)
+    candidate.update(symbol=symbol,factors=factors,fis=fis,direction=raw["direction"],
+                     review_approved=False,status="pending independent review" if fis is not None else "incomplete factors")
+    return candidate
+
+def extract_fis_candidate(analysis):
+    """A separate machine-readable tail must not leak into the saved prose."""
+    marker="\nFIS_CANDIDATE:"
+    if marker not in analysis:
+        return analysis,None
+    body,tail=analysis.rsplit(marker,1)
+    try:
+        raw=json.loads(tail.strip())
+    except (ValueError,TypeError):
+        raw=None
+    return body.rstrip(),raw
+
+def persist_fis(symbol,assessment,report_id):
+    from app.options.api import connect_watchlist_db
+    with closing(connect_watchlist_db()) as db, db:
+        db.execute("CREATE TABLE IF NOT EXISTS forward_assessments (report_id INTEGER PRIMARY KEY,symbol TEXT NOT NULL,created_at TEXT NOT NULL,payload TEXT NOT NULL)")
+        db.execute("CREATE INDEX IF NOT EXISTS forward_assessment_symbol ON forward_assessments(symbol,report_id DESC)")
+        db.execute("INSERT OR REPLACE INTO forward_assessments VALUES (?,?,?,?)",(report_id,symbol,datetime.now(timezone.utc).isoformat(),json.dumps(assessment)))
+
+def latest_fis():
+    from app.options.api import connect_watchlist_db
+    with closing(connect_watchlist_db()) as db, db:
+        db.execute("CREATE TABLE IF NOT EXISTS forward_assessments (report_id INTEGER PRIMARY KEY,symbol TEXT NOT NULL,created_at TEXT NOT NULL,payload TEXT NOT NULL)")
+        rows=db.execute("SELECT f.symbol,f.payload FROM forward_assessments f JOIN (SELECT symbol,MAX(report_id) AS report_id FROM forward_assessments GROUP BY symbol) m ON m.symbol=f.symbol AND m.report_id=f.report_id").fetchall()
+    result={}
+    for row in rows:
+        item=json.loads(row["payload"])
+        if not item:
+            continue
+        try:
+            age=datetime.now(timezone.utc)-datetime.fromisoformat(item["as_of"])
+            item["stale"]=not timedelta(0)<=age<=timedelta(hours=12)
+        except (ValueError,TypeError,KeyError):
+            item["stale"]=True
+        result[row["symbol"]]=item
+    return result
