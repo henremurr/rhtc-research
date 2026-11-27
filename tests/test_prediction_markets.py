@@ -128,3 +128,27 @@ class PredictionMarketTests(unittest.TestCase):
         self.assertEqual(pm.hydrate_snapshot(payload3,{key3:meta3}),revised)
         with self.assertRaises(ValueError):
             pm.hydrate_snapshot(payload,{})
+
+    def test_request_ledger_settlement(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from types import SimpleNamespace
+        from app.options import prediction_markets as pm
+        with tempfile.TemporaryDirectory() as folder:
+            with patch("app.options.api.watchlist_db_path",return_value=Path(folder)/"watch.sqlite3"), patch.dict("os.environ",{"RHTC_PREDICTION_DAILY_REQUESTS":"10","RHTC_PREDICTION_DAILY_TOKENS":"1000"}):
+                request=pm.reserve_request()
+                self.assertEqual(pm.daily_usage()["in_flight"],1)
+                self.assertEqual(pm.daily_usage()["unresolved_usage"],0)
+                result=SimpleNamespace(usage=SimpleNamespace(input_tokens=25,output_tokens=10))
+                self.assertTrue(pm.record_usage(request,result))
+                self.assertFalse(pm.record_usage(request,result))
+                self.assertEqual(pm.daily_usage()["input_tokens"],25)
+                rejected=pm.reserve_request()
+                pm.record_request_failure(rejected,SimpleNamespace(status_code=400))
+                self.assertEqual(pm.daily_usage()["rejected"],1)
+                self.assertEqual(pm.daily_usage()["unresolved_usage"],0)
+                interrupted=pm.reserve_request()
+                pm.recover_request_ledger()
+                self.assertEqual(pm.daily_usage()["in_flight"],0)
+                self.assertEqual(pm.daily_usage()["unresolved_usage"],1)
