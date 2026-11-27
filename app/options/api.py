@@ -328,13 +328,14 @@ def connect_watchlist_db() -> sqlite3.Connection:
 def read_watchlist() -> list[dict[str, Any]]:
     with closing(connect_watchlist_db()) as connection:
         rows = [dict(row) for row in connection.execute("SELECT symbol, peak, share_price, quantity, call_score, analysis_count, stock_score, stock_rating_label, account, lt_call, lt_expy, lt_qty, lt_premium, additional_calls_json, pg, buffett_pass, buffett_score, buffett_updated_at, buffett_criteria_json, (SELECT COUNT(*) FROM stock_analysis_reports r WHERE r.symbol = symbols.symbol) AS stock_report_count, (SELECT COUNT(*) FROM buffett_screen_reports b WHERE b.symbol = symbols.symbol) AS buffett_report_count, (SELECT risk_score FROM ceo_risk_reports c WHERE c.symbol = symbols.symbol ORDER BY created_at DESC, report_id DESC LIMIT 1) AS ceo_risk_score, (SELECT risk_rating FROM ceo_risk_reports c WHERE c.symbol = symbols.symbol ORDER BY created_at DESC, report_id DESC LIMIT 1) AS ceo_risk_rating, (SELECT created_at FROM ceo_risk_reports c WHERE c.symbol = symbols.symbol ORDER BY created_at DESC, report_id DESC LIMIT 1) AS ceo_risk_updated_at, (SELECT COUNT(*) FROM ceo_risk_reports c WHERE c.symbol = symbols.symbol) AS ceo_risk_report_count FROM symbols ORDER BY position")]
-        from app.options.forward_intelligence import latest_fis
+        from app.options.forward_intelligence import latest_fis, score_fields
         try:
             assessments=latest_fis()
         except Exception:
             assessments={}
         for row in rows:
             row["forward_intelligence"]=assessments.get(row["symbol"])
+            row.update(score_fields(row["stock_score"],row["call_score"],row["forward_intelligence"]))
             row["additional_calls"] = json.loads(row.pop("additional_calls_json"))
             row.update(account_status(row.get("account")))
         return rows
@@ -1639,6 +1640,23 @@ def data_source() -> str:
     if not os.getenv("TRADIER_API_TOKEN"):
         return "demo"
     return "tradier_sandbox" if "sandbox.tradier.com" in os.getenv("TRADIER_BASE_URL", "https://sandbox.tradier.com/v1") else "tradier"
+
+
+class ForwardReviewInput(BaseModel):
+    report_id: int
+    approved: bool
+    note: str = ""
+
+
+@app.post("/api/forward-intelligence/{symbol}/review")
+async def review_forward_intelligence(symbol: str, data: ForwardReviewInput):
+    symbol = symbol.strip().upper()
+    if not SYMBOL_PATTERN.fullmatch(symbol):
+        raise HTTPException(400, "Invalid ticker")
+    if not watchlist_storage_ready():
+        raise HTTPException(503, "Persistent storage is unavailable")
+    from app.options.forward_intelligence import review_fis
+    return await asyncio.to_thread(review_fis,symbol,data.report_id,data.approved,data.note)
 
 
 @app.get("/api/watchlist")
@@ -3235,6 +3253,8 @@ async def opportunities(
         row["call_score"] = holding.get("call_score")
         row["stock_score"] = holding.get("stock_score")
         row["forward_intelligence"] = holding.get("forward_intelligence")
+        for field in ("rhtc_base_score","rhtc_composite_score","forward_adjustment"):
+            row[field]=holding.get(field)
         row["stock_rating_label"] = holding.get("stock_rating_label")
         row["stock_report_count"] = int(holding.get("stock_report_count") or 0)
         row["coverage_status"] = "Needs review" if row.get("open_interest", 0) < 25 else "Liquid enough to review"
