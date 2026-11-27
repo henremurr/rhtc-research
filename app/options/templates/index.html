@@ -152,6 +152,7 @@
 #trade-preview.expanded,#trade-preview:fullscreen{width:100vw;height:100vh;height:100dvh;margin:0}
 #trade-preview::backdrop{background:#0009}
 #trade-preview nav{display:flex;align-items:center;gap:.6rem;padding:.5rem;background:#172229;flex-wrap:wrap}
+#preview-income-grouping{appearance:auto;padding-inline-end:.4rem}
 #holdings-preview-open{margin-inline-start:auto}
 #preview-pages .holdings-report-table :is(th,td):nth-child(n+4):nth-child(-n+8){text-align:right}
 #preview-pages .holdings-report-table :is(th,td):is(:nth-child(2),:last-child){white-space:pre-line;overflow-wrap:anywhere;text-align:left!important}
@@ -263,7 +264,7 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
 }
 </style>
 <style>@media print{.active-lot-delete-tools,.active-lot-select{display:none!important}}</style><dialog id="trade-preview" aria-modal="true" aria-labelledby="preview-title">
-<nav><button type="button" class="trade-action" id="preview-close">Close preview</button><button type="button" id="preview-return" class="trade-action">Return to dashboard</button><button type="button" id="preview-expand" class="trade-action" aria-pressed="false">Full screen</button><button type="button" id="preview-print" class="trade-action">Print report</button><a id="preview-download" class="trade-action" download>Download PDF</a><span id="preview-print-status" role="status"></span></nav>
+<nav><button type="button" class="trade-action" id="preview-close">Close preview</button><button type="button" id="preview-return" class="trade-action">Return to dashboard</button><button type="button" id="preview-expand" class="trade-action" aria-pressed="false">Full screen</button><button type="button" id="preview-print" class="trade-action">Print report</button><a id="preview-download" class="trade-action" download>Download PDF</a><select id="preview-income-grouping" class="trade-action" aria-label="Income Detail view" hidden><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option></select><span id="preview-print-status" role="status"></span></nav>
 <div id="preview-pages" hidden></div></dialog>
 <dialog id="trade-report-dialog" aria-labelledby="trade-title" style="width:min(60rem,94vw);max-height:88vh;box-sizing:border-box;background:#171c21;color:#eef2f5;border:1px solid #847450;border-radius:12px;padding:1rem">
 <div class="trade-toolbar">
@@ -292,8 +293,21 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
  }
  function reportRoute(){return isCash()?'cash-activity-report':reportMode==='trade'?'trade-report':reportMode==='open-tax'?'open-tax-lot-report':'tax-lot-report';}
  function showReport(results, params, message, hasRows){
+   printRequest?.abort();
+   printRequest=undefined;
+   printFile=undefined;
+   printStatus.textContent='';
+   incomeParams=reportMode==='weekly-detail'?params:undefined;
+   incomeGrouping.hidden=!incomeParams;
+   incomeGrouping.disabled=false;
+   incomeGrouping.value=params.grouping||'weekly';
    const logo=document.createElement('img');logo.src='/apple-touch-icon.png';logo.width=44;logo.height=44;logo.alt='RHTC';
    const title=document.createElement('h2');title.id='preview-title';title.textContent=reportTitle();
+   if(incomeParams&&incomeGrouping.value!=='weekly'){
+     const view=incomeGrouping.selectedOptions[0].text;
+     title.textContent=/^Weekly\s/i.test(title.textContent)
+       ?title.textContent.replace(/^Weekly/i,view):title.textContent+' ('+view+')';
+   }
    const caption=document.createElement('p');caption.textContent=isCash()?params.broker+' · Account '+params.account+' · All dates':'Account '+params.account+' · '+(params.year==='0'?(reportMode==='open-tax'?'Latest available':'All years'):params.year)+(isWeekly()?' · All tickers':params.ticker?' · Ticker '+params.ticker:'');
    const note=document.createElement('p');note.textContent=message;
    pages.replaceChildren(logo,title,caption,note,results);
@@ -301,17 +315,19 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
    previewDownload.hidden=!hasRows;
    printButton.hidden=combinedPdfAction&&hasRows;
    if(hasRows){
-     previewDownload.href='/options/api/'+reportRoute()+'/pdf?'+new URLSearchParams({...params,title:reportTitle(),download:'true'});
+     previewDownload.href='/options/api/'+reportRoute()+'/pdf?'+new URLSearchParams({...params,title:title.textContent,download:'true'});
      previewDownload.download=pdfFilename();
-     if(canShareFiles&&(appleMobile||!window.showSaveFilePicker))preparePrintFile(previewDownload.href);
+     if(canShareFiles&&(appleMobile||!window.showSaveFilePicker))preparePrintFile(previewDownload.href,previewDownload.download);
    }else{
      previewDownload.removeAttribute('href');
    }
    status.textContent='';
-   dialog.close();
-   preview.showModal();
+   if(!preview.open){
+     dialog.close();
+     preview.showModal();
+     get('preview-close').focus();
+   }
    pages.scrollTop=0;
-   get('preview-close').focus();
  }
  async function loadTickers(){
   tickerInput.replaceChildren(new Option('Select ticker',''));
@@ -355,7 +371,30 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
  get('open-cash-activity-report').addEventListener('click',event=>openReport('cash',event.currentTarget.textContent.trim()));
  const preview=get('trade-preview'),expand=get('preview-expand'),pages=get('preview-pages');
  const printButton=get('preview-print'),printStatus=get('preview-print-status');
- const previewDownload=get('preview-download');
+ const previewDownload=get('preview-download'),incomeGrouping=get('preview-income-grouping');
+ const incomePeriodHeadings={weekly:'Week',monthly:'Month',quarterly:'Quarter'};
+ let incomeParams;
+ incomeGrouping.addEventListener('change',async ()=>{
+   const previous=incomeParams;
+   const params={...previous,grouping:incomeGrouping.value};
+   incomeGrouping.disabled=true;
+   printStatus.textContent='Loading '+incomeGrouping.selectedOptions[0].text.toLowerCase()+' view…';
+   const isCurrent=()=>preview.open&&incomeParams===previous;
+   try{
+     const data=await request('?'+new URLSearchParams(params));
+     if(isCurrent()){
+       showIncomeReport(document.createElement('div'),params,data);
+       incomeGrouping.focus();
+     }
+   }catch(error){
+     if(isCurrent()){
+       incomeGrouping.value=previous.grouping||'weekly';
+       incomeGrouping.disabled=false;
+       printStatus.textContent=error.message;
+       incomeGrouping.focus();
+     }
+   }
+ });
  const appleMobile=/iPad|iPhone|iPod/.test(navigator.userAgent)||
    (navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
  const canShareFiles=Boolean(navigator.share&&navigator.canShare);
@@ -370,6 +409,7 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
    const snapshot=holdingsReportSnapshot();
    clear();
    reportMode='holdings';
+   incomeGrouping.hidden=true;
    const logo=document.createElement('img');logo.src='/apple-touch-icon.png';logo.width=44;logo.height=44;logo.alt='RHTC';
    const title=document.createElement('h2');title.id='preview-title';title.textContent='Holdings Report for '+snapshot.account;
    const caption=document.createElement('p');caption.textContent='As of '+snapshot.timestamp;
@@ -429,18 +469,18 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
    }
  }
  holdingsTrigger.addEventListener('click',openHoldingsPreview);
- function pdfFilename(){if(reportMode==='holdings')return 'RHTC_Holdings_Report.pdf';if(isCash())return 'RHTC_Cash_Activity_Report.pdf';return (reportMode==='trade'?'RHTC_Trade_Report_':reportMode==='open-tax'?'RHTC_Open_Tax_Lots_':isWeekly()?(reportMode==='weekly-detail'?'RHTC_Weekly_Income_Detail_Report_':'RHTC_Weekly_Income_Summary_Report_'):'RHTC_Form_8949_')+(year.value==='0'?'Latest':year.value)+(reportMode==='ticker-tax'?'_'+tickerInput.value.trim().toUpperCase():'')+'.pdf';}
+ function pdfFilename(){if(reportMode==='holdings')return 'RHTC_Holdings_Report.pdf';if(isCash())return 'RHTC_Cash_Activity_Report.pdf';return (reportMode==='trade'?'RHTC_Trade_Report_':reportMode==='open-tax'?'RHTC_Open_Tax_Lots_':isWeekly()?(reportMode==='weekly-detail'?'RHTC_'+incomeGrouping.selectedOptions[0].text+'_Income_Detail_Report_':'RHTC_Weekly_Income_Summary_Report_'):'RHTC_Form_8949_')+(year.value==='0'?'Latest':year.value)+(reportMode==='ticker-tax'?'_'+tickerInput.value.trim().toUpperCase():'')+'.pdf';}
  async function fetchPdf(url,signal){
    const response=await fetch(url,{signal,cache:'no-store'});
    if(!response.ok||!response.headers.get('Content-Type')?.includes('application/pdf'))throw Error('PDF unavailable');
    return response.blob();
  }
- async function preparePrintFile(url){
+ async function preparePrintFile(url,filename){
    const request=new AbortController();
    printRequest=request;
    try{
      const blob=await fetchPdf(url,request.signal);
-     if(!request.signal.aborted)printFile=new File([blob],pdfFilename(),{type:'application/pdf'});
+     if(!request.signal.aborted)printFile=new File([blob],filename,{type:'application/pdf'});
    }catch{
      // The download link remains available if preparing the shareable file fails.
    }finally{
@@ -455,15 +495,16 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
      return;
    }
    const url=event.currentTarget.href;
+   const file=printFile;
    const feedback=printStatus;
    if(!combinedPdfAction&&window.showSaveFilePicker){
      event.preventDefault();
      try{
        const handle=await window.showSaveFilePicker({
-         suggestedName:pdfFilename(),
+         suggestedName:event.currentTarget.download,
          types:[{description:'PDF document',accept:{'application/pdf':['.pdf']}}]
        });
-       const blob=printFile||await fetchPdf(url);
+       const blob=file||await fetchPdf(url);
        const writer=await handle.createWritable();
        await writer.write(blob);
        await writer.close();
@@ -511,10 +552,104 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
      URL.revokeObjectURL(holdingsPdfUrl);
      holdingsPdfUrl=undefined;
    }
+   incomeParams=undefined;
+   incomeGrouping.hidden=true;
+   printRequest?.abort();
+   printRequest=undefined;
+   printFile=undefined;
    printStatus.textContent='';
    expanded(false);pages.replaceChildren();pages.hidden=true;
  });
  get('trade-close').onclick=()=>{dialog.close();get('guide-menu-toggle').focus();};dialog.addEventListener('close',()=>{if(!preview.open&&!dialog.open)clear();});
+ function showIncomeReport(results,params,data){
+  const periods=data.income_periods||data.weeks||[];
+  const grouping=params.grouping||'weekly';
+  const periodHeading=incomePeriodHeadings[grouping];
+  if(!periods.length){showReport(results,params,'No completed tax lots for this account and tax year.',false);return;}
+  const dollars=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'});
+  const wrap=document.createElement('div');
+  wrap.style.overflowX='auto';
+  const table=document.createElement('table');
+  table.style.cssText='width:100%;min-width:540px;text-align:left';
+  const header=table.createTHead().insertRow();
+  const labels=[periodHeading,'Date range','Closed lots','Proceeds','Cost basis','Net gain/loss'];
+  labels.forEach((label,index)=>{
+   const cell=document.createElement('th');
+   cell.textContent=label;
+   if(index>=2)cell.style.textAlign='right';
+   header.append(cell);
+  });
+  const body=table.createTBody();
+  for(const period of periods){
+   const row=body.insertRow();
+   const amounts=['proceeds','basis','gain'].map(key=>period[key]==null?'—':dollars.format(Number(period[key])));
+   [period.label??period.week,period.dates,period.count,...amounts].forEach((value,index)=>{
+    const cell=row.insertCell();
+    cell.dataset.label=labels[index];
+    cell.textContent=value;
+    if(index>=2)cell.style.textAlign='right';
+   });
+  }
+  const footer=table.createTFoot().insertRow();
+  const totalLabel=document.createElement('th');
+  totalLabel.scope='row';
+  totalLabel.colSpan=2;
+  totalLabel.textContent='Total';
+  footer.append(totalLabel);
+  const totals=data.totals;
+  const amounts=['proceeds','basis','gain'].map(key=>totals[key]==null?'—':dollars.format(Number(totals[key])));
+  [totals.count,...amounts].forEach((value,index)=>{
+   const cell=footer.insertCell();
+   cell.dataset.label=labels[index+2];
+   cell.textContent=value;
+   cell.style.textAlign='right';
+  });
+  for(const cell of footer.cells){
+   cell.style.fontWeight='700';
+   cell.style.borderTop='2px solid #c6a45c';
+  }
+  wrap.append(table);
+  results.append(wrap);
+  if(reportMode==='weekly-detail'){
+   const columns=['Description','Acquired','Sold','Proceeds','Cost basis','Code','Adjustment','Net gain/loss'];
+   for(const period of periods){
+    if(!period.lots?.length)continue;
+    const heading=document.createElement('h3');
+    const periodLabel=period.label??('Week '+period.week);
+    heading.textContent=periodLabel+' · '+period.dates+' · Net gain/loss '+(period.gain==null?'—':dollars.format(Number(period.gain)));
+    const container=document.createElement('div');
+    container.style.overflowX='auto';
+    const detail=document.createElement('table');
+    detail.style.cssText='width:100%;min-width:760px';
+    const header=detail.createTHead().insertRow();
+    columns.forEach((label,index)=>{
+     const cell=document.createElement('th');
+     cell.textContent=label;
+     if(index>=3 && index!==5)cell.style.textAlign='right';
+     header.append(cell);
+    });
+    const lotBody=detail.createTBody();
+    const addLotRow=(lot,subtotal=false)=>{
+     const row=lotBody.insertRow();
+     if(subtotal)row.className='weekly-ticker-subtotal';
+     ['description','acquired','sold','proceeds','basis','code','adjustment','gain'].forEach((key,index)=>{
+      const cell=row.insertCell();
+      const numeric=index>=3 && index!==5;
+      cell.dataset.label=columns[index];
+      cell.textContent=lot[key]==null||lot[key]===''?'—':numeric?dollars.format(Number(lot[key])):lot[key];
+      if(numeric)cell.style.textAlign='right';
+     });
+    }
+    for(const group of period.ticker_groups){
+     group.lots.forEach(lot=>addLotRow(lot));
+     addLotRow({...group,description:(group.ticker||'Unknown ticker')+' subtotal'},true);
+    }
+    container.append(detail);
+    results.append(heading,container);
+   }
+  }
+  showReport(results,params,(grouping==='weekly'?'Weeks 1–'+periods.length+' by closing date':'Grouped by closing '+periodHeading.toLowerCase())+' · All tickers',true);
+ }
  get('trade-filters').onsubmit=async e=>{
   e.preventDefault();
   if(previewButton.disabled)return;
@@ -587,90 +722,7 @@ a.trade-action:is(:visited,:hover,:active){color:#171717;text-decoration:none}
     return;
    }
    if(isWeekly()){
-    const weeks=data.weeks||[];
-    if(!weeks.length){showReport(results,params,'No completed tax lots for this account and tax year.',false);return;}
-    const dollars=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'});
-    const wrap=document.createElement('div');
-    wrap.style.overflowX='auto';
-    const table=document.createElement('table');
-    table.style.cssText='width:100%;min-width:540px;text-align:left';
-    const header=table.createTHead().insertRow();
-    const labels=['Week','Date range','Closed lots','Proceeds','Cost basis','Net gain/loss'];
-    labels.forEach((label,index)=>{
-     const cell=document.createElement('th');
-     cell.textContent=label;
-     if(index>=2)cell.style.textAlign='right';
-     header.append(cell);
-    });
-    const body=table.createTBody();
-    for(const week of weeks){
-     const row=body.insertRow();
-     const amounts=['proceeds','basis','gain'].map(key=>week[key]==null?'—':dollars.format(Number(week[key])));
-     [week.week,week.dates,week.count,...amounts].forEach((value,index)=>{
-      const cell=row.insertCell();
-      cell.dataset.label=labels[index];
-      cell.textContent=value;
-      if(index>=2)cell.style.textAlign='right';
-     });
-    }
-    const footer=table.createTFoot().insertRow();
-    const totalLabel=document.createElement('th');
-    totalLabel.scope='row';
-    totalLabel.colSpan=2;
-    totalLabel.textContent='Total';
-    footer.append(totalLabel);
-    const totals=data.totals;
-    const amounts=['proceeds','basis','gain'].map(key=>totals[key]==null?'—':dollars.format(Number(totals[key])));
-    [totals.count,...amounts].forEach((value,index)=>{
-     const cell=footer.insertCell();
-     cell.dataset.label=labels[index+2];
-     cell.textContent=value;
-     cell.style.textAlign='right';
-    });
-    for(const cell of footer.cells){
-     cell.style.fontWeight='700';
-     cell.style.borderTop='2px solid #c6a45c';
-    }
-    wrap.append(table);
-    results.append(wrap);
-    if(reportMode==='weekly-detail'){
-     const columns=['Description','Acquired','Sold','Proceeds','Cost basis','Code','Adjustment','Net gain/loss'];
-     for(const week of weeks){
-      if(!week.lots?.length)continue;
-      const heading=document.createElement('h3');
-      heading.textContent='Week '+week.week+' · '+week.dates+' · Net gain/loss '+(week.gain==null?'—':dollars.format(Number(week.gain)));
-      const container=document.createElement('div');
-      container.style.overflowX='auto';
-      const detail=document.createElement('table');
-      detail.style.cssText='width:100%;min-width:760px';
-      const header=detail.createTHead().insertRow();
-      columns.forEach((label,index)=>{
-       const cell=document.createElement('th');
-       cell.textContent=label;
-       if(index>=3 && index!==5)cell.style.textAlign='right';
-       header.append(cell);
-      });
-      const lotBody=detail.createTBody();
-      const addLotRow=(lot,subtotal=false)=>{
-       const row=lotBody.insertRow();
-       if(subtotal)row.className='weekly-ticker-subtotal';
-       ['description','acquired','sold','proceeds','basis','code','adjustment','gain'].forEach((key,index)=>{
-        const cell=row.insertCell();
-        const numeric=index>=3 && index!==5;
-        cell.dataset.label=columns[index];
-        cell.textContent=lot[key]==null||lot[key]===''?'—':numeric?dollars.format(Number(lot[key])):lot[key];
-        if(numeric)cell.style.textAlign='right';
-       });
-      }
-      for(const group of week.ticker_groups){
-       group.lots.forEach(lot=>addLotRow(lot));
-       addLotRow({...group,description:(group.ticker||'Unknown ticker')+' subtotal'},true);
-      }
-      container.append(detail);
-      results.append(heading,container);
-     }
-    }
-    showReport(results,params,'Weeks 1–'+weeks.length+' by closing date · All tickers',true);
+    showIncomeReport(results,params,data);
     return;
    }
    if(reportMode!=='trade'){
