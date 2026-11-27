@@ -108,3 +108,23 @@ class PredictionMarketTests(unittest.TestCase):
             pm.validated_batch_items(SimpleNamespace(status="incomplete",output_text="{}"),batch)
         with self.assertRaises(ValueError):
             pm.validated_batch_items(SimpleNamespace(status="completed",output_text='{"items":[]}'),batch)
+
+    def test_compact_snapshot_preserves_legacy_and_versioned_rules(self):
+        import json
+        from app.options import prediction_markets as pm
+        original=pm.normalize({"id":"1","question":"AI chips","description":"Original rules","outcomes":["Yes","No"],"outcomePrices":["0.6","0.4"]})
+        key,meta,payload=pm.compact_snapshot(original)
+        changed={**original,"probabilities":{"Yes":0.8,"No":0.2}}
+        key2,meta2,payload2=pm.compact_snapshot(changed)
+        self.assertEqual(key,key2)
+        self.assertEqual(meta,meta2)
+        self.assertNotIn("description",json.loads(payload))
+        self.assertEqual(pm.hydrate_snapshot(payload,{key:meta}),original)
+        self.assertEqual(pm.hydrate_snapshot(payload2,{key:meta}),changed)
+        self.assertEqual(pm.hydrate_snapshot(json.dumps(original),{}),original)
+        revised={**changed,"description":"Revised rules"}
+        key3,meta3,payload3=pm.compact_snapshot(revised)
+        self.assertNotEqual(key,key3)
+        self.assertEqual(pm.hydrate_snapshot(payload3,{key3:meta3}),revised)
+        with self.assertRaises(ValueError):
+            pm.hydrate_snapshot(payload,{})
