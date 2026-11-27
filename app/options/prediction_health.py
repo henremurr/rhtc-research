@@ -12,6 +12,10 @@ import httpx
 from app.options import prediction_markets as pm
 
 log = logging.getLogger(__name__)
+refresh_event = asyncio.Event()
+
+def request_refresh():
+    refresh_event.set()
 
 def check(name, state, detail):
     return {"name":name,"state":state,"detail":str(detail)}
@@ -128,12 +132,20 @@ async def run_health():
     result={"checked_at":datetime.now(timezone.utc).isoformat(),"state":state,"checks":checks,"scope":"Live provider and stored data checks, synthetic pipeline and deployed wiring; no paid model inference."}
     await asyncio.to_thread(save,result)
     log.warning("Prediction infrastructure health: %s (%d checks)",state,len(checks))
+    for c in checks:
+        if c["state"] in ("fail","warn","pending"):
+            log.warning("Prediction health %s: %s — %s",c["state"],c["name"],c["detail"])
     return result
 
 async def scheduler():
     while True:
+        refresh_event.clear()
         try:
             await run_health()
         except Exception:
             log.exception("Prediction infrastructure health cycle failed")
-        await asyncio.sleep(3600)
+        try:
+            await asyncio.wait_for(refresh_event.wait(),timeout=3600)
+            await asyncio.sleep(10)  # coalesce recovery notifications
+        except asyncio.TimeoutError:
+            pass

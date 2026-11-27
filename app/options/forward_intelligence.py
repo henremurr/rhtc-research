@@ -106,3 +106,45 @@ def active_adjustments():
     except Exception:
         log.exception("Forward adjustment unavailable")
         return {}
+
+
+FIS_WEIGHTS={"economic_impact":25,"corroboration":25,"strategic_relevance":20,"market_quality":15,"probability_movement":10,"event_proximity":5}
+
+def forward_score(factors):
+    """0–100 evidence-strength score; never infer direction from magnitude."""
+    import math
+    if not isinstance(factors,dict) or set(factors)!=set(FIS_WEIGHTS):
+        return None
+    if any(isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v) or not 0<=v<=1 for v in factors.values()):
+        return None
+    return round(sum(FIS_WEIGHTS[k]*factors[k] for k in FIS_WEIGHTS),1)
+
+def composite_score(stock,call,assessment=None):
+    try:
+        stock,call=float(stock),float(call)
+    except (TypeError,ValueError):
+        return None
+    if stock not in (1,2,3,4,5) or not 0<=call<=5:
+        return None
+    base=stock+call
+    # Only an independently reviewed, explicitly approved, current overlay
+    # may alter ranking; unverified AI hypotheses remain informational.
+    adjustment=0
+    if assessment and assessment.get("review_approved") is True and (assessment.get("fis") or 0)>=75:
+        value=assessment.get("adjustment")
+        if value in (-.25,.25):
+            adjustment=value
+    return round(max(0,min(10,base+adjustment)),2)
+
+def assess_forward_factors(event):
+    """Return provisional components; do not impute absent corroboration."""
+    review=event.get("research") or {}
+    movement=event.get("changes_pp",{})
+    moves=[abs(v) for values in movement.values() for v in values.values()]
+    end=parse_date(event.get("end_date"))
+    days=(end-datetime.now(timezone.utc).date()).days if end else None
+    return {"economic_impact":None,"corroboration":None,
+            "strategic_relevance":review.get("relevance",0)/10 if review else None,
+            "market_quality":1 if event.get("quality")=="higher liquidity" else None,
+            "probability_movement":min(1,max(moves)/20) if moves else None,
+            "event_proximity":max(0,1-days/90) if days is not None and days>=0 else None}
