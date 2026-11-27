@@ -102,7 +102,8 @@ def active_adjustments():
         for row in rows:
             item=json.loads(row["payload"])
             if now-datetime.fromisoformat(item["as_of"]) <= timedelta(hours=12) and now-datetime.fromisoformat(item["reviewed_at"]) <= timedelta(hours=12):
-                result[row["symbol"]]=item
+                item["report_id"]=row["report_id"]
+        result[row["symbol"]]=item
         return result
     except Exception:
         log.exception("Forward adjustment unavailable")
@@ -191,7 +192,7 @@ def latest_fis():
     from app.options.api import connect_watchlist_db
     with closing(connect_watchlist_db()) as db, db:
         db.execute("CREATE TABLE IF NOT EXISTS forward_assessments (report_id INTEGER PRIMARY KEY,symbol TEXT NOT NULL,created_at TEXT NOT NULL,payload TEXT NOT NULL)")
-        rows=db.execute("SELECT f.symbol,f.payload FROM forward_assessments f JOIN (SELECT symbol,MAX(report_id) AS report_id FROM forward_assessments GROUP BY symbol) m ON m.symbol=f.symbol AND m.report_id=f.report_id").fetchall()
+        rows=db.execute("SELECT f.symbol,f.payload,f.report_id FROM forward_assessments f JOIN (SELECT symbol,MAX(report_id) AS report_id FROM stock_analysis_reports GROUP BY symbol) m ON m.symbol=f.symbol AND m.report_id=f.report_id").fetchall()
     result={}
     for row in rows:
         item=json.loads(row["payload"])
@@ -204,3 +205,24 @@ def latest_fis():
             item["stale"]=True
         result[row["symbol"]]=item
     return result
+
+
+def review_fis(symbol,report_id,approved,note):
+    """Explicit user attestation; never trust a client-supplied score or adjustment."""
+    from app.options.api import connect_watchlist_db
+    from fastapi import HTTPException
+    with closing(connect_watchlist_db()) as db, db:
+        db.execute("BEGIN IMMEDIATE")
+        latest=db.execute("SELECT MAX(report_id) FROM stock_analysis_reports WHERE symbol=?",(symbol,)).fetchone()[0]
+        if latest!=report_id:
+            raise HTTPException(409,"Assessment is no longer the latest stock report")
+        row=db.execute("SELECT payload FROM forward_assessments WHERE symbol=? AND report_id=?",(symbol,report_id)).fetchone()
+        item=json.loads(row[0]) if row else None
+        if not item:
+            raise HTTPException(404,"No eligible forward assessment")
+        age=datetime.now(timezone.utc)-datetime.fromisoformat(item["as_of"])
+        if approved and (not timedelta(0)<=age<=timedelta(hours=12) or forward_score(item["factors"])!=item["fis"] or (item["fis"] or 0)<75 or not note.strip()):
+            raise HTTPException(409,"Approval requires fresh complete FIS of at least 75 and a review note")
+        item.update(review_approved=approved,review_note=note.strip()[:1000],reviewed_at=datetime.now(timezone.utc).isoformat(),status="approved" if approved else "rejected")
+        db.execute("UPDATE forward_assessments SET payload=? WHERE report_id=?",(json.dumps(item),report_id))
+    return item | {"report_id":report_id,"stale":not timedelta(0)<=age<=timedelta(hours=12)}
