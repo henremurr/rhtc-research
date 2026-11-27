@@ -7,6 +7,7 @@ import sqlite3
 import re
 import os
 import hashlib
+import uuid
 import shutil
 import zlib
 from pathlib import Path
@@ -75,6 +76,8 @@ def connect():
     db.execute("CREATE TABLE IF NOT EXISTS scan_checkpoint (id INTEGER PRIMARY KEY CHECK(id=1), stamp TEXT NOT NULL, cursor TEXT, pages INTEGER NOT NULL, retrieved INTEGER NOT NULL, exhausted INTEGER NOT NULL DEFAULT 0)")
     db.execute("CREATE TABLE IF NOT EXISTS scan_cursors (stamp TEXT NOT NULL, cursor TEXT NOT NULL, PRIMARY KEY(stamp,cursor))")
     db.execute("CREATE TABLE IF NOT EXISTS prediction_usage (day TEXT PRIMARY KEY, requests INTEGER NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, unknown_usage INTEGER NOT NULL)")
+    db.execute("CREATE TABLE IF NOT EXISTS prediction_request_ledger (id TEXT PRIMARY KEY, day TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, state TEXT NOT NULL, provider_request_id TEXT, input_tokens INTEGER, output_tokens INTEGER, reason TEXT)")
+    db.execute("CREATE INDEX IF NOT EXISTS prediction_ledger_day ON prediction_request_ledger(day,state)")
     db.commit()
     return db
 
@@ -283,6 +286,7 @@ async def maintenance_scheduler():
         await asyncio.sleep(86400)
 
 async def research_scheduler():
+    await asyncio.to_thread(recover_request_ledger)
     while True:
         try:
             await enrich_pending()
@@ -337,32 +341,79 @@ def validate_research(item):
 
 enrichment_lock = asyncio.Lock()
 
+def _usage_limits():
+    return (max(0,int(os.getenv("RHTC_PREDICTION_DAILY_REQUESTS","100"))),
+            max(0,int(os.getenv("RHTC_PREDICTION_DAILY_TOKENS","1000000"))))
+
 def daily_usage():
     day=datetime.now(timezone.utc).date().isoformat()
     with closing(connect()) as db:
         row=db.execute("SELECT * FROM prediction_usage WHERE day=?",(day,)).fetchone()
         totals=dict(row) if row else {"day":day,"requests":0,"input_tokens":0,"output_tokens":0,"unknown_usage":0}
-    totals["request_limit"]=max(0,int(os.getenv("RHTC_PREDICTION_DAILY_REQUESTS","100")))
-    totals["token_limit"]=max(0,int(os.getenv("RHTC_PREDICTION_DAILY_TOKENS","1000000")))
+        counts={r[0]:r[1] for r in db.execute("SELECT state,COUNT(*) FROM prediction_request_ledger WHERE day=? GROUP BY state",(day,))}
+    # Aggregate rows from the legacy implementation cannot be reconstructed
+    # from a count alone. Keep their uncertainty visible.
+    active=counts.get("in_flight",0)
+    totals["in_flight"]=active
+    totals["failed_unknown"]=counts.get("unknown",0)
+    totals["rejected"]=counts.get("rejected",0)
+    totals["legacy_unknown"]=max(0,totals["unknown_usage"]-active-totals["failed_unknown"])
+    totals["unresolved_usage"]=totals["legacy_unknown"]+totals["failed_unknown"]
+    totals["request_limit"],totals["token_limit"]=_usage_limits()
     inp=number(os.getenv("RHTC_PREDICTION_INPUT_USD_PER_MTOK"))
     out=number(os.getenv("RHTC_PREDICTION_OUTPUT_USD_PER_MTOK"))
     totals["estimated_usd"]=round((totals["input_tokens"]*inp+totals["output_tokens"]*out)/1000000,4) if inp is not None and out is not None and inp>=0 and out>=0 and not totals["unknown_usage"] else None
     return totals
 
 def reserve_request():
-    usage=daily_usage()
-    if usage["requests"]>=usage["request_limit"] or usage["input_tokens"]+usage["output_tokens"]>=usage["token_limit"]:
-        return None
+    day=datetime.now(timezone.utc).date().isoformat()
+    request_limit,token_limit=_usage_limits()
+    request_id=uuid.uuid4().hex
     with closing(connect()) as db, db:
-        db.execute("INSERT INTO prediction_usage VALUES (?,1,0,0,1) ON CONFLICT(day) DO UPDATE SET requests=requests+1,unknown_usage=unknown_usage+1",(usage["day"],))
-    return usage["day"]
+        db.execute("BEGIN IMMEDIATE")
+        row=db.execute("SELECT requests,input_tokens,output_tokens FROM prediction_usage WHERE day=?",(day,)).fetchone()
+        if request_limit==0 or token_limit==0 or row and (row[0]>=request_limit or row[1]+row[2]>=token_limit):
+            return None
+        db.execute("INSERT INTO prediction_usage VALUES (?,1,0,0,1) ON CONFLICT(day) DO UPDATE SET requests=requests+1,unknown_usage=unknown_usage+1",(day,))
+        db.execute("INSERT INTO prediction_request_ledger(id,day,started_at,state) VALUES (?,?,?,'in_flight')",(request_id,day,datetime.now(timezone.utc).isoformat()))
+    return request_id
 
-def record_usage(day,result):
-    usage=getattr(result,"usage",None)
-    if usage is None:
-        return
+def settle_request(request_id,state,input_tokens=None,output_tokens=None,provider_request_id=None,reason=None):
+    if state not in ("known","rejected","unknown"):
+        raise ValueError("Invalid request settlement")
     with closing(connect()) as db, db:
-        db.execute("UPDATE prediction_usage SET input_tokens=input_tokens+?,output_tokens=output_tokens+?,unknown_usage=MAX(0,unknown_usage-1) WHERE day=?",(getattr(usage,"input_tokens",0) or 0,getattr(usage,"output_tokens",0) or 0,day))
+        db.execute("BEGIN IMMEDIATE")
+        row=db.execute("SELECT day,state FROM prediction_request_ledger WHERE id=?",(request_id,)).fetchone()
+        if not row or row["state"]!="in_flight":
+            return False
+        db.execute("UPDATE prediction_request_ledger SET finished_at=?,state=?,input_tokens=?,output_tokens=?,provider_request_id=?,reason=? WHERE id=?",
+                   (datetime.now(timezone.utc).isoformat(),state,input_tokens,output_tokens,provider_request_id,reason,request_id))
+        if state in ("known","rejected"):
+            db.execute("UPDATE prediction_usage SET input_tokens=input_tokens+?,output_tokens=output_tokens+?,unknown_usage=MAX(0,unknown_usage-1) WHERE day=?",(input_tokens or 0,output_tokens or 0,row["day"]))
+        return True
+
+def record_usage(request_id,result):
+    usage=getattr(result,"usage",None)
+    inp=getattr(usage,"input_tokens",None)
+    out=getattr(usage,"output_tokens",None)
+    provider_id=getattr(result,"_request_id",None)
+    if type(inp) is not int or type(out) is not int or inp<0 or out<0:
+        return settle_request(request_id,"unknown",provider_request_id=provider_id,reason="Response omitted valid token usage")
+    return settle_request(request_id,"known",inp,out,provider_id)
+
+def record_request_failure(request_id,exc):
+    code=getattr(exc,"status_code",None)
+    provider_id=getattr(exc,"request_id",None)
+    # Explicit request rejection before model inference is distinct from
+    # timeout or server failure, where billing cannot be established.
+    rejected=code in (400,401,403,404,422,429)
+    return settle_request(request_id,"rejected" if rejected else "unknown",0 if rejected else None,0 if rejected else None,provider_id,reason=f"HTTP {code}" if code else type(exc).__name__)
+
+def recover_request_ledger():
+    # Production has one replica. A new process cannot recover the response
+    # to a request abandoned by its predecessor; preserve it as unresolved.
+    with closing(connect()) as db, db:
+        db.execute("UPDATE prediction_request_ledger SET state='unknown',finished_at=?,reason='Interrupted before usage receipt' WHERE state='in_flight'",(datetime.now(timezone.utc).isoformat(),))
 
 def semantic_input(payload):
     # Responses API JSON mode requires the input message itself to mention JSON.
@@ -471,7 +522,11 @@ async def enrich_pending():
                     if reviewed==len(records):
                         from app.options.prediction_health import request_refresh
                         request_refresh()
+                except asyncio.CancelledError:
+                    await asyncio.to_thread(settle_request,day,"unknown",reason="Cancelled before usage receipt")
+                    raise
                 except Exception as exc:
+                    await asyncio.to_thread(record_request_failure,day,exc)
                     failures+=1
                     code=getattr(exc,"status_code",None)
                     last_error=f"AI provider HTTP {code}" if code else type(exc).__name__
