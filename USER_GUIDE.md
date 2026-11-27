@@ -3,7 +3,7 @@
 **For:** RHTC internal research users<br>
 **Stable release:** v2026.11.22<br>
 **Last checked:** November 22, 2026
-**Documentation update:** November 22, 2026 (stable release promotion)<br>
+**Documentation update:** November 27, 2026 (Prediction Market Intelligence supplement)<br>
 **Application:** Covered Call Screener / Income Engine and RHTC News Feed
 
 ## Table of contents
@@ -28,6 +28,7 @@
 18. [Open tax lot report](#open-tax-lot-report)
 19. [Cash Activity Report](#cash-activity-report)
 20. [Reporting troubleshooting and limitations](#reporting-troubleshooting-and-limitations)
+21. [Prediction Market Intelligence](#prediction-market-intelligence)
 
 ## Overview
 
@@ -392,3 +393,82 @@ All reporting results are derived from imported CSV records and application calc
 ### Release discipline
 
 The current stable release is **v2026.11.22** at Git reference **`stable/v2026.11.22`**. The earlier **v2026.11.15** baseline remains available at **`stable/v2026.11.15`**. Promotion of future code requires a separate release decision and validation.
+
+
+## Prediction Market Intelligence
+
+Added to the main development branch on November 27, 2026, through PRs #263–266. This section documents the implementation and its intended analytical purpose; it does not promote the stable release or certify production runtime validation.
+
+### Purpose and model influence
+
+Prediction Market Intelligence adds a **forward-looking evidence layer** to RHTC research. Whereas financial statements describe business performance and news reports describe developments, prediction-market prices express what participants currently expect may occur. The system retrieves public Polymarket data for research only. It does not wager, connect wallets, submit brokerage orders, retrain underlying AI models, or change their parameters. Instead, selected market evidence is supplied as contextual input to existing report-generation models.
+
+| RHTC model | Implementation status | Purpose |
+| --- | --- | --- |
+| News Summary | Integrated in source | Compare independently reported developments with changing market expectations. |
+| The Long Game | Integrated in source | Evaluate strategic risks, emerging opportunities, and possible portfolio misalignment. |
+| Stock Analysis | Proposed | Identify external catalysts and company-specific risks. |
+| Buffett Model | Proposed, contextual only | Investigate threats to durable business economics and competitive advantages. |
+| CEO Risk | Proposed | Investigate leadership, succession, and regulatory risks. |
+| Covered Call Analysis | Proposed | Identify event risk within the recorded contract life. |
+| RHTC Composite Score | Proposed | Consider corroborated forward-looking risks and opportunities without double-counting existing factors. |
+
+Prediction-market evidence does **not currently directly change numerical stock, call, Buffett, CEO Risk, or composite scores**. News Summary and The Long Game receive selected evidence from completed saved scans, including market-implied probabilities, available historical changes, quality indicators, research hypotheses, recorded exposure, and confirmation requirements. The Long Game retains that context with the job inputs for reproducible historical analysis and checkpoint recovery.
+
+### Research methodology
+
+The analytical sequence is:
+
+1. **Prediction Market Intelligence:** What might happen?
+2. **Independent research:** What evidence supports or contradicts that expectation?
+3. **Three Peaks thesis:** Which investment assumptions might strengthen or deteriorate?
+4. **Portfolio impact assessment:** Which recorded holdings, industries, supply chains, and emerging companies could benefit or suffer?
+5. **Strategic decision support:** Evaluate whether further research supports accumulation, maintenance, reduction, rebalancing, or waiting for confirmation.
+
+Discovery is not restricted to the watchlist. It covers AI/I (AI and infrastructure), EFM/I (energy, fuels, manufacturing and infrastructure), DS/I (defense, security and space), Human Economy (needs, comfort, connection, experience, aspiration and well-being), macroeconomics, and markets outside established categories. Unclassified markets remain available for emerging-theme discovery.
+
+The following examples are hypothetical, not live market readings or verified company recommendations.
+
+| Changing market expectation | Potential research implications |
+| --- | --- |
+| Increased probability of semiconductor export restrictions | Reassess NVDA, AMD, MU and MRVL exposure. |
+| Increased probability of nuclear regulatory reform | Investigate OKLO, SMR, LEU and nuclear supply chains. |
+| Increased probability of expanded defense expenditure | Reassess LMT, NOC, KTOS, AVAV and emerging suppliers. |
+| Increased probability of interest rate increases | Review margin exposure and capital-intensive growth businesses. |
+| Increased probability of commercial fusion breakthroughs | Investigate infrastructure and component suppliers. |
+| Increased probability of accelerated AI adoption | Investigate second-order beneficiaries in electricity, cooling, optical networking and memory. |
+
+### Proposed Forward Intelligence Score (FIS)
+
+A separate Forward Intelligence Score is recommended for future development rather than allowing prediction markets to distort fundamental scores. The following weights are illustrative and **not implemented**:
+
+| Factor | Proposed weight |
+| --- | ---: |
+| Potential economic impact | 25% |
+| Independent corroboration | 25% |
+| Three Peaks strategic relevance | 20% |
+| Market liquidity and credibility | 15% |
+| Probability movement | 10% |
+| Event proximity | 5% |
+
+This proposed score is distinct from the existing semantic market relevance score (0–10). Probability movement alone would carry only 10% of the proposed weighting. Before implementing FIS, define factor scales, missing-evidence treatment, directional impact, validation and safeguards against double-counting correlated markets. Do not treat a high FIS as a buy or sell instruction.
+
+### Using the research screen
+
+Open **Dashboard menu → Other Reports → Prediction Market Intelligence** (location may differ in a customized menu). Filter by thesis or exposure, search markets and tickers, page through results, and inspect the resolution rules, liquidity, volume, bid-ask spread, relevance and candidate company associations. The Emerging filter includes candidates outside the watchlist and relevant markets without watchlist matches. Holdings are derived from the recorded watchlist quantities and account labels, not a reconciled brokerage statement.
+
+**Refresh markets** requests discovery; **Reload results** reads saved results; **Print or save PDF** prints the displayed page; **Return to dashboard** navigates back. Partial results are explicitly identified and available during discovery. Report integrations use completed snapshots, not incomplete scans.
+
+### Automated discovery, persistence and cost controls
+
+The current implementation is designed to scan active, non-closed markets approximately every six hours using cursor pagination. Each retrieved page and its cursor are stored atomically in SQLite on persistent storage. Interrupted scans resume from a saved checkpoint where the provider cursor remains valid. Completed snapshots retain a rolling 35-day history. Historical 1-, 7- and 30-day comparisons require sufficiently close saved observations; unavailable comparisons are not fabricated.
+
+A separate semantic research worker prioritizes economically relevant markets and reserves processing capacity for unclassified markets. Unchanged questions and resolution rules reuse cached analysis. Discovery is comprehensive by design, but semantic coverage is progressive and not guaranteed to be complete at any given time. AI usage is tracked by UTC day, with defaults of 100 requests and a 1,000,000-token threshold per day, and batches of up to 20 markets. A final request can exceed the token threshold; failed requests may have unknown usage. Estimated dollar costs require configured model pricing and are unavailable when usage is unknown.
+
+### Interpretation and strategic safeguards
+
+Market-implied probabilities are not objective forecasts. Thin liquidity, wide spreads, ambiguous resolution rules, correlated events, stale observations, concentrated participation and speculative behavior can distort them. AI-generated ticker associations and opportunity/risk descriptions are research hypotheses and require independent verification. Do not equate an increased probability with a particular security's expected return or use it as an isolated trading signal.
+
+The strategic objective is to detect emerging investment opportunities and threats before they reach the watchlist, challenge existing assumptions, identify portfolio misalignment, and improve the timing of research, capital allocation and covered-call review. Independent evidence, business fundamentals, current valuation, liquidity, verified account exposure and contract details remain necessary for investment decisions.
+
+**Validation status:** the implementation is merged into main, but complete live discovery, semantic processing, report integration and corrected mobile rendering have not been independently verified. The stable release baseline remains unchanged.
