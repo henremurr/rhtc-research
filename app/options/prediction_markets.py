@@ -241,6 +241,8 @@ async def refresh():
             count=await asyncio.to_thread(finish_checkpoint,cp)
             save_status("completed",pages=cp["pages"],discovered=cp["retrieved"],active=count)
             log.warning("Prediction discovery completed: %d active markets, %d pages, %d retrieved",count,cp["pages"],cp["retrieved"])
+            from app.options.prediction_health import request_refresh
+            request_refresh()
             return {"as_of":cp["stamp"],"count":count}
         except asyncio.CancelledError:
             save_status("interrupted",pages=cp["pages"],discovered=cp["retrieved"])
@@ -262,6 +264,23 @@ async def scheduler():
         except Exception:
             log.exception("Prediction market scan failed; retaining prior complete scan")
         await asyncio.sleep(900)
+
+def maintain_database():
+    # Non-destructive maintenance; expired completed snapshots are already
+    # pruned on completion. Do not VACUUM an active production database.
+    with closing(connect()) as db:
+        db.execute("PRAGMA optimize")
+        db.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+        return {"pages":db.execute("PRAGMA page_count").fetchone()[0],"free_pages":db.execute("PRAGMA freelist_count").fetchone()[0]}
+
+async def maintenance_scheduler():
+    while True:
+        try:
+            result=await asyncio.to_thread(maintain_database)
+            log.warning("Prediction database maintenance: %s",result)
+        except Exception:
+            log.exception("Prediction database maintenance failed")
+        await asyncio.sleep(86400)
 
 async def research_scheduler():
     while True:
@@ -378,6 +397,13 @@ def read_research_status():
         row=db.execute("SELECT payload FROM prediction_research_status WHERE id=1").fetchone()
         return json.loads(row[0]) if row else {"state":"not started"}
 
+def direct_exposure(row,held):
+    return bool(held.intersection(re.findall(r"\$([A-Z][A-Z0-9.\-]{0,9})\b",row["title"])))
+
+def research_priority(row,held):
+    movement=max((abs(v) for d in row.get("changes_pp",{}).values() for v in d.values()),default=0)
+    return (direct_exposure(row,held),row["quality"]=="higher liquidity",movement,row["liquidity"] or 0)
+
 async def enrich_pending():
     if enrichment_lock.locked():
         return
@@ -391,9 +417,12 @@ async def enrich_pending():
             research_status("waiting",reason="No market snapshot yet")
             return
         pending = [r for r in await asyncio.to_thread(attach_research,rows) if r["research"] is None]
+        from app.options.api import read_watchlist
+        held={w["symbol"] for w in await asyncio.to_thread(read_watchlist) if (number(w.get("quantity")) or 0)>0}
+        await asyncio.to_thread(add_history,scan,pending)
         # Reserve every fifth batch for unclassified markets to prevent starvation.
-        ranked=sorted((r for r in pending if r["topics"]),key=lambda r:(r["quality"]=="higher liquidity",r["liquidity"] or 0),reverse=True)
-        unexplored=iter(r for r in pending if not r["topics"])
+        ranked=sorted((r for r in pending if r["topics"] or direct_exposure(r,held)),key=lambda r:research_priority(r,held),reverse=True)
+        unexplored=iter(sorted((r for r in pending if not r["topics"] and not direct_exposure(r,held)),key=lambda r:research_priority(r,held),reverse=True))
         ordered=[]
         for i in range(0,len(ranked),80):
             ordered.extend(ranked[i:i+80])
@@ -439,6 +468,9 @@ async def enrich_pending():
                     deferred.extend(r for r in batch if r["id"] not in saved_ids)
                     research_status("running",pending=max(0,len(pending)-reviewed),reviewed=reviewed,attempts=attempts,failures=failures,batch_size=size)
                     log.warning("Prediction semantic batch saved: %d/%d markets; cycle total %d",len(records),len(batch),reviewed)
+                    if reviewed==len(records):
+                        from app.options.prediction_health import request_refresh
+                        request_refresh()
                 except Exception as exc:
                     failures+=1
                     code=getattr(exc,"status_code",None)
@@ -456,6 +488,8 @@ async def enrich_pending():
         state="cycle completed with retries" if failures and reviewed else "failed" if failures else "cycle completed"
         research_status(state,pending=max(0,len(pending)-reviewed),reviewed=reviewed,attempts=attempts,failures=failures,reason=last_error)
         log.warning("Prediction semantic cycle completed: %d markets saved, %d failed attempts",reviewed,failures)
+        from app.options.prediction_health import request_refresh
+        request_refresh()
 
 def add_history(scan, rows):
     if not scan:
@@ -475,19 +509,23 @@ def add_history(scan, rows):
 
 def map_portfolio(rows, watchlist):
     symbols = {str(w["symbol"]).upper() for w in watchlist}
+    held_by_symbol={}
+    held_by_peak={}
+    for w in watchlist:
+        if (number(w.get("quantity")) or 0)<=0:
+            continue
+        symbol=w["symbol"]
+        held_by_symbol.setdefault(symbol,[]).append({"symbol":symbol,"account":w.get("account"),"quantity":w.get("quantity"),"call_expiration":w.get("lt_expy"),"call_contracts":w.get("lt_qty"),"additional_calls":w.get("additional_calls",[])})
+        held_by_peak.setdefault(w.get("peak"),set()).add(symbol)
     for row in rows:
-        review = row["research"] or {}
-        # Exact explicit uppercase symbols only; thematic matches shown separately.
-        explicit = set(re.findall(r"\$([A-Z][A-Z0-9.\-]{0,9})\b",row["title"]))
-        candidates = set(review.get("tickers",[])) | explicit
-        row["watchlist_matches"] = sorted(symbols & candidates)
-        row["outside_candidates"] = sorted(candidates-symbols)
-        row["holdings"] = [{"symbol":w["symbol"],"account":w.get("account"),"quantity":w.get("quantity"),
-                            "call_expiration":w.get("lt_expy"),"call_contracts":w.get("lt_qty"),
-                            "additional_calls":w.get("additional_calls",[])}
-                           for w in watchlist if w["symbol"] in candidates and (number(w.get("quantity")) or 0)>0]
-        row["thematic_exposure"] = sorted({w["symbol"] for w in watchlist if w.get("peak") in row["topics"] and (number(w.get("quantity")) or 0)>0})
-        row["relevance"] = review.get("relevance") if row["research"] else None
+        review=row["research"] or {}
+        explicit=set(re.findall(r"\$([A-Z][A-Z0-9.\-]{0,9})\b",row["title"]))
+        candidates=set(review.get("tickers",[])) | explicit
+        row["watchlist_matches"]=sorted(symbols & candidates)
+        row["outside_candidates"]=sorted(candidates-symbols)
+        row["holdings"]=[h for symbol in sorted(candidates) for h in held_by_symbol.get(symbol,[])]
+        row["thematic_exposure"]=sorted(set().union(*(held_by_peak.get(t,set()) for t in row["topics"])))
+        row["relevance"]=review.get("relevance") if row["research"] else None
     return rows
 
 def current_markets(include_partial=False):
@@ -504,13 +542,17 @@ def priority(row):
 def research_context():
     """Compact saved prediction evidence for existing report generators."""
     try:
-        scan, rows = current_markets()
+        scan, rows = latest()
         if not scan:
             return {"status":"No completed prediction scan"}
-        ranked = sorted([r for r in rows if (r["relevance"] or 0)>=5],key=priority,reverse=True)[:20]
+        attach_research(rows)
+        reviewed=sum(r["research"] is not None for r in rows)
+        from app.options.api import read_watchlist
+        eligible=[r for r in rows if (r["research"] or {}).get("relevance",0)>=5]
+        ranked=sorted(map_portfolio(add_history(scan,eligible),read_watchlist()),key=priority,reverse=True)[:20]
         keys = ("id","title","topics","probabilities","changes_pp","quality","end_date","resolution_source","research","watchlist_matches","outside_candidates","holdings")
         return {"as_of":scan["stamp"],"stale":(datetime.now(timezone.utc)-datetime.fromisoformat(scan["stamp"])).total_seconds()>43200,
-                "scanned":len(rows),"semantically_reviewed":sum(r["research"] is not None for r in rows),
+                "scanned":len(rows),"semantically_reviewed":reviewed,
                 "selected":[{k:r[k] for k in keys} for r in ranked],
                 "warning":"Unverified market expectations and candidate mappings, not facts or standalone trade signals. Corroborate with independent research; selected subset only."}
     except Exception:
