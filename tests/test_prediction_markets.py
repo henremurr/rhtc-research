@@ -55,3 +55,40 @@ class PredictionMarketTests(unittest.TestCase):
         from app.options.prediction_markets import validate_research
         self.assertEqual(validate_research({"relevance":20})["relevance"],10)
         self.assertEqual(validate_research({"relevance":-4})["relevance"],0)
+
+    def test_checkpoint_resume_and_publish(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from app.options import prediction_markets as pm
+        with tempfile.TemporaryDirectory() as folder:
+            with patch("app.options.api.watchlist_db_path",return_value=Path(folder)/"watch.sqlite3"):
+                cp=pm.begin_checkpoint()
+                page=[{"id":"1","question":"AI chips","active":True,"closed":False},
+                      {"id":"2","question":"Closed","active":True,"closed":True}]
+                cp=pm.persist_page(cp,page,"next")
+                self.assertEqual(pm.checkpoint(),cp)
+                self.assertEqual(pm.latest(),(None,[]))
+                scan,rows=pm.latest(True)
+                self.assertTrue(scan["partial"])
+                self.assertEqual([r["id"] for r in rows],["1"])
+                with self.assertRaises(ValueError):
+                    pm.persist_page(cp,page,"next")
+                self.assertEqual(pm.checkpoint(),cp)
+                cp=pm.persist_page(cp,[{"id":"3","question":"Nuclear","active":True,"closed":False}],None)
+                self.assertEqual(pm.finish_checkpoint(cp),2)
+                self.assertIsNone(pm.checkpoint())
+                scan,rows=pm.latest()
+                self.assertEqual(scan["count"],2)
+                self.assertEqual({r["id"] for r in rows},{"1","3"})
+
+    def test_daily_request_cap(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from app.options import prediction_markets as pm
+        with tempfile.TemporaryDirectory() as folder:
+            with patch("app.options.api.watchlist_db_path",return_value=Path(folder)/"watch.sqlite3"), patch.dict("os.environ",{"RHTC_PREDICTION_DAILY_REQUESTS":"1","RHTC_PREDICTION_DAILY_TOKENS":"1000"}):
+                self.assertIsNotNone(pm.reserve_request())
+                self.assertIsNone(pm.reserve_request())
+                self.assertEqual(pm.daily_usage()["unknown_usage"],1)
