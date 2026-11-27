@@ -15,22 +15,24 @@ class PredictionMarketTests(unittest.TestCase):
     def test_all_pages_and_unclassified(self):
         async def run():
             def handler(request):
-                offset = int(request.url.params["offset"])
+                cursor = request.url.params.get("after_cursor")
                 self.assertEqual(request.url.params["active"], "true")
                 self.assertEqual(request.url.params["closed"], "false")
-                page = [{"id": str(offset), "question": "Unfamiliar subject",
-                         "active": True, "closed": False}] if offset < 2 else []
-                return httpx.Response(200, json=page)
+                self.assertNotIn("offset", request.url.params)
+                if cursor is None:
+                    return httpx.Response(200,json={"markets":[{"id":"1","question":"Unfamiliar subject","active":True,"closed":False}],"next_cursor":"next"})
+                self.assertEqual(cursor,"next")
+                return httpx.Response(200,json={"markets":[{"id":"2","question":"Unfamiliar subject","active":True,"closed":False}]})
             async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
                 rows = await discover(client)
-            self.assertEqual(len(rows), 2)
-            self.assertEqual(rows[0]["topics"], [])
+            self.assertEqual(len(rows),2)
+            self.assertEqual(rows[0]["topics"],[])
         asyncio.run(run())
 
     def test_repeated_page_fails(self):
         async def run():
             def handler(request):
-                return httpx.Response(200, json=[{"id":"1","active":True,"closed":False}])
+                return httpx.Response(200,json={"markets":[{"id":"1","active":True,"closed":False}],"next_cursor":"repeat"})
             async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
                 with self.assertRaises(ValueError):
                     await discover(client)

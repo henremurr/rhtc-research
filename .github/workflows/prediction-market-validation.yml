@@ -39,14 +39,18 @@ jobs:
           import httpx
           from app.options.prediction_markets import URL, normalize
           with httpx.Client(timeout=30) as client:
-              pages = []
-              for offset in (0, 2):
-                  r = client.get(URL, params={'active':'true','closed':'false','limit':2,'offset':offset,'order':'id','ascending':'true'})
-                  r.raise_for_status()
-                  page = r.json()
-                  assert isinstance(page,list) and page, 'Expected active markets'
-                  assert all(m.get('active') is True and m.get('closed') is False for m in page)
-                  pages.append({normalize(m)['id'] for m in page})
-              assert pages[0].isdisjoint(pages[1]), 'Pagination repeated market IDs'
+              params = {'active':'true','closed':'false','limit':2,'order':'id','ascending':'true'}
+              r = client.get(URL, params=params)
+              r.raise_for_status()
+              first = r.json()
+              assert isinstance(first.get('markets'),list) and first['markets']
+              assert first.get('next_cursor'), 'Expected cursor for next page'
+              r = client.get(URL, params={**params,'after_cursor':first['next_cursor']})
+              r.raise_for_status()
+              second = r.json()
+              assert second.get('markets'), 'Expected second page'
+              for page in (first,second):
+                  assert all(m.get('active') is True and m.get('closed') is False for m in page['markets'])
+              assert {normalize(m)['id'] for m in first['markets']}.isdisjoint({normalize(m)['id'] for m in second['markets']})
           print('Live provider schema and two-page pagination verified')
           PY

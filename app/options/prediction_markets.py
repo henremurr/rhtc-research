@@ -17,7 +17,7 @@ from fastapi import APIRouter, HTTPException, Query
 router = APIRouter(prefix="/api/prediction-markets")
 log = logging.getLogger(__name__)
 lock = asyncio.Lock()
-URL = "https://gamma-api.polymarket.com/markets"
+URL = "https://gamma-api.polymarket.com/markets/keyset"
 TOPICS = {
     "AI/I": r"artificial intelligence|\bAI\b|semiconductor|chip|data cent[er]+|cloud computing|robotics|quantum|memory|inference",
     "EFM/I": r"nuclear|fusion|uranium|electricity|power grid|energy|oil|natural gas|critical mineral|rare earth|manufacturing|copper",
@@ -68,45 +68,87 @@ def connect():
     db.execute("CREATE TABLE IF NOT EXISTS snapshots (stamp TEXT NOT NULL, id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(stamp,id))")
     db.execute('CREATE TABLE IF NOT EXISTS market_research (id TEXT NOT NULL, fingerprint TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(id,fingerprint))')
     db.execute('CREATE INDEX IF NOT EXISTS snapshots_id_stamp ON snapshots(id,stamp)')
+    db.execute("CREATE TABLE IF NOT EXISTS scan_status (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL)")
     db.commit()
     return db
 
-async def discover(client):
-    # No search terms or portfolio filters are sent to the provider.
+def save_status(state, **fields):
+    with closing(connect()) as db, db:
+        db.execute("INSERT OR REPLACE INTO scan_status VALUES (1,?)", (json.dumps({"state":state,"updated_at":datetime.now(timezone.utc).isoformat(),**fields}),))
+
+def read_status():
+    with closing(connect()) as db:
+        row = db.execute("SELECT payload FROM scan_status WHERE id=1").fetchone()
+        return json.loads(row[0]) if row else {"state":"not started"}
+
+async def discover(client, progress=None):
     markets = {}
-    offset = 0
+    cursor = None
+    seen = set()
+    pages = 0
     while True:
-        response = await client.get(URL, params={"active": "true", "closed": "false", "limit": 100, "offset": offset, "order": "id", "ascending": "true"})
-        response.raise_for_status()
-        page = response.json()
-        if not isinstance(page, list):
-            raise ValueError("Unexpected market response")
-        if not page:
-            break
-        new_ids = 0
+        params = {"active":"true","closed":"false","limit":100,"order":"id","ascending":"true"}
+        if cursor:
+            params["after_cursor"] = cursor
+        for attempt in range(4):
+            try:
+                response = await client.get(URL,params=params)
+                if response.status_code in (429,500,502,503,504) and attempt<3:
+                    await asyncio.sleep(2**attempt)
+                    continue
+                response.raise_for_status()
+                break
+            except httpx.TransportError:
+                if attempt==3:
+                    raise
+                await asyncio.sleep(2**attempt)
+        payload = response.json()
+        if not isinstance(payload,dict) or not isinstance(payload.get("markets"),list):
+            raise ValueError("Unexpected cursor response")
+        page = payload["markets"]
+        before = len(markets)
         for m in page:
-            mid = str(m["id"])
-            if mid not in markets:
-                new_ids += 1
-            markets[mid] = m
-        if not new_ids:
-            raise ValueError("Pagination stopped advancing")
-        offset += len(page)
+            markets[str(m["id"])] = m
+        pages += 1
+        if progress:
+            progress(pages,len(markets))
+        next_cursor = payload.get("next_cursor")
+        if not next_cursor:
+            break
+        if not page or len(markets)==before or next_cursor in seen:
+            raise ValueError("Market cursor stopped advancing")
+        seen.add(next_cursor)
+        cursor = next_cursor
         await asyncio.sleep(.1)
     return [normalize(m) for m in markets.values() if m.get("active") is True and m.get("closed") is False]
 
 async def refresh():
     async with lock:
-        async with httpx.AsyncClient(timeout=30) as client:
-            rows = await discover(client)
-        if not rows:
-            raise ValueError("Empty scan; previous snapshot retained")
-        stamp = datetime.now(timezone.utc).isoformat()
-        with closing(connect()) as db, db:
-            db.execute("INSERT INTO scans VALUES (?,?)", (stamp, len(rows)))
-            db.executemany("INSERT INTO snapshots VALUES (?,?,?)",
-                           [(stamp, m["id"], json.dumps(m)) for m in rows])
-        return {"as_of": stamp, "count": len(rows)}
+        progress = {"pages":0,"discovered":0}
+        def report(pages,count):
+            progress.update(pages=pages,discovered=count)
+            save_status("running",**progress)
+        try:
+            report(0,0)
+            async with httpx.AsyncClient(timeout=30) as client:
+                rows = await discover(client,report)
+            if not rows:
+                raise ValueError("Empty scan; previous snapshot retained")
+            stamp = datetime.now(timezone.utc).isoformat()
+            with closing(connect()) as db, db:
+                db.execute("INSERT INTO scans VALUES (?,?)",(stamp,len(rows)))
+                db.executemany("INSERT INTO snapshots VALUES (?,?,?)",[(stamp,m["id"],json.dumps(m)) for m in rows])
+            save_status("completed",**progress)
+            return {"as_of":stamp,"count":len(rows)}
+        except asyncio.CancelledError:
+            save_status("interrupted",**progress)
+            raise
+        except Exception as exc:
+            reason = ("Provider HTTP "+str(exc.response.status_code) if isinstance(exc,httpx.HTTPStatusError)
+                      else "Provider connection failed: "+type(exc).__name__ if isinstance(exc,httpx.TransportError)
+                      else str(exc)[:200] if isinstance(exc,ValueError) else type(exc).__name__)
+            save_status("failed",error=reason,**progress)
+            raise
 
 async def scheduler():
     while True:
@@ -263,7 +305,7 @@ def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int 
         rows = [r for r in rows if q.casefold() in json.dumps(r,ensure_ascii=False).casefold()]
     rows.sort(key=priority,reverse=True)
     return {"scan":scan,"reviewed":reviewed,"count":len(rows),"markets":rows[offset:offset+limit],
-            "scanning":lock.locked(),"reviewing":enrichment_lock.locked(),
+            "scanning":lock.locked(),"reviewing":enrichment_lock.locked(),"scan_status":read_status(),
             "caution":"Market prices are complementary evidence only; independently verify fundamentals and resolution rules."}
 
 @router.post("/refresh",status_code=202)
