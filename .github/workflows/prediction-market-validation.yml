@@ -1,0 +1,52 @@
+name: Prediction Market Validation
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RHTC_DATA_DIR: ${{ runner.temp }}/rhtc-validation
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: Compile application
+        run: python -m compileall -q app main.py tests
+      - name: Prediction market regression tests
+        run: python -m unittest discover -s tests -p 'test_prediction_markets.py' -v
+      - name: Application import and authenticated route registration
+        run: |
+          python - <<'PY'
+          from main import app
+          from app.options.api import app as options
+          paths = {route.path for route in options.routes}
+          assert '/api/prediction-markets' in paths
+          assert '/api/prediction-markets/refresh' in paths
+          assert '/prediction-markets' in paths
+          print('Prediction market routes registered')
+          PY
+      - name: Live read-only provider contract smoke test
+        run: |
+          python - <<'PY'
+          import httpx
+          from app.options.prediction_markets import URL, normalize
+          with httpx.Client(timeout=30) as client:
+              pages = []
+              for offset in (0, 2):
+                  r = client.get(URL, params={'active':'true','closed':'false','limit':2,'offset':offset,'order':'id','ascending':'true'})
+                  r.raise_for_status()
+                  page = r.json()
+                  assert isinstance(page,list) and page, 'Expected active markets'
+                  assert all(m.get('active') is True and m.get('closed') is False for m in page)
+                  pages.append({normalize(m)['id'] for m in page})
+              assert pages[0].isdisjoint(pages[1]), 'Pagination repeated market IDs'
+          print('Live provider schema and two-page pagination verified')
+          PY
