@@ -69,6 +69,9 @@ def connect():
     db.execute('CREATE TABLE IF NOT EXISTS market_research (id TEXT NOT NULL, fingerprint TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(id,fingerprint))')
     db.execute('CREATE INDEX IF NOT EXISTS snapshots_id_stamp ON snapshots(id,stamp)')
     db.execute("CREATE TABLE IF NOT EXISTS scan_status (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL)")
+    db.execute("CREATE TABLE IF NOT EXISTS scan_checkpoint (id INTEGER PRIMARY KEY CHECK(id=1), stamp TEXT NOT NULL, cursor TEXT, pages INTEGER NOT NULL, retrieved INTEGER NOT NULL, exhausted INTEGER NOT NULL DEFAULT 0)")
+    db.execute("CREATE TABLE IF NOT EXISTS scan_cursors (stamp TEXT NOT NULL, cursor TEXT NOT NULL, PRIMARY KEY(stamp,cursor))")
+    db.execute("CREATE TABLE IF NOT EXISTS prediction_usage (day TEXT PRIMARY KEY, requests INTEGER NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, unknown_usage INTEGER NOT NULL)")
     db.commit()
     return db
 
@@ -122,32 +125,96 @@ async def discover(client, progress=None):
         await asyncio.sleep(.1)
     return [normalize(m) for m in markets.values() if m.get("active") is True and m.get("closed") is False]
 
+def checkpoint():
+    with closing(connect()) as db:
+        row = db.execute("SELECT * FROM scan_checkpoint WHERE id=1").fetchone()
+        return dict(row) if row else None
+
+def begin_checkpoint():
+    with closing(connect()) as db, db:
+        db.execute("BEGIN IMMEDIATE")
+        db.execute("INSERT OR IGNORE INTO scan_checkpoint VALUES (1,?,NULL,0,0,0)",(datetime.now(timezone.utc).isoformat(),))
+        return dict(db.execute("SELECT * FROM scan_checkpoint WHERE id=1").fetchone())
+
+def persist_page(cp, page, next_cursor):
+    # Data and cursor advance in the same transaction. A restart cannot skip a page.
+    rows = [normalize(m) for m in page if m.get("active") is True and m.get("closed") is False and m.get("archived") is not True]
+    observed = datetime.now(timezone.utc).isoformat()
+    with closing(connect()) as db, db:
+        db.execute("BEGIN IMMEDIATE")
+        current = db.execute("SELECT * FROM scan_checkpoint WHERE id=1").fetchone()
+        if current is None or dict(current)!=cp:
+            raise ValueError("Checkpoint changed; another scan owns this page")
+        if next_cursor:
+            if not page or next_cursor==cp["cursor"] or db.execute("SELECT 1 FROM scan_cursors WHERE stamp=? AND cursor=?",(cp["stamp"],next_cursor)).fetchone():
+                raise ValueError("Market cursor stopped advancing")
+            db.execute("INSERT INTO scan_cursors VALUES (?,?)",(cp["stamp"],next_cursor))
+        for row in rows:
+            row["observed_at"] = observed
+        db.executemany("INSERT OR REPLACE INTO snapshots VALUES (?,?,?)",[(cp["stamp"],m["id"],json.dumps(m)) for m in rows])
+        db.execute("UPDATE scan_checkpoint SET cursor=?,pages=pages+1,retrieved=retrieved+?,exhausted=? WHERE id=1",(next_cursor,len(page),int(not next_cursor)))
+        return dict(db.execute("SELECT * FROM scan_checkpoint WHERE id=1").fetchone())
+
+def finish_checkpoint(cp):
+    with closing(connect()) as db, db:
+        db.execute("BEGIN IMMEDIATE")
+        current = db.execute("SELECT * FROM scan_checkpoint WHERE id=1").fetchone()
+        if current is None or dict(current)!=cp or not cp["exhausted"]:
+            raise ValueError("Cannot publish an incomplete scan")
+        count = db.execute("SELECT COUNT(*) FROM snapshots WHERE stamp=?",(cp["stamp"],)).fetchone()[0]
+        if not count:
+            raise ValueError("Empty active scan; previous complete snapshot retained")
+        db.execute("INSERT INTO scans VALUES (?,?)",(cp["stamp"],count))
+        db.execute("DELETE FROM scan_cursors WHERE stamp=?",(cp["stamp"],))
+        db.execute("DELETE FROM scan_checkpoint WHERE id=1")
+        # Retain 35 days of scan history; never delete the current or incomplete scan.
+        cutoff = (datetime.now(timezone.utc)-timedelta(days=35)).isoformat()
+        db.execute("DELETE FROM snapshots WHERE stamp IN (SELECT stamp FROM scans WHERE stamp<? AND stamp<>?)",(cutoff,cp["stamp"]))
+        db.execute("DELETE FROM scans WHERE stamp<? AND stamp<>?",(cutoff,cp["stamp"]))
+        return count
+
+async def fetch_page(client,cursor):
+    params = {"active":"true","closed":"false","limit":100,"order":"id","ascending":"true"}
+    if cursor:
+        params["after_cursor"]=cursor
+    for attempt in range(4):
+        try:
+            response=await client.get(URL,params=params)
+            if response.status_code in (429,500,502,503,504) and attempt<3:
+                await asyncio.sleep(2**attempt)
+                continue
+            response.raise_for_status()
+            payload=response.json()
+            if not isinstance(payload,dict) or not isinstance(payload.get("markets"),list):
+                raise ValueError("Unexpected cursor response")
+            return payload["markets"],payload.get("next_cursor")
+        except httpx.TransportError:
+            if attempt==3:
+                raise
+            await asyncio.sleep(2**attempt)
+
 async def refresh():
     async with lock:
-        progress = {"pages":0,"discovered":0}
-        def report(pages,count):
-            progress.update(pages=pages,discovered=count)
-            save_status("running",**progress)
+        cp = await asyncio.to_thread(begin_checkpoint)
         try:
-            report(0,0)
+            save_status("running",pages=cp["pages"],discovered=cp["retrieved"])
             async with httpx.AsyncClient(timeout=30) as client:
-                rows = await discover(client,report)
-            if not rows:
-                raise ValueError("Empty scan; previous snapshot retained")
-            stamp = datetime.now(timezone.utc).isoformat()
-            with closing(connect()) as db, db:
-                db.execute("INSERT INTO scans VALUES (?,?)",(stamp,len(rows)))
-                db.executemany("INSERT INTO snapshots VALUES (?,?,?)",[(stamp,m["id"],json.dumps(m)) for m in rows])
-            save_status("completed",**progress)
-            return {"as_of":stamp,"count":len(rows)}
+                while not cp["exhausted"]:
+                    page,cursor=await fetch_page(client,cp["cursor"])
+                    cp=await asyncio.to_thread(persist_page,cp,page,cursor)
+                    save_status("running",pages=cp["pages"],discovered=cp["retrieved"])
+                    await asyncio.sleep(.1)
+            count=await asyncio.to_thread(finish_checkpoint,cp)
+            save_status("completed",pages=cp["pages"],discovered=cp["retrieved"],active=count)
+            return {"as_of":cp["stamp"],"count":count}
         except asyncio.CancelledError:
-            save_status("interrupted",**progress)
+            save_status("interrupted",pages=cp["pages"],discovered=cp["retrieved"])
             raise
         except Exception as exc:
-            reason = ("Provider HTTP "+str(exc.response.status_code) if isinstance(exc,httpx.HTTPStatusError)
-                      else "Provider connection failed: "+type(exc).__name__ if isinstance(exc,httpx.TransportError)
-                      else str(exc)[:200] if isinstance(exc,ValueError) else type(exc).__name__)
-            save_status("failed",error=reason,**progress)
+            reason=("Provider HTTP "+str(exc.response.status_code) if isinstance(exc,httpx.HTTPStatusError)
+                    else "Provider connection failed: "+type(exc).__name__ if isinstance(exc,httpx.TransportError)
+                    else str(exc)[:200] if isinstance(exc,ValueError) else type(exc).__name__)
+            save_status("failed",error=reason,pages=cp["pages"],discovered=cp["retrieved"])
             raise
 
 async def scheduler():
@@ -155,16 +222,29 @@ async def scheduler():
         try:
             with closing(connect()) as db:
                 latest = db.execute("SELECT MAX(stamp) FROM scans").fetchone()[0]
-            if not latest or (datetime.now(timezone.utc)-datetime.fromisoformat(latest)).total_seconds() >= 21600:
+            if checkpoint() or not latest or (datetime.now(timezone.utc)-datetime.fromisoformat(latest)).total_seconds() >= 21600:
                 await refresh()
-            await enrich_pending()
         except Exception:
             log.exception("Prediction market scan failed; retaining prior complete scan")
         await asyncio.sleep(900)
 
-def latest():
+async def research_scheduler():
+    while True:
+        try:
+            await enrich_pending()
+        except Exception:
+            log.exception("Prediction research cycle failed")
+        await asyncio.sleep(900)
+
+def latest(include_partial=False):
     with closing(connect()) as db:
         scan = db.execute("SELECT stamp,count FROM scans ORDER BY stamp DESC LIMIT 1").fetchone()
+        if include_partial:
+            cp=db.execute("SELECT stamp FROM scan_checkpoint WHERE id=1").fetchone()
+            if cp:
+                count=db.execute("SELECT COUNT(*) FROM snapshots WHERE stamp=?",(cp["stamp"],)).fetchone()[0]
+                if count:
+                    scan={"stamp":cp["stamp"],"count":count,"partial":True}
         if not scan:
             return None, []
         return dict(scan), [json.loads(r[0]) for r in db.execute("SELECT payload FROM snapshots WHERE stamp=?", (scan["stamp"],))]
@@ -201,10 +281,18 @@ async def enrich_pending():
         return
     async with enrichment_lock:
         from openai import AsyncOpenAI
-        scan, rows = latest()
+        scan, rows = await asyncio.to_thread(latest,True)
         if not scan:
             return
-        pending = [r for r in attach_research(rows) if r["research"] is None]
+        pending = [r for r in await asyncio.to_thread(attach_research,rows) if r["research"] is None]
+        # Reserve every fifth batch for unclassified markets to prevent starvation.
+        ranked=sorted((r for r in pending if r["topics"]),key=lambda r:(r["quality"]=="higher liquidity",r["liquidity"] or 0),reverse=True)
+        unexplored=iter(r for r in pending if not r["topics"])
+        ordered=[]
+        for i in range(0,len(ranked),80):
+            ordered.extend(ranked[i:i+80])
+            ordered.extend(next(unexplored,None) for _ in range(20))
+        pending=[r for r in ordered if r is not None]+list(unexplored)
         # Bounded batches per scheduler tick; no relevance prefilter. Every market
         # remains discoverable while its semantic review is pending.
         max_batches = max(1, min(100, int(os.getenv("RHTC_PREDICTION_AI_BATCHES", "10"))))
@@ -262,9 +350,9 @@ def map_portfolio(rows, watchlist):
         row["relevance"] = review.get("relevance") if row["research"] else None
     return rows
 
-def current_markets():
+def current_markets(include_partial=False):
     from app.options.api import read_watchlist
-    scan, rows = latest()
+    scan, rows = latest(include_partial=include_partial)
     if not scan:
         return scan, rows
     return scan, map_portfolio(add_history(scan,attach_research(rows)),read_watchlist())
@@ -291,7 +379,7 @@ def research_context():
 
 @router.get("")
 def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500)):
-    scan, rows = current_markets()
+    scan, rows = current_markets(include_partial=True)
     reviewed = sum(r["research"] is not None for r in rows)
     if topic != "All":
         rows = [r for r in rows if topic in r["topics"] or (topic == "Unclassified" and not r["topics"])]
@@ -315,7 +403,6 @@ async def refresh_markets():
     async def run():
         try:
             await refresh()
-            await enrich_pending()
         except Exception:
             log.exception("Manual scan failed; previous snapshot retained")
     asyncio.create_task(run())
