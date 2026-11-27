@@ -3885,6 +3885,8 @@ async def generate_long_game_analysis(job_id, job, storage, activity):
         now = now_pacific()
         timestamp = now.strftime("%B %d, %Y at %I:%M %p %Z")
         facts = portfolio_facts(watchlist, prices, now.date().isoformat())
+        from app.options.prediction_markets import research_context
+        facts["prediction_market_evidence"] = await asyncio.to_thread(research_context)
         job["inputs"] = (facts, stock, ceo, news, timestamp)
         storage.save_inputs(job_id, job["inputs"])
     facts, stock, ceo, news, timestamp = job["inputs"]
