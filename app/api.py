@@ -14,7 +14,7 @@ from app.models import BatchRequest
 from app.options.api import app as options_app
 from app.legal import router as legal_router
 from app.options.news import start_daily_news_scheduler
-from app.options.prediction_markets import router as prediction_router, scheduler as prediction_scheduler
+from app.options.prediction_markets import router as prediction_router, page_router as prediction_page_router, scheduler as prediction_scheduler
 
 from app.perplexity_client import analyze_one
 from app.reporting import create_pdf
@@ -32,6 +32,7 @@ app = FastAPI(
     description="Three Peaks batch research, classification, and PDF reporting.",
 )
 options_app.include_router(prediction_router)
+options_app.include_router(prediction_page_router)
 app.mount("/options", options_app)
 app.include_router(legal_router)
 
