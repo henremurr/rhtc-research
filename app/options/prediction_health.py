@@ -60,12 +60,13 @@ def storage_checks():
     checks.append(check("Discovery worker","fail" if state=="failed" else "warn" if state=="interrupted" else "pass" if state=="completed" or state=="running" and pm.lock.locked() else "pending",f"{state}; {status.get('discovered',0)} retrieved; {status.get('error','')}"))
     rs=pm.read_research_status()
     state=rs.get("state")
-    checks.append(check("Semantic worker","fail" if state=="failed" else "warn" if state in ("disabled","budget limited") else "pass" if reviewed and state in ("running","cycle completed","up to date") else "pending",f"{state}; {reviewed} distinct cached market IDs (all snapshots); {rs.get('reason','')}"))
+    checks.append(check("Semantic worker","fail" if state=="failed" else "warn" if state in ("disabled","budget limited","retrying","cycle completed with retries") else "pass" if reviewed and state in ("running","cycle completed","up to date") else "pending",f"{state}; {reviewed} distinct cached market IDs (all snapshots); {rs.get('reason','')}"))
     usage=pm.daily_usage()
     checks.append(check("AI usage accounting","warn" if usage["unknown_usage"] else "pass",f"{usage['requests']}/{usage['request_limit']} requests; {usage['input_tokens']+usage['output_tokens']}/{usage['token_limit']} tokens; {usage['unknown_usage']} unknown requests"))
     disk=shutil.disk_usage(path.parent)
     db_bytes=sum(p.stat().st_size for p in (path,Path(str(path)+"-wal"),Path(str(path)+"-shm")) if p.exists())
-    checks.append(check("Persistent volume headroom","warn" if disk.free/disk.total<.15 else "pass",f"Prediction database and sidecars {db_bytes/1048576:.1f} MiB; filesystem free {disk.free/1048576:.1f} MiB"))
+    used=1-disk.free/disk.total
+    checks.append(check("Persistent volume headroom","fail" if used>=.85 else "warn" if used>=.70 else "pass",f"Filesystem {used:.1%} used; prediction database and sidecars {db_bytes/1048576:.1f} MiB; filesystem free {disk.free/1048576:.1f} MiB"))
     return checks
 
 async def provider_check():
