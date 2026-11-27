@@ -92,3 +92,19 @@ class PredictionMarketTests(unittest.TestCase):
                 self.assertIsNotNone(pm.reserve_request())
                 self.assertIsNone(pm.reserve_request())
                 self.assertEqual(pm.daily_usage()["unknown_usage"],1)
+
+    def test_json_mode_input_and_response_validation(self):
+        from types import SimpleNamespace
+        import json
+        from app.options import prediction_markets as pm
+        self.assertIn("json",pm.semantic_input([{"id":"1"}]).lower())
+        batch=[pm.normalize({"id":"1","question":"AI chips"}),pm.normalize({"id":"2","question":"Grid"})]
+        result=SimpleNamespace(status="completed",output_text=json.dumps({"items":[{"id":"1","relevance":8},{"id":"1","relevance":2},{"id":"other","relevance":9},{"id":"2"}]}))
+        records=pm.validated_batch_items(result,batch)
+        self.assertEqual(len(records),1)
+        self.assertEqual(records[0][0],"1")
+        self.assertEqual(json.loads(records[0][2])["relevance"],8)
+        with self.assertRaises(ValueError):
+            pm.validated_batch_items(SimpleNamespace(status="incomplete",output_text="{}"),batch)
+        with self.assertRaises(ValueError):
+            pm.validated_batch_items(SimpleNamespace(status="completed",output_text='{"items":[]}'),batch)
