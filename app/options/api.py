@@ -1600,7 +1600,10 @@ async def infrastructure_inventory(include_sources: bool = Query(default=False))
             except (httpx.HTTPError, ValueError, TypeError):
                 source_checks = {"status": "unavailable", "results": []}
 
+    from app.options.prediction_health import latest_health
+    prediction_health = await asyncio.to_thread(latest_health)
     return {
+        "prediction_health": prediction_health,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "release": {
             "version": OPTIONS_RELEASE_VERSION,
