@@ -78,6 +78,9 @@ def connect():
     db.execute("CREATE TABLE IF NOT EXISTS prediction_usage (day TEXT PRIMARY KEY, requests INTEGER NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, unknown_usage INTEGER NOT NULL)")
     db.execute("CREATE TABLE IF NOT EXISTS prediction_request_ledger (id TEXT PRIMARY KEY, day TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, state TEXT NOT NULL, provider_request_id TEXT, input_tokens INTEGER, output_tokens INTEGER, reason TEXT)")
     db.execute("CREATE INDEX IF NOT EXISTS prediction_ledger_day ON prediction_request_ledger(day,state)")
+    db.execute("CREATE TABLE IF NOT EXISTS market_catalog (stamp TEXT NOT NULL,id TEXT NOT NULL,fingerprint TEXT NOT NULL,topics TEXT NOT NULL,tickers TEXT NOT NULL,search_text TEXT NOT NULL,liquidity REAL NOT NULL,quality INTEGER NOT NULL,PRIMARY KEY(stamp,id))")
+    db.execute("CREATE INDEX IF NOT EXISTS market_catalog_order ON market_catalog(stamp,quality DESC,liquidity DESC,id)")
+    db.execute("CREATE TABLE IF NOT EXISTS market_catalog_state (stamp TEXT PRIMARY KEY,last_id TEXT NOT NULL,complete INTEGER NOT NULL DEFAULT 0)")
     db.commit()
     return db
 
@@ -187,6 +190,7 @@ def persist_page(cp, page, next_cursor):
         packed=[(m["id"],*compact_snapshot(m)) for m in rows]
         db.executemany("INSERT OR IGNORE INTO market_metadata VALUES (?,?)",[(key,static) for _,key,static,_ in packed])
         db.executemany("INSERT OR REPLACE INTO snapshots VALUES (?,?,?)",[(cp["stamp"],mid,payload) for mid,_,_,payload in packed])
+        db.executemany("INSERT OR REPLACE INTO market_catalog VALUES (?,?,?,?,?,?,?,?)",[catalog_record(cp["stamp"],m) for m in rows])
         db.execute("UPDATE scan_checkpoint SET cursor=?,pages=pages+1,retrieved=retrieved+?,exhausted=? WHERE id=1",(next_cursor,len(page),int(not next_cursor)))
         return dict(db.execute("SELECT * FROM scan_checkpoint WHERE id=1").fetchone())
 
@@ -205,6 +209,8 @@ def finish_checkpoint(cp):
         # Retain 35 days of scan history; never delete the current or incomplete scan.
         cutoff = (datetime.now(timezone.utc)-timedelta(days=35)).isoformat()
         db.execute("DELETE FROM snapshots WHERE stamp IN (SELECT stamp FROM scans WHERE stamp<? AND stamp<>?)",(cutoff,cp["stamp"]))
+        db.execute("DELETE FROM market_catalog WHERE stamp IN (SELECT stamp FROM scans WHERE stamp<? AND stamp<>?)",(cutoff,cp["stamp"]))
+        db.execute("DELETE FROM market_catalog_state WHERE stamp IN (SELECT stamp FROM scans WHERE stamp<? AND stamp<>?)",(cutoff,cp["stamp"]))
         db.execute("DELETE FROM scans WHERE stamp<? AND stamp<>?",(cutoff,cp["stamp"]))
         return count
 
@@ -610,6 +616,101 @@ def map_portfolio(rows, watchlist):
         row["relevance"]=review.get("relevance") if row["research"] else None
     return rows
 
+def catalog_record(stamp,row):
+    explicit=sorted(set(re.findall(r"\$([A-Z][A-Z0-9.\-]{0,9})\b",row["title"])))
+    # Searchable text is deliberately bounded; full text search retains the
+    # existing fallback below, so indexing cannot silently hide matches.
+    return (stamp,row["id"],fingerprint(row),json.dumps(row["topics"]),json.dumps(explicit),
+            row["title"][:500].casefold(),row["liquidity"] or 0,int(row["quality"]=="higher liquidity"))
+
+def backfill_catalog(stamp,batch_size=500):
+    """Build legacy catalog projection incrementally; no destructive migration."""
+    with closing(connect()) as db, db:
+        db.execute("BEGIN IMMEDIATE")
+        state=db.execute("SELECT last_id,complete FROM market_catalog_state WHERE stamp=?",(stamp,)).fetchone()
+        if state and state["complete"]:
+            return True
+        last=state["last_id"] if state else ""
+        raw=db.execute("SELECT id,payload FROM snapshots WHERE stamp=? AND id>? ORDER BY id LIMIT ?",(stamp,last,batch_size)).fetchall()
+        if not raw:
+            db.execute("INSERT OR REPLACE INTO market_catalog_state VALUES (?,?,1)",(stamp,last))
+            return True
+        rows=hydrate_many(db,[r["payload"] for r in raw])
+        db.executemany("INSERT OR IGNORE INTO market_catalog VALUES (?,?,?,?,?,?,?,?)",[catalog_record(stamp,r) for r in rows])
+        db.execute("INSERT OR REPLACE INTO market_catalog_state VALUES (?,?,0)",(stamp,raw[-1]["id"]))
+        return False
+
+async def catalog_scheduler():
+    while True:
+        try:
+            with closing(connect()) as db:
+                scans=db.execute("SELECT stamp FROM scans ORDER BY stamp DESC LIMIT 1").fetchall()
+            for scan in scans:
+                while not await asyncio.to_thread(backfill_catalog,scan["stamp"]):
+                    await asyncio.sleep(.05)
+        except Exception:
+            log.exception("Prediction catalog backfill failed")
+        await asyncio.sleep(60)
+
+def catalog_page(topic,exposure,offset,limit):
+    """Select a page using indexed compact metadata before hydrating records.
+    Return None while an existing completed scan is still being indexed.
+    """
+    from app.options.api import read_watchlist
+    watchlist=read_watchlist()
+    symbols=sorted({w["symbol"] for w in watchlist})
+    held=sorted({w["symbol"] for w in watchlist if (number(w.get("quantity")) or 0)>0})
+    with closing(connect()) as db:
+        db.execute("BEGIN")
+        scan=snapshot_info(db,True)
+        if not scan:
+            return None
+        # Partial scan can contain old rows that predate the projection.
+        # Do not expose a truncated catalog as a complete result.
+        indexed=db.execute("SELECT COUNT(*) FROM market_catalog WHERE stamp=?",(scan["stamp"],)).fetchone()[0]
+        if indexed!=scan["count"]:
+            return None
+        db.execute("CREATE TEMP TABLE IF NOT EXISTS catalog_watch(symbol TEXT PRIMARY KEY,held INTEGER)")
+        db.executemany("INSERT INTO catalog_watch VALUES (?,?)",[(x,int(x in held)) for x in symbols])
+        # Only research with the exact snapshot fingerprint participates.
+        base="""WITH candidates AS (
+          SELECT c.id,c.quality,c.liquidity,c.topics,c.tickers,r.payload AS research,
+            COALESCE(CAST(json_extract(r.payload,'$.relevance') AS REAL),0) AS relevance
+          FROM market_catalog c LEFT JOIN market_research r ON r.id=c.id AND r.fingerprint=c.fingerprint
+          WHERE c.stamp=?
+        ), flags AS (
+          SELECT a.*,
+            EXISTS(SELECT 1 FROM json_each(a.tickers) t JOIN catalog_watch w ON w.symbol=t.value WHERE w.held=1)
+              OR EXISTS(SELECT 1 FROM json_each(a.research,'$.tickers') t JOIN catalog_watch w ON w.symbol=t.value WHERE w.held=1) AS held,
+            EXISTS(SELECT 1 FROM json_each(a.tickers) t JOIN catalog_watch w ON w.symbol=t.value)
+              OR EXISTS(SELECT 1 FROM json_each(a.research,'$.tickers') t JOIN catalog_watch w ON w.symbol=t.value) AS watched,
+            EXISTS(SELECT 1 FROM json_each(a.tickers) t WHERE NOT EXISTS(SELECT 1 FROM catalog_watch w WHERE w.symbol=t.value))
+              OR EXISTS(SELECT 1 FROM json_each(a.research,'$.tickers') t WHERE NOT EXISTS(SELECT 1 FROM catalog_watch w WHERE w.symbol=t.value)) AS outside
+          FROM candidates a
+        ) """
+        clauses=[]
+        args=[scan["stamp"]]
+        if topic=="Unclassified":
+            clauses.append("json_array_length(topics)=0 AND COALESCE(json_array_length(research,'$.topics'),0)=0")
+        elif topic!="All":
+            clauses.append("(EXISTS(SELECT 1 FROM json_each(topics) WHERE value=?) OR EXISTS(SELECT 1 FROM json_each(research,'$.topics') WHERE value=?))")
+            args.extend([topic,topic])
+        if exposure=="Holdings":
+            clauses.append("held")
+        elif exposure=="Watchlist":
+            clauses.append("watched")
+        elif exposure=="Emerging":
+            clauses.append("(outside OR (relevance>=5 AND NOT watched))")
+        where=" WHERE "+" AND ".join(clauses) if clauses else ""
+        count=db.execute(base+"SELECT COUNT(*) FROM flags"+where,args).fetchone()[0]
+        reviewed=db.execute(base+"SELECT COUNT(*) FROM candidates WHERE research IS NOT NULL",(scan["stamp"],)).fetchone()[0]
+        ids=[r[0] for r in db.execute(base+"SELECT id FROM flags"+where+" ORDER BY relevance DESC,held DESC,quality DESC,liquidity DESC,id LIMIT ? OFFSET ?",(*args,limit,offset))]
+        if not ids:
+            return scan,reviewed,count,[]
+        payloads={r["id"]:r["payload"] for r in db.execute("SELECT id,payload FROM snapshots WHERE stamp=? AND id IN ("+",".join("?" for _ in ids)+")",(scan["stamp"],*ids))}
+        rows=hydrate_many(db,[payloads[i] for i in ids])
+    return scan,reviewed,count,map_portfolio(add_history(scan,attach_research(rows)),watchlist)
+
 def current_markets(include_partial=False):
     from app.options.api import read_watchlist
     scan, rows = latest(include_partial=include_partial)
@@ -642,6 +743,12 @@ def research_context():
 
 @router.get("")
 def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500)):
+    indexed=catalog_page(topic,exposure,offset,limit) if not q else None
+    if indexed is not None:
+        scan,reviewed,count,rows=indexed
+        return {"scan":scan,"reviewed":reviewed,"count":count,"markets":rows,
+                "scanning":lock.locked(),"reviewing":enrichment_lock.locked(),"scan_status":read_status(),"ai_usage":daily_usage(),"research_status":read_research_status(),
+                "query_mode":"indexed","caution":"Market prices are complementary evidence only; independently verify fundamentals and resolution rules."}
     scan, rows = current_markets(include_partial=True)
     reviewed = sum(r["research"] is not None for r in rows)
     if topic != "All":
