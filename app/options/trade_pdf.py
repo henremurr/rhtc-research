@@ -84,23 +84,27 @@ def build_report(account, year, groups, summaries, title="", account_classificat
 INCOME_PERIOD_HEADINGS = {"weekly": "Week", "monthly": "Month", "quarterly": "Quarter"}
 
 
-def weekly_income_rows(lots, year, include_details=False, grouping="weekly"):
+def weekly_income_rows(lots, year, include_details=False, grouping="weekly", *, drill_down=False, bounds=None):
     """Summarize closing dates in the selected tax year's income periods."""
     start = date(year, 1, 1)
     year_end = date(year, 12, 31)
+    def period_index(day):
+        if grouping == "monthly":
+            return day.month
+        if grouping == "quarterly":
+            return (day.month - 1) // 3 + 1
+        return min(52, (day - start).days // 7 + 1)
+
     buckets = {}
     for lot in lots:
-        sold = date.fromisoformat(lot["sold"])
-        if grouping == "monthly":
-            period = sold.month
-        elif grouping == "quarterly":
-            period = (sold.month - 1) // 3 + 1
-        else:
-            period = min(52, (sold - start).days // 7 + 1)
+        period = period_index(date.fromisoformat(lot["sold"]))
         buckets.setdefault(period, []).append(lot)
 
+    first_period, last_period = (tuple(map(period_index, bounds)) if bounds
+                                 else (1, max(buckets, default=0)))
+    child_grouping = {"quarterly": "monthly", "monthly": "weekly"}.get(grouping)
     rows = []
-    for period in range(1, max(buckets, default=0) + 1):
+    for period in range(first_period, last_period + 1):
         entries = buckets.get(period, [])
         if grouping == "weekly":
             first = start + timedelta(weeks=period - 1)
@@ -112,6 +116,8 @@ def weekly_income_rows(lots, year, include_details=False, grouping="weekly"):
             end_month = period * months
             last = date(year, end_month, monthrange(year, end_month)[1])
             label = {"label": first.strftime("%B") if grouping == "monthly" else f"Q{period}"}
+        if bounds:
+            first, last = max(first, bounds[0]), min(last, bounds[1])
         row = {**label, "dates": f"{first:%m/%d} – {last:%m/%d}", "count": len(entries)}
         for key in ("proceeds", "basis", "gain"):
             values = [lot[key] for lot in entries]
@@ -131,6 +137,10 @@ def weekly_income_rows(lots, year, include_details=False, grouping="weekly"):
                     for lot in ticker_lots
                 ])
                 row["ticker_groups"].append({"ticker": ticker, "lots": ticker_lots, **subtotal})
+        if drill_down and child_grouping:
+            row["children"] = weekly_income_rows(
+                entries, year, grouping=child_grouping, drill_down=True, bounds=(first, last),
+            )
         rows.append(row)
     return rows
 

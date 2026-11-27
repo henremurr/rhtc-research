@@ -523,7 +523,9 @@ def register(app, database_path):
                     raise HTTPException(422, "Select a tax year for the weekly report.")
                 if grouping not in INCOME_PERIOD_HEADINGS:
                     raise HTTPException(422, "Choose weekly, monthly, or quarterly.")
-                rows = weekly_income_rows(lots, year, include_details=weekly_detail, grouping=grouping)
+                rows = weekly_income_rows(
+                    lots, year, include_details=weekly_detail, grouping=grouping, drill_down=weekly_detail,
+                )
                 row_key = "weeks" if grouping == "weekly" else "income_periods"
                 return {"periods": periods, row_key: rows, "totals": weekly_income_totals(rows), "account_status": report_status(db, account)}
             return {"periods": periods, "lots": lots, "tickers": tickers, "summary": tax_lot_summary(lots), "account_status": report_status(db, account)}
