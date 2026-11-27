@@ -223,10 +223,10 @@ def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False, we
                     continue
                 label = f'Week {week["week"]}' if grouping == "weekly" else week["label"]
                 heading = f'{label} | {week["dates"]} | Net gain/loss {money(week["gain"])}'
-                story.append(Spacer(1, 4))
                 story.append(Paragraph(escape(heading), ParagraphStyle(
                     "WeeklyDetailHeading", parent=body, fontName="Helvetica-Bold",
-                    fontSize=9, leading=11, spaceAfter=3)))
+                    fontSize=9, leading=11, spaceBefore=4 if grouping == "weekly" else 14,
+                    spaceAfter=3, keepWithNext=True)))
                 detail = [headings]
                 subtotals = []
                 for group in week["ticker_groups"]:
@@ -256,6 +256,7 @@ def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False, we
                     *(("BACKGROUND", (0, index), (-1, index), colors.HexColor("#F0F2F3")) for index in subtotals),
                     *(("FONTNAME", (0, index), (-1, index), "Helvetica-Bold") for index in subtotals),
                     *(("LINEABOVE", (0, index), (-1, index), .75, gold) for index in subtotals),
+                    *(("TOPPADDING", (0, index + 1), (-1, index + 1), 9) for index in subtotals[:-1]),
                 ]))
                 story.append(lots_table)
         doc.build(story, onFirstPage=decorate, onLaterPages=decorate)
