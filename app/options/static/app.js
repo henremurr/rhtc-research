@@ -2474,7 +2474,7 @@ $('#dashboard-logout').addEventListener('click',async()=>{try{await fetch('/opti
   return {...data,root:[...data.root,key],groups:[...data.groups,{key,label:'Other Reports',native:true,children:[item]}]};
  }
  const restore=data=>{if(!data||!Array.isArray(data.root)||!Array.isArray(data.groups))return false;
-  data=addLongGameMenuItem(addLongGameMenuItem(data),'open-uncertainty-report');
+  data=addLongGameMenuItem(addLongGameMenuItem(addLongGameMenuItem(data),'open-uncertainty-report'),'open-prediction-markets');
   for(const key of itemDefaults.keys()){
    const label=data.item_labels?.[key];
    if(itemLabels.has(key)||(typeof label==='string'&&label.trim()))nameItem(key,typeof label==='string'?label.trim():'');
