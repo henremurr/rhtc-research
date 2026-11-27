@@ -2511,6 +2511,8 @@ async def buffett_screen(data: BuffettScreenInput):
         source_documents_for_model.append({**document, "content": excerpt})
     source_review_by_url = {item["url"]: item for item in source_review}
     names = {1:"Industry leader",2:"Cash-adjusted P/E at or below 5",3:"Dividend yield at least 6%",4:"Gross margin at least 60%",5:"Return on equity at least 20%",6:"Net profit margin at least 15%",7:"Asset-light; limited ongoing reinvestment required",8:"Durable products and independent pricing power through inflation",9:"Low debt and at least three-year cash survival under a severe revenue-drop scenario",10:"Widely recognized national brand",11:"Trustworthy management without a material record of misleading or exploiting shareholders",12:"Simple, focused core business",13:"Enduring demand with concentrated supply; frequent repeat purchase is favorable"}
+    from app.options.forward_intelligence import ticker_context, POLICY
+    prediction = await asyncio.to_thread(ticker_context,symbol,"buffett")
     instructions = (
         "Use evidence in this exact order: (1) review every saved stock analysis in newest-to-oldest order and compare how its thesis and rating changed; (2) review every fetched document from their cited source links; "
         "(3) use provided SEC Company Facts XBRL data for filed cash and short-term-investment facts; "
@@ -2588,9 +2590,10 @@ async def buffett_screen(data: BuffettScreenInput):
         }
         response = await client.responses.create(
             model=os.getenv("OPENAI_ANALYSIS_MODEL", os.getenv("OPENAI_MODEL", "gpt-5-mini")),
-            tools=[{"type":"web_search"}], reasoning={"effort":"low"}, instructions=instructions,
+            tools=[{"type":"web_search"}], reasoning={"effort":"low"}, instructions=instructions + "\n" + POLICY + " Use market context solely to identify independent research questions about competitive advantage, pricing power, durable demand and structural risk. Never treat it as a criterion pass/fail input; only independently verified business evidence may affect the existing 13 criteria.",
             input=json.dumps({
                 "ticker": symbol,
+                "prediction_market_context": prediction,
                 "criteria": names,
                 "saved_stock_analyses": saved_analyses,
                 "saved_stock_analysis_count": len(saved_analyses),
@@ -2856,7 +2859,7 @@ async def buffett_screen(data: BuffettScreenInput):
                 citations.append({"title":str(cite.get("title") or cite["url"])[:300],"url":cite["url"][:1000],"origin":"Supplemental web search"})
                 citation_urls.add(cite["url"])
         updated_at=datetime.now(timezone.utc).isoformat()
-        stored={
+        stored={"prediction_market_context": prediction,
             "buffett_pass":passed,
             "score_percent":score_percent,
             "rating_label":rating_label,
@@ -3024,6 +3027,8 @@ async def assess_ceo_risk(data: BuffettScreenInput):
     key = os.getenv("OPENAI_API_KEY", "").strip()
     if not key:
         raise HTTPException(503, "CEO Risk research requires OPENAI_API_KEY on the server.")
+    from app.options.forward_intelligence import ticker_context, POLICY
+    prediction = await asyncio.to_thread(ticker_context,symbol,"ceo")
     dimensions = [
         "CEO control over strategy, product, capital allocation, and key decisions",
         "succession readiness and strength of the executive bench",
@@ -3062,9 +3067,9 @@ async def assess_ceo_risk(data: BuffettScreenInput):
         )
         response = await client.responses.create(
             model=os.getenv("OPENAI_ANALYSIS_MODEL", os.getenv("OPENAI_MODEL", "gpt-5-mini")),
-            tools=[{"type": "web_search"}], reasoning={"effort": "low"}, instructions=instructions,
+            tools=[{"type": "web_search"}], reasoning={"effort": "low"}, instructions=instructions + "\n" + POLICY + " Investigate company-specific leadership, succession, governance and regulatory leads. No speculation about personal health or misconduct as fact; score the six existing dimensions on independently verified evidence only. Summarize any material lead and verification status in monitor_signals.",
             input=json.dumps({"ticker": symbol, "peak": row["peak"], "risk_dimensions": dimensions,
-                              "recent_saved_stock_analysis": [dict(item) for item in saved]}, ensure_ascii=False),
+                              "prediction_market_context": prediction, "recent_saved_stock_analysis": [dict(item) for item in saved]}, ensure_ascii=False),
             text={"format": {"type": "json_schema", "name": "ceo_risk_assessment", "strict": True, "schema": schema}},
             max_output_tokens=5000, max_tool_calls=8, store=False,
         )
@@ -3085,7 +3090,7 @@ async def assess_ceo_risk(data: BuffettScreenInput):
                         citations.append({"title": getattr(cite, "title", "") or url, "url": url})
                         seen.add(url)
         created_at = datetime.now(timezone.utc).isoformat()
-        report = {**result, "risk_score": risk_score, "risk_rating": risk_rating,
+        report = {**result, "prediction_market_context": prediction, "risk_score": risk_score, "risk_rating": risk_rating,
                   "scoring_scale": "Weighted 0–100 key-person risk; higher means greater exposure",
                   "factor_weights": weights, "citations": citations[:50]}
         report_json = json.dumps(report, ensure_ascii=False)
@@ -4659,6 +4664,8 @@ async def analyze_stock(data: StockAnalysisInput):
     if not key:
         raise HTTPException(503, "Stock analysis is unavailable. Configure OPENAI_API_KEY in the server settings.")
 
+    from app.options.forward_intelligence import ticker_context, POLICY
+    prediction = await asyncio.to_thread(ticker_context,symbol,"stock")
     quote_fields = (
         "symbol", "description", "source", "quote_time", "price", "change", "change_pct", "bid", "ask",
         "open", "high", "low", "volume", "week_52_high", "week_52_low", "average_volume",
@@ -4691,9 +4698,11 @@ async def analyze_stock(data: StockAnalysisInput):
         "evidence that would move the rating up or down. Keep the full response under 600 words. No raw URLs in "
         "the prose; citations will be shown separately. Do not give a personalized trade instruction."
     )
+    instructions += "\n" + POLICY + " Investigate company-specific and thematic forward catalysts, earnings implications and emerging risks. In Detailed analysis include a short Forward intelligence paragraph with verification status when material. Preserve the existing rating scale; only independently verified facts may influence it."
     prompt = (
         f"Analyze {symbol} for the RHTC Three Peaks research framework.\n"
         f"Quote and company metrics supplied by the dashboard: {quote_json}\n"
+        f"Supplementary prediction context: {json.dumps(prediction,ensure_ascii=False)}\n"
         "Search the latest available company filings, earnings, guidance, and material news. If a metric is missing "
         "or appears stale or implausible, say so and do not invent a replacement."
     )
@@ -4824,6 +4833,8 @@ async def analyze_symbol(data: SymbolAnalysisInput):
     )
     screen = {field: data.screen.get(field) for field in screen_fields if field in data.screen}
     screen_json = json.dumps(screen, allow_nan=False, separators=(",", ":"))
+    from app.options.forward_intelligence import ticker_context, POLICY
+    prediction = await asyncio.to_thread(ticker_context,symbol,"call",screen.get("expiry"))
     instructions = (
         "You are the decision-support analyst inside the RHTC covered-call screener. Produce a compact, "
         "ticker-specific brief that helps a knowledgeable investor judge the DISPLAYED covered call, not a "
@@ -4861,10 +4872,12 @@ async def analyze_symbol(data: SymbolAnalysisInput):
         "shown separately by the application. Clearly distinguish facts from inference. Bid yield is bid divided by "
         "share price, not expected return. Do not give personalized financial advice or assume holdings/suitability."
     )
+    instructions += "\n" + POLICY + " Review the supplied event leads only for the displayed contract window. A market end date is not proof of an event date; independently establish timing before treating it as a pre-expiry catalyst. Preserve existing income, cushion and liquidity score rules. Unconfirmed events are monitoring leads, not score inputs."
     prompt = (
         f"Analyze ticker {symbol} (RHTC theme: {peak}).\n"
         f"Recorded accounts for this ticker (not verified balances): {[{k: r.get(k) for k in ('account', 'tax_status', 'funding_status', 'quantity')} for r in read_watchlist() if r.get('symbol') == symbol and (r.get('quantity') or 0) > 0]}\n"
         f"Current dashboard quote/options snapshot, if available: {screen_json}\n"
+        f"Supplementary prediction context: {json.dumps(prediction,ensure_ascii=False)}\n"
         "Search current public information, including the next earnings date, recent filings, guidance, and company news."
     )
     try:
