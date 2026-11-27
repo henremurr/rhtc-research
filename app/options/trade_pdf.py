@@ -1,3 +1,4 @@
+from calendar import monthrange
 from datetime import date, timedelta
 """Printable RHTC trade report."""
 from decimal import Decimal, ROUND_HALF_UP
@@ -80,22 +81,38 @@ def build_report(account, year, groups, summaries, title="", account_classificat
     return output.getvalue()
 
 
-def weekly_income_rows(lots, year, include_details=False):
-    """Summarize calendar-year sales in seven-day buckets beginning January 1."""
+INCOME_PERIOD_HEADINGS = {"weekly": "Week", "monthly": "Month", "quarterly": "Quarter"}
+
+
+def weekly_income_rows(lots, year, include_details=False, grouping="weekly"):
+    """Summarize closing dates in the selected tax year's income periods."""
     start = date(year, 1, 1)
     year_end = date(year, 12, 31)
     buckets = {}
     for lot in lots:
         sold = date.fromisoformat(lot["sold"])
-        week = min(52, (sold - start).days // 7 + 1)
-        buckets.setdefault(week, []).append(lot)
+        if grouping == "monthly":
+            period = sold.month
+        elif grouping == "quarterly":
+            period = (sold.month - 1) // 3 + 1
+        else:
+            period = min(52, (sold - start).days // 7 + 1)
+        buckets.setdefault(period, []).append(lot)
 
     rows = []
-    for week in range(1, max(buckets, default=0) + 1):
-        entries = buckets.get(week, [])
-        first = start + timedelta(weeks=week - 1)
-        last = year_end if week == 52 else first + timedelta(days=6)
-        row = {"week": week, "dates": f"{first:%m/%d} – {last:%m/%d}", "count": len(entries)}
+    for period in range(1, max(buckets, default=0) + 1):
+        entries = buckets.get(period, [])
+        if grouping == "weekly":
+            first = start + timedelta(weeks=period - 1)
+            last = year_end if period == 52 else first + timedelta(days=6)
+            label = {"week": period}
+        else:
+            months = 1 if grouping == "monthly" else 3
+            first = date(year, (period - 1) * months + 1, 1)
+            end_month = period * months
+            last = date(year, end_month, monthrange(year, end_month)[1])
+            label = {"label": first.strftime("%B") if grouping == "monthly" else f"Q{period}"}
+        row = {**label, "dates": f"{first:%m/%d} – {last:%m/%d}", "count": len(entries)}
         for key in ("proceeds", "basis", "gain"):
             values = [lot[key] for lot in entries]
             row[key] = None if any(value in (None, "") for value in values) else str(
@@ -127,10 +144,10 @@ def weekly_income_totals(weeks):
     return totals
 
 
-def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False, weekly_detail=False, title="", account_classification="Unknown / Unknown"):
+def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False, weekly_detail=False, title="", account_classification="Unknown / Unknown", grouping="weekly"):
     """Create a printable Form 8949 style tax lot schedule."""
     if weekly_income:
-        default_title = "Weekly Income Detail Report" if weekly_detail else "Weekly Income Summary Report"
+        default_title = f"{grouping.title()} Income {'Detail' if weekly_detail else 'Summary'} Report"
     else:
         default_title = "Ticker tax lot report · Form 8949" if ticker else "Tax lot report · Form 8949"
     title = title.strip()[:300] or default_title
@@ -171,10 +188,10 @@ def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False, we
 
     story = []
     if weekly_income:
-        data = [["Week", "Date range", "Closed lots", "Proceeds", "Cost basis", "Net gain/loss"]]
-        weeks = weekly_income_rows(lots, int(year), include_details=weekly_detail)
+        data = [[INCOME_PERIOD_HEADINGS[grouping], "Date range", "Closed lots", "Proceeds", "Cost basis", "Net gain/loss"]]
+        weeks = weekly_income_rows(lots, int(year), include_details=weekly_detail, grouping=grouping)
         for row in weeks:
-            data.append([row["week"], row["dates"], row["count"],
+            data.append([row.get("week", row.get("label")), row["dates"], row["count"],
                          *(money(row[key]) for key in ("proceeds", "basis", "gain"))])
         totals = weekly_income_totals(weeks)
         data.append(["Total", "", totals["count"],
@@ -194,8 +211,8 @@ def build_tax_lot_report(account, year, lots, ticker="", weekly_income=False, we
             for week in weeks:
                 if not week["lots"]:
                     continue
-                heading = (f'Week {week["week"]} | {week["dates"]} | '
-                           f'Net gain/loss {money(week["gain"])}')
+                label = f'Week {week["week"]}' if grouping == "weekly" else week["label"]
+                heading = f'{label} | {week["dates"]} | Net gain/loss {money(week["gain"])}'
                 story.append(Spacer(1, 4))
                 story.append(Paragraph(escape(heading), ParagraphStyle(
                     "WeeklyDetailHeading", parent=body, fontName="Helvetica-Bold",

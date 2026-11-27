@@ -15,7 +15,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 from .trade_pdf import build_cash_activity_report, build_report
 from .account_policy import import_status, status_label
-from .trade_pdf import build_tax_lot_report, build_open_tax_lot_report, weekly_income_rows, weekly_income_totals
+from .trade_pdf import INCOME_PERIOD_HEADINGS, build_tax_lot_report, build_open_tax_lot_report, weekly_income_rows, weekly_income_totals
 from starlette.concurrency import run_in_threadpool
 
 HEADERS = ["Run Date", "Action", "Symbol", "Description", "Type", "Price ($)", "Quantity",
@@ -503,7 +503,7 @@ def register(app, database_path):
                                  "Cache-Control": "private, no-store"})
 
     @app.get("/api/tax-lot-report")
-    def tax_lot_report(account: str = "", year: int = 0, ticker: str = "", weekly_income: bool = False, weekly_detail: bool = False, metadata_only: bool = False):
+    def tax_lot_report(account: str = "", year: int = 0, ticker: str = "", weekly_income: bool = False, weekly_detail: bool = False, metadata_only: bool = False, grouping: str = "weekly"):
         with closing(sqlite3.connect(database_path())) as db:
             if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='trading_transactions'").fetchone():
                 return {"periods": [], "lots": [], "tickers": [], "summary": tax_lot_summary([])}
@@ -521,25 +521,30 @@ def register(app, database_path):
             if weekly_income and account:
                 if not 1 <= year <= 9998:
                     raise HTTPException(422, "Select a tax year for the weekly report.")
-                weeks = weekly_income_rows(lots, year, include_details=weekly_detail)
-                return {"periods": periods, "weeks": weeks, "totals": weekly_income_totals(weeks), "account_status": report_status(db, account)}
+                if grouping not in INCOME_PERIOD_HEADINGS:
+                    raise HTTPException(422, "Choose weekly, monthly, or quarterly.")
+                rows = weekly_income_rows(lots, year, include_details=weekly_detail, grouping=grouping)
+                row_key = "weeks" if grouping == "weekly" else "income_periods"
+                return {"periods": periods, row_key: rows, "totals": weekly_income_totals(rows), "account_status": report_status(db, account)}
             return {"periods": periods, "lots": lots, "tickers": tickers, "summary": tax_lot_summary(lots), "account_status": report_status(db, account)}
 
     @app.get("/api/tax-lot-report/pdf")
-    def tax_lot_pdf(account: str, year: int, ticker: str = "", weekly_income: bool = False, download: bool = False, weekly_detail: bool = False, title: str = ""):
+    def tax_lot_pdf(account: str, year: int, ticker: str = "", weekly_income: bool = False, download: bool = False, weekly_detail: bool = False, title: str = "", grouping: str = "weekly"):
         if weekly_income and not 1 <= year <= 9998:
             raise HTTPException(422, "Select a tax year for the weekly report.")
+        if weekly_income and grouping not in INCOME_PERIOD_HEADINGS:
+            raise HTTPException(422, "Choose weekly, monthly, or quarterly.")
         report = tax_lot_report(account, year, ticker)
         if not report["lots"]:
             raise HTTPException(404, "No completed tax lots for this account, ticker, and tax year.")
         disposition = "attachment" if download else "inline"
         ticker = ticker.strip().upper()
         if weekly_income:
-            filename = f"RHTC_Weekly_Income_{'Detail' if weekly_detail else 'Summary'}_Report_{year or 'All'}_{account}.pdf"
+            filename = f"RHTC_{grouping.title()}_Income_{'Detail' if weekly_detail else 'Summary'}_Report_{year or 'All'}_{account}.pdf"
         else:
             ticker_suffix = f"_{ticker}" if ticker else ""
             filename = f"RHTC_Form_8949_{year or 'All'}{ticker_suffix}_{account}.pdf"
-        return Response(build_tax_lot_report(account, year or "All years", report["lots"], ticker=ticker, weekly_income=weekly_income, weekly_detail=weekly_detail, title=title, account_classification=status_label(report["account_status"])), media_type="application/pdf",
+        return Response(build_tax_lot_report(account, year or "All years", report["lots"], ticker=ticker, weekly_income=weekly_income, weekly_detail=weekly_detail, title=title, account_classification=status_label(report["account_status"]), grouping=grouping), media_type="application/pdf",
                         headers={"Content-Disposition": f'{disposition}; filename="{filename}"',
                                  "Cache-Control": "private, no-store"})
 
