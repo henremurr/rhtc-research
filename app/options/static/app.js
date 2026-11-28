@@ -2477,8 +2477,12 @@ async function refreshMarketSnapshot(){
     const value = $('#market-'+symbol.toLowerCase());
     const quote = data.indices?.[symbol];
     value.textContent = quote ? quote.price.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
+    const change = quote?.change;
+    const direction = Number.isFinite(change) ? Math.sign(Math.round(change * 100)) : 0;
+    value.dataset.direction = direction > 0 ? 'up' : direction < 0 ? 'down' : '';
+    const movement = direction > 0 ? ' · Up from previous close' : direction < 0 ? ' · Down from previous close' : '';
     const stamp = quote?.trade_time_ms > 0 ? ' · '+marketQuoteTime.format(new Date(quote.trade_time_ms))+' ET' : '';
-    value.title = quote ? name+' · '+quote.source+' · May be delayed'+stamp : name+' · Quote unavailable';
+    value.title = quote ? name+' · '+quote.source+' · May be delayed'+stamp+movement : name+' · Quote unavailable';
   }
 }
 void refreshMarketSnapshot();

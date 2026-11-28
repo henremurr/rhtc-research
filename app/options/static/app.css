@@ -1917,3 +1917,6 @@ body.news-mode .news-research-title {
 .market-snapshot[data-session="open"] .market-dot {background:var(--green)}
 .market-snapshot[data-session="premarket"] .market-dot,
 .market-snapshot[data-session="postmarket"] .market-dot {background:var(--gold)}
+
+.market-index [data-direction="up"] {color:var(--green)}
+.market-index [data-direction="down"] {color:var(--red)}
