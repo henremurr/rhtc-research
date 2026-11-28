@@ -843,7 +843,7 @@ def catalog_page(topic,exposure,offset,limit,sort="relevance",provider="polymark
             payloads={r["id"]:r["payload"] for r in db.execute(f"SELECT id,payload FROM {schema}.snapshots WHERE stamp=? AND id IN ("+",".join("?" for _ in ids)+")",(stamp,*ids))}
             raw=[payloads[i] for i in ids]
             if name=="kalshi":
-                rows=classify_kalshi([json.loads(p) for p in raw])
+                rows=classify_kalshi(kalshi_ingestion.hydrate_many(db,raw,schema="kalshi"))
                 history=kalshi_ingestion.add_history
             else:
                 rows=hydrate_many(db,raw)
