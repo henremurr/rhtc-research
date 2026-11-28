@@ -108,13 +108,23 @@ def finish(cp):
     return count
 
 
-def latest():
+def latest(search=None):
     with closing(connect()) as db:
         db.execute("BEGIN")
         scan = db.execute("SELECT * FROM scans ORDER BY stamp DESC LIMIT 1").fetchone()
         if not scan:
             return None, []
-        rows = [json.loads(r[0]) for r in db.execute("SELECT payload FROM snapshots WHERE stamp=?", (scan["stamp"],))]
+        if search is None:
+            records = db.execute("SELECT payload FROM snapshots WHERE stamp=?", (scan["stamp"],))
+        else:
+            def matches(title, description):
+                return int(bool(search.search(title or "") or search.search(description or "")))
+            db.create_function("kalshi_matches", 2, matches, deterministic=True)
+            records = db.execute(
+                "SELECT payload FROM snapshots WHERE stamp=? AND "
+                "kalshi_matches(json_extract(payload,'$.title'),json_extract(payload,'$.description'))",
+                (scan["stamp"],))
+        rows = [json.loads(r[0]) for r in records]
         return dict(scan), rows
 
 
