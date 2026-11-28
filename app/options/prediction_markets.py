@@ -743,9 +743,24 @@ def research_context():
         log.exception("Prediction context unavailable")
         return {"status":"Prediction context unavailable"}
 
+def without_duplicate_markets(rows):
+    """Keep the first ranked contract for each exact set of contract terms."""
+    seen = set()
+    unique = []
+    for row in rows:
+        outcomes = tuple(sorted(row["probabilities"]))
+        if row["title"] and row["description"] and row["end_date"] and outcomes:
+            key = (fingerprint(row), row["end_date"], outcomes)
+            if key in seen:
+                continue
+            seen.add(key)
+        unique.append(row)
+    return unique
+
+
 @router.get("")
-def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500)):
-    indexed=catalog_page(topic,exposure,offset,limit) if not q else None
+def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500), deduplicate: bool = False):
+    indexed=catalog_page(topic,exposure,offset,limit) if not q and not deduplicate else None
     if indexed is not None:
         scan,reviewed,count,rows=indexed
         return {"scan":scan,"reviewed":reviewed,"count":count,"markets":rows,
@@ -764,7 +779,10 @@ def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int 
     if q:
         rows = [r for r in rows if q.casefold() in json.dumps(r,ensure_ascii=False).casefold()]
     rows.sort(key=priority,reverse=True)
-    return {"scan":scan,"reviewed":reviewed,"count":len(rows),"markets":rows[offset:offset+limit],
+    matching_count = len(rows)
+    if deduplicate:
+        rows = without_duplicate_markets(rows)
+    return {"scan":scan,"reviewed":reviewed,"count":len(rows),"duplicates_removed":matching_count-len(rows),"markets":rows[offset:offset+limit],
             "scanning":lock.locked(),"reviewing":enrichment_lock.locked(),"scan_status":read_status(),"ai_usage":daily_usage(),"research_status":read_research_status(),
             "caution":"Market prices are complementary evidence only; independently verify fundamentals and resolution rules."}
 
