@@ -575,6 +575,13 @@ async def enrich_pending():
         research_status("disabled",reason="OPENAI_API_KEY not configured")
         return
     async with enrichment_lock:
+        usage=await asyncio.to_thread(daily_usage)
+        if usage["requests"]>=usage["request_limit"] or usage["input_tokens"]+usage["output_tokens"]>=usage["token_limit"]:
+            await asyncio.to_thread(research_status,"budget limited",reason="Daily budget reached; catalog loading skipped")
+            return
+        if os.getenv("RHTC_PREDICTION_RESEARCH_PAUSED","1")=="1":
+            await asyncio.to_thread(research_status,"paused",reason="Temporarily paused to protect dashboard responsiveness")
+            return
         from openai import AsyncOpenAI
         from app.options import kalshi_ingestion
         scan, rows = await asyncio.to_thread(latest,True)
@@ -731,23 +738,27 @@ def backfill_catalog(stamp,batch_size=500):
         db.execute("INSERT OR REPLACE INTO market_catalog_state VALUES (?,?,0)",(stamp,raw[-1]["id"]))
         return False
 
+def catalog_backfill_tick():
+    from app.options import kalshi_ingestion
+    with closing(connect()) as db:
+        scan=db.execute("SELECT stamp FROM scans ORDER BY stamp DESC LIMIT 1").fetchone()
+    if scan:
+        backfill_catalog(scan["stamp"],batch_size=250)
+    kalshi_ingestion.backfill_latest_catalog(batch_size=250)
+
+
 async def catalog_scheduler():
+    # Avoid tight loops over hundreds of thousands of rows. Each transaction
+    # commits its cursor before yielding; no work is lost on restart.
+    await asyncio.sleep(60)
     while True:
         try:
-            with closing(connect()) as db:
-                scans=db.execute("SELECT stamp FROM scans ORDER BY stamp DESC LIMIT 1").fetchall()
-            for scan in scans:
-                while not await asyncio.to_thread(backfill_catalog,scan["stamp"]):
-                    await asyncio.sleep(.05)
+            if os.getenv("RHTC_PREDICTION_BACKFILL_PAUSED","0")!="1":
+                await asyncio.to_thread(catalog_backfill_tick)
         except Exception:
             log.exception("Prediction catalog backfill failed")
-        try:
-            from app.options import kalshi_ingestion
-            while not await asyncio.to_thread(kalshi_ingestion.backfill_latest_catalog):
-                await asyncio.sleep(.05)
-        except Exception:
-            log.exception("Kalshi catalog backfill failed")
-        await asyncio.sleep(60)
+        await asyncio.sleep(2)
+
 
 PROBABILITY_SORT_OUTCOMES = {"prob-yes": "yes", "prob-no": "no"}
 
@@ -1004,6 +1015,20 @@ def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int 
         return {"scan":scan,"reviewed":reviewed,"count":count,"markets":rows,
                 "scanning":lock.locked(),"reviewing":enrichment_lock.locked(),"scan_status":read_status(),"ai_usage":daily_usage(),"research_status":read_research_status(),
                 "provider_scans":scans,"kalshi_status":kalshi_ingestion.read_status() if provider!="polymarket" else None,"query_mode":"indexed","caution":"Market prices are complementary evidence only; independently verify fundamentals and resolution rules."}
+    if indexed is None and not search_term and not deduplicate:
+        from app.options import kalshi_ingestion
+        with closing(connect()) as db:
+            pscan=snapshot_info(db,True) if provider!="kalshi" else None
+        with closing(kalshi_ingestion.connect()) as db:
+            kscan=db.execute("SELECT stamp,count FROM scans ORDER BY stamp DESC LIMIT 1").fetchone() if provider!="polymarket" else None
+        scans={"polymarket":pscan,"kalshi":dict(kscan) if kscan else None}
+        total=sum(scan["count"] for scan in scans.values() if scan)
+        if total>5000:
+            # Never hydrate an entire large catalog on an ordinary UI request.
+            # Return an explicitly incomplete response, not a false empty catalog.
+            return {"scan":pscan or scans["kalshi"],"provider_scans":scans,"count":total,"reviewed":0,"markets":[],
+                    "query_mode":"index_pending","index_pending":True,"scanning":lock.locked() or kalshi_ingestion.lock.locked(),
+                    "reviewing":enrichment_lock.locked(),"caution":"Catalog indexing in progress; results not yet available."}
     search = re.compile(r"(?<!\w)" + re.escape(search_term) + r"(?!\w)", re.IGNORECASE) if search_term else None
     from app.options import kalshi_ingestion
     scan, rows = current_markets(include_partial=True, search=search) if provider != "kalshi" else (None, [])

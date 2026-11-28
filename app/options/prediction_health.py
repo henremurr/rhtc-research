@@ -129,7 +129,7 @@ def storage_checks():
     checks.append(check("Discovery worker","fail" if state=="failed" else "warn" if state=="interrupted" else "pass" if state=="completed" or state=="running" and pm.lock.locked() else "pending",f"{state}; {status.get('discovered',0)} retrieved; {status.get('error','')}"))
     rs=pm.read_research_status()
     state=rs.get("state")
-    checks.append(check("Semantic worker","fail" if state=="failed" else "warn" if state in ("disabled","budget limited","retrying","cycle completed with retries") else "pass" if reviewed and state in ("running","cycle completed","up to date") else "pending",f"{state}; {reviewed} distinct cached market IDs (all snapshots); {rs.get('reason','')}"))
+    checks.append(check("Semantic worker","fail" if state=="failed" else "warn" if state in ("disabled","paused","budget limited","retrying","cycle completed with retries") else "pass" if reviewed and state in ("running","cycle completed","up to date") else "pending",f"{state}; {reviewed} distinct cached market IDs (all snapshots); {rs.get('reason','')}"))
     usage=pm.daily_usage()
     limits = []
     if usage["requests"] >= usage["request_limit"]:
