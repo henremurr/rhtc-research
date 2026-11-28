@@ -950,6 +950,12 @@ def kalshi_catalog(search=None):
     return scan, map_portfolio(kalshi_ingestion.add_history(scan, attach_research(rows)), read_watchlist())
 
 
+@router.get("/health")
+def prediction_health():
+    from app.options.prediction_health import latest_health
+    return latest_health()
+
+
 @router.get("")
 def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500), deduplicate: bool = False, sort: Literal["relevance", "volume", "liquidity", "prob-yes", "prob-no"] = "relevance", provider: Literal["all", "polymarket", "kalshi"] = "polymarket"):
     search_term = q.strip().removeprefix("$")
