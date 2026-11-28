@@ -741,37 +741,62 @@ async def catalog_scheduler():
                     await asyncio.sleep(.05)
         except Exception:
             log.exception("Prediction catalog backfill failed")
+        try:
+            from app.options import kalshi_ingestion
+            while not await asyncio.to_thread(kalshi_ingestion.backfill_latest_catalog):
+                await asyncio.sleep(.05)
+        except Exception:
+            log.exception("Kalshi catalog backfill failed")
         await asyncio.sleep(60)
 
 PROBABILITY_SORT_OUTCOMES = {"prob-yes": "yes", "prob-no": "no"}
 
 
-def catalog_page(topic,exposure,offset,limit,sort="relevance"):
+def catalog_page(topic,exposure,offset,limit,sort="relevance",provider="polymarket"):
     """Select a page using indexed compact metadata before hydrating records.
     Return None while an existing completed scan is still being indexed.
     """
-    from app.options.api import read_watchlist
+    from app.options.api import read_watchlist, watchlist_db_path
+    from app.options import kalshi_ingestion
     watchlist=read_watchlist()
     symbols=sorted({w["symbol"] for w in watchlist})
     held=sorted({w["symbol"] for w in watchlist if (number(w.get("quantity")) or 0)>0})
     with closing(connect()) as db:
+        if provider!="polymarket":
+            with closing(kalshi_ingestion.connect()):
+                pass
+            db.execute("ATTACH DATABASE ? AS kalshi",(str(watchlist_db_path().with_name("rhtc_kalshi.sqlite3")),))
         db.execute("BEGIN")
-        scan=snapshot_info(db,True)
-        if not scan:
+        scans={}
+        if provider!="kalshi":
+            scan=snapshot_info(db,True)
+            if scan:
+                scans["polymarket"]=scan
+        if provider!="polymarket":
+            scan=db.execute("SELECT stamp,count FROM kalshi.scans ORDER BY stamp DESC LIMIT 1").fetchone()
+            if scan:
+                scans["kalshi"]=dict(scan)
+        if not scans:
             return None
-        # Partial scan can contain old rows that predate the projection.
-        # Do not expose a truncated catalog as a complete result.
-        indexed=db.execute("SELECT COUNT(*) FROM market_catalog WHERE stamp=?",(scan["stamp"],)).fetchone()[0]
-        if indexed!=scan["count"]:
-            return None
+        sources=[]
+        for name,scan in scans.items():
+            schema="kalshi" if name=="kalshi" else "main"
+            indexed=db.execute(f"SELECT COUNT(*) FROM {schema}.market_catalog WHERE stamp=?",(scan["stamp"],)).fetchone()[0]
+            if indexed!=scan["count"]:
+                return None
+            sources.append((name,schema,scan["stamp"]))
+        scan=scans.get("polymarket") or scans.get("kalshi")
         db.execute("CREATE TEMP TABLE IF NOT EXISTS catalog_watch(symbol TEXT PRIMARY KEY,held INTEGER)")
         db.executemany("INSERT INTO catalog_watch VALUES (?,?)",[(x,int(x in held)) for x in symbols])
         # Only research with the exact snapshot fingerprint participates.
-        base="""WITH candidates AS (
-          SELECT c.id,c.quality,c.liquidity,c.topics,c.tickers,r.payload AS research,
+        source_sql=" UNION ALL ".join(
+            f"SELECT '{name}' AS provider,c.* FROM {schema}.market_catalog c WHERE c.stamp=?"
+            for name,schema,_ in sources)
+        source_args=[stamp for _,_,stamp in sources]
+        base="""WITH source_catalog AS ("""+source_sql+"""), candidates AS (
+          SELECT c.provider,c.stamp,c.id,c.quality,c.liquidity,c.topics,c.tickers,r.payload AS research,
             COALESCE(CAST(json_extract(r.payload,'$.relevance') AS REAL),0) AS relevance
-          FROM market_catalog c LEFT JOIN market_research r ON r.id=c.id AND r.fingerprint=c.fingerprint
-          WHERE c.stamp=?
+          FROM source_catalog c LEFT JOIN market_research r ON r.id=c.id AND r.fingerprint=c.fingerprint
         ), flags AS (
           SELECT a.*,
             EXISTS(SELECT 1 FROM json_each(a.tickers) t JOIN catalog_watch w ON w.symbol=t.value WHERE w.held=1)
@@ -783,7 +808,7 @@ def catalog_page(topic,exposure,offset,limit,sort="relevance"):
           FROM candidates a
         ) """
         clauses=[]
-        args=[scan["stamp"]]
+        args=list(source_args)
         if topic=="Unclassified":
             clauses.append("json_array_length(topics)=0 AND COALESCE(json_array_length(research,'$.topics'),0)=0")
         elif topic!="All":
@@ -797,29 +822,39 @@ def catalog_page(topic,exposure,offset,limit,sort="relevance"):
             clauses.append("(outside OR (relevance>=5 AND NOT watched))")
         where=" WHERE "+" AND ".join(clauses) if clauses else ""
         count=db.execute(base+"SELECT COUNT(*) FROM flags"+where,args).fetchone()[0]
-        reviewed=db.execute(base+"SELECT COUNT(*) FROM candidates WHERE research IS NOT NULL",(scan["stamp"],)).fetchone()[0]
-        order = "relevance DESC,held DESC,quality DESC,liquidity DESC,id"
-        order_args = ()
-        if sort == "liquidity":
-            order = "liquidity DESC," + order
-        elif sort == "volume":
-            order = """(SELECT CAST(json_extract(s.payload,'$.volume24h') AS REAL)
-                        FROM snapshots s WHERE s.stamp=? AND s.id=flags.id) DESC,""" + order
-            order_args = (scan["stamp"],)
-        elif sort in PROBABILITY_SORT_OUTCOMES:
-            order = """(SELECT MAX(CAST(p.value AS REAL))
-                        FROM snapshots s, json_each(s.payload, '$.probabilities') p
-                        WHERE s.stamp=? AND s.id=flags.id AND lower(p.key)=?) DESC,""" + order
-            order_args = (scan["stamp"], PROBABILITY_SORT_OUTCOMES[sort])
-        ids = [r[0] for r in db.execute(
-            base + "SELECT id FROM flags" + where + " ORDER BY " + order + " LIMIT ? OFFSET ?",
-            (*args, *order_args, limit, offset),
-        )]
-        if not ids:
-            return scan,reviewed,count,[]
-        payloads={r["id"]:r["payload"] for r in db.execute("SELECT id,payload FROM snapshots WHERE stamp=? AND id IN ("+",".join("?" for _ in ids)+")",(scan["stamp"],*ids))}
-        rows=hydrate_many(db,[payloads[i] for i in ids])
-    return scan,reviewed,count,map_portfolio(add_history(scan,attach_research(rows)),watchlist)
+        reviewed=db.execute(base+"SELECT COUNT(*) FROM candidates WHERE research IS NOT NULL",source_args).fetchone()[0]
+        order = "relevance DESC,held DESC,quality DESC,liquidity DESC,provider,id"
+        if sort in ("volume","liquidity") or sort in PROBABILITY_SORT_OUTCOMES:
+            def scalar(schema):
+                if sort in ("volume","liquidity"):
+                    field="volume24h" if sort=="volume" else "liquidity"
+                    return f"(SELECT CAST(json_extract(s.payload,'$.{field}') AS REAL) FROM {schema}.snapshots s WHERE s.stamp=flags.stamp AND s.id=flags.id)"
+                label=PROBABILITY_SORT_OUTCOMES[sort]
+                return f"(SELECT MAX(CAST(p.value AS REAL)) FROM {schema}.snapshots s,json_each(s.payload,'$.probabilities') p WHERE s.stamp=flags.stamp AND s.id=flags.id AND lower(p.key)='{label}')"
+            metric="CASE provider "+" ".join(f"WHEN '{name}' THEN {scalar(schema)}" for name,schema,_ in sources)+" END"
+            order=("provider DESC," if sort in ("volume","liquidity") else "")+metric+" DESC,"+order
+        selected=db.execute(base+"SELECT provider,id FROM flags"+where+" ORDER BY "+order+" LIMIT ? OFFSET ?",(*args,limit,offset)).fetchall()
+        keys=[(r["provider"],r["id"]) for r in selected]
+        mapped={}
+        for name,schema,stamp in sources:
+            ids=[mid for p,mid in keys if p==name]
+            if not ids:
+                continue
+            payloads={r["id"]:r["payload"] for r in db.execute(f"SELECT id,payload FROM {schema}.snapshots WHERE stamp=? AND id IN ("+",".join("?" for _ in ids)+")",(stamp,*ids))}
+            raw=[payloads[i] for i in ids]
+            if name=="kalshi":
+                rows=classify_kalshi([json.loads(p) for p in raw])
+                history=kalshi_ingestion.add_history
+            else:
+                rows=hydrate_many(db,raw)
+                history=add_history
+            for row in map_portfolio(history(scans[name],attach_research(rows)),watchlist):
+                row["provider"]=name
+                mapped[(name,row["id"])]=row
+    rows=[mapped[key] for key in keys]
+    if provider=="polymarket":
+        return scan,reviewed,count,rows
+    return scan,reviewed,count,rows,scans
 
 def current_markets(include_partial=False, search=None):
     from app.options.api import read_watchlist
@@ -959,14 +994,16 @@ def prediction_health():
 @router.get("")
 def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500), deduplicate: bool = False, sort: Literal["relevance", "volume", "liquidity", "prob-yes", "prob-no"] = "relevance", provider: Literal["all", "polymarket", "kalshi"] = "polymarket"):
     search_term = q.strip().removeprefix("$")
-    indexed=catalog_page(topic,exposure,offset,limit,sort) if provider == "polymarket" and not search_term and not deduplicate else None
+    indexed=(catalog_page(topic,exposure,offset,limit,sort) if provider=="polymarket" else catalog_page(topic,exposure,offset,limit,sort,provider)) if not search_term and not deduplicate else None
     if indexed is not None:
-        scan,reviewed,count,rows=indexed
+        scan,reviewed,count,rows=indexed[:4]
+        from app.options import kalshi_ingestion
+        scans=indexed[4] if len(indexed)>4 else {"polymarket":scan}
         for row in rows:
             row.setdefault("provider", "polymarket")
         return {"scan":scan,"reviewed":reviewed,"count":count,"markets":rows,
                 "scanning":lock.locked(),"reviewing":enrichment_lock.locked(),"scan_status":read_status(),"ai_usage":daily_usage(),"research_status":read_research_status(),
-                "query_mode":"indexed","caution":"Market prices are complementary evidence only; independently verify fundamentals and resolution rules."}
+                "provider_scans":scans,"kalshi_status":kalshi_ingestion.read_status() if provider!="polymarket" else None,"query_mode":"indexed","caution":"Market prices are complementary evidence only; independently verify fundamentals and resolution rules."}
     search = re.compile(r"(?<!\w)" + re.escape(search_term) + r"(?!\w)", re.IGNORECASE) if search_term else None
     from app.options import kalshi_ingestion
     scan, rows = current_markets(include_partial=True, search=search) if provider != "kalshi" else (None, [])
