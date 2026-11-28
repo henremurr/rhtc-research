@@ -853,7 +853,7 @@ def without_duplicate_markets(rows):
     interest = market_open_interest(conditions)
     winners = []
     for group in finalists:
-        open_interest = [interest.get(row.get("condition_id")) for row in group]
+        open_interest = [row.get("open_interest") if row.get("provider") == "kalshi" else interest.get(row.get("condition_id")) for row in group]
         # Compare open interest only when it is known for every tied contract.
         if len(group) > 1 and all(value is not None for value in open_interest):
             highest = max(open_interest)
@@ -885,6 +885,8 @@ def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int 
     indexed=catalog_page(topic,exposure,offset,limit,sort) if provider == "polymarket" and not search_term and not deduplicate else None
     if indexed is not None:
         scan,reviewed,count,rows=indexed
+        for row in rows:
+            row.setdefault("provider", "polymarket")
         return {"scan":scan,"reviewed":reviewed,"count":count,"markets":rows,
                 "scanning":lock.locked(),"reviewing":enrichment_lock.locked(),"scan_status":read_status(),"ai_usage":daily_usage(),"research_status":read_research_status(),
                 "query_mode":"indexed","caution":"Market prices are complementary evidence only; independently verify fundamentals and resolution rules."}
@@ -929,20 +931,27 @@ def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int 
 
         rows.sort(key=probability, reverse=True)
     return {"scan":scan,"reviewed":reviewed,"count":len(rows),"duplicates_removed":matching_count-len(rows),"direct_search":bool(search),"markets":rows[offset:offset+limit],"provider_scans":provider_scans,"kalshi_status":kalshi_ingestion.read_status() if provider != "polymarket" else None,
-            "scanning":lock.locked(),"reviewing":enrichment_lock.locked(),"scan_status":read_status(),"ai_usage":daily_usage(),"research_status":read_research_status(),
+            "scanning":(lock.locked() if provider != "kalshi" else False) or (kalshi_ingestion.lock.locked() if provider != "polymarket" else False),"reviewing":enrichment_lock.locked(),"scan_status":read_status() if provider != "kalshi" else None,"ai_usage":daily_usage(),"research_status":read_research_status(),
             "caution":"Market prices are complementary evidence only; independently verify fundamentals and resolution rules."}
 
 @router.post("/refresh",status_code=202)
-async def refresh_markets():
-    if lock.locked():
-        raise HTTPException(409,"Scan already running")
-    async def run():
+async def refresh_markets(provider: Literal["all", "polymarket", "kalshi"] = "polymarket"):
+    from app.options import kalshi_ingestion
+    workers = []
+    if provider != "kalshi" and not lock.locked():
+        workers.append(("polymarket", refresh))
+    if provider != "polymarket" and not kalshi_ingestion.lock.locked():
+        workers.append(("kalshi", kalshi_ingestion.refresh))
+    if not workers:
+        raise HTTPException(409,"Requested scans already running")
+    async def run(name, worker):
         try:
-            await refresh()
+            await worker()
         except Exception:
-            log.exception("Manual scan failed; previous snapshot retained")
-    asyncio.create_task(run())
-    return {"status":"queued"}
+            log.exception("Manual %s scan failed; previous snapshot retained", name)
+    for name, worker in workers:
+        asyncio.create_task(run(name, worker))
+    return {"status":"queued","providers":[name for name,_ in workers]}
 
 from fastapi.responses import FileResponse
 page_router = APIRouter()
