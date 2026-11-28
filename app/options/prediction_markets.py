@@ -357,10 +357,19 @@ def fingerprint(row):
     return hashlib.sha256(json.dumps([row["title"],row["description"],row.get("resolution_source")], ensure_ascii=False).encode()).hexdigest()
 
 def attach_research(rows):
-    with closing(connect()) as db:
-        cached = {(r["id"], r["fingerprint"]):json.loads(r["payload"]) for r in db.execute("SELECT * FROM market_research")}
+    fingerprints = {row["id"]: fingerprint(row) for row in rows}
+    ids = list(fingerprints)
+    cached = {}
+    if ids:
+        with closing(connect()) as db:
+            for start in range(0, len(ids), 500):
+                chunk = ids[start:start+500]
+                sql = "SELECT id,fingerprint,payload FROM market_research WHERE id IN (" + ",".join("?" for _ in chunk) + ")"
+                for record in db.execute(sql, chunk):
+                    if record["fingerprint"] == fingerprints.get(record["id"]):
+                        cached[(record["id"], record["fingerprint"])] = json.loads(record["payload"])
     for row in rows:
-        row["research"] = cached.get((row["id"],fingerprint(row)))
+        row["research"] = cached.get((row["id"],fingerprints[row["id"]]))
         if row["research"]:
             row["topics"] = sorted(set(row["topics"]) | set(row["research"]["topics"]))
     return rows
@@ -501,14 +510,18 @@ async def enrich_pending():
         return
     async with enrichment_lock:
         from openai import AsyncOpenAI
+        from app.options import kalshi_ingestion
         scan, rows = await asyncio.to_thread(latest,True)
-        if not scan:
+        kalshi_scan, kalshi_rows = await asyncio.to_thread(kalshi_ingestion.latest)
+        classify_kalshi(kalshi_rows)
+        if not scan and not kalshi_scan:
             research_status("waiting",reason="No market snapshot yet")
             return
-        pending = [r for r in await asyncio.to_thread(attach_research,rows) if r["research"] is None]
+        pending = [r for r in await asyncio.to_thread(attach_research,rows+kalshi_rows) if r["research"] is None]
         from app.options.api import read_watchlist
         held={w["symbol"] for w in await asyncio.to_thread(read_watchlist) if (number(w.get("quantity")) or 0)>0}
-        await asyncio.to_thread(add_history,scan,pending)
+        await asyncio.to_thread(add_history,scan,[r for r in pending if r.get("provider")!="kalshi"])
+        await asyncio.to_thread(kalshi_ingestion.add_history,kalshi_scan,[r for r in pending if r.get("provider")=="kalshi"])
         # Reserve every fifth batch for unclassified markets to prevent starvation.
         ranked=sorted((r for r in pending if r["topics"] or direct_exposure(r,held)),key=lambda r:research_priority(r,held),reverse=True)
         unexplored=iter(sorted((r for r in pending if not r["topics"] and not direct_exposure(r,held)),key=lambda r:research_priority(r,held),reverse=True))
@@ -537,7 +550,7 @@ async def enrich_pending():
                 if not queue:
                     queue,deferred=deferred,deque()
                 batch=[queue.popleft() for _ in range(min(size,len(queue)))]
-                payload=[{"id":r["id"],"question":r["title"][:500],"rules":r["description"][:1500],"resolution_source":r.get("resolution_source")} for r in batch]
+                payload=[{"id":r["id"],"provider":r.get("provider","polymarket"),"question":r["title"][:500],"rules":r["description"][:1500],"resolution_source":r.get("resolution_source")} for r in batch]
                 day=await asyncio.to_thread(reserve_request)
                 if day is None:
                     research_status("budget limited",pending=max(0,len(pending)-reviewed),reviewed=reviewed)
@@ -758,20 +771,42 @@ def priority(row):
             bool(row["holdings"]),row["quality"]=="higher liquidity",row["liquidity"] or 0)
 
 def research_context():
-    """Compact saved prediction evidence for existing report generators."""
+    """Compact, fresh, provider-attributed evidence for existing report generators."""
     try:
-        scan, rows = latest_reviewed()
-        if not scan:
-            return {"status":"No completed prediction scan"}
-        reviewed=len(rows)
+        from app.options import kalshi_ingestion
         from app.options.api import read_watchlist
-        eligible=[r for r in rows if (r["research"] or {}).get("relevance",0)>=5]
-        ranked=sorted(map_portfolio(add_history(scan,eligible),read_watchlist()),key=priority,reverse=True)[:20]
-        keys = ("id","title","topics","probabilities","changes_pp","quality","end_date","resolution_source","research","watchlist_matches","outside_candidates","holdings")
-        return {"as_of":scan["stamp"],"stale":(datetime.now(timezone.utc)-datetime.fromisoformat(scan["stamp"])).total_seconds()>43200,
-                "scanned":scan["count"],"semantically_reviewed":reviewed,
-                "selected":[{k:r[k] for k in keys} for r in ranked],
-                "warning":"Unverified market expectations and candidate mappings, not facts or standalone trade signals. Corroborate with independent research; selected subset only."}
+        sources = {}
+        eligible = []
+        reviewed = 0
+        for provider, load, history in (
+            ("polymarket", latest_reviewed, add_history),
+            ("kalshi", kalshi_ingestion.latest, kalshi_ingestion.add_history),
+        ):
+            try:
+                scan, rows = load()
+                if not scan:
+                    continue
+                age = datetime.now(timezone.utc)-datetime.fromisoformat(scan["stamp"])
+                if not timedelta(0) <= age <= timedelta(hours=12):
+                    continue
+                if provider == "kalshi":
+                    rows = [r for r in attach_research(classify_kalshi(rows)) if r["research"] is not None]
+                sources[provider] = scan
+                reviewed += len(rows)
+                selected = [r for r in rows if (r["research"] or {}).get("relevance",0)>=5]
+                for row in selected:
+                    row.update(provider=provider, snapshot_as_of=scan["stamp"])
+                eligible.extend(history(scan, selected))
+            except Exception:
+                log.exception("Research context provider unavailable: %s", provider)
+        if not sources:
+            return {"status":"No fresh completed prediction scan","selected":[]}
+        ranked=sorted(map_portfolio(eligible,read_watchlist()),key=priority,reverse=True)[:20]
+        keys = ("id","provider","snapshot_as_of","title","topics","probabilities","changes_pp","quality","end_date","resolution_source","research","watchlist_matches","outside_candidates","holdings")
+        return {"as_of":min(s["stamp"] for s in sources.values()),"stale":False,
+                "scanned":sum(s["count"] for s in sources.values()),"semantically_reviewed":reviewed,
+                "providers":sources,"selected":[{k:r.get(k) for k in keys} for r in ranked],
+                "warning":"Market expectations and candidate mappings are unverified leads, not facts or trade signals. Do not double-count shared catalysts. Exchange agreement is not independent corroboration; compare only identical event definitions and deadlines."}
     except Exception:
         log.exception("Prediction context unavailable")
         return {"status":"Prediction context unavailable"}
@@ -827,7 +862,7 @@ def without_duplicate_markets(rows):
     interest = market_open_interest(conditions)
     winners = []
     for group in finalists:
-        open_interest = [interest.get(row.get("condition_id")) for row in group]
+        open_interest = [row.get("open_interest") if row.get("provider") == "kalshi" else interest.get(row.get("condition_id")) for row in group]
         # Compare open interest only when it is known for every tied contract.
         if len(group) > 1 and all(value is not None for value in open_interest):
             highest = max(open_interest)
@@ -838,17 +873,46 @@ def without_duplicate_markets(rows):
     return sorted(winners, key=priority, reverse=True)
 
 
+def classify_kalshi(rows):
+    for row in rows:
+        row["topics"] = [key for key, pattern in TOPICS.items()
+                         if re.search(pattern, row["title"] + " " + row["description"], re.I)]
+    return rows
+
+
+def kalshi_catalog(search=None):
+    from app.options import kalshi_ingestion
+    from app.options.api import read_watchlist
+    scan, rows = kalshi_ingestion.latest(search=search)
+    classify_kalshi(rows)
+    return scan, map_portfolio(kalshi_ingestion.add_history(scan, attach_research(rows)), read_watchlist())
+
+
 @router.get("")
-def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500), deduplicate: bool = False, sort: Literal["relevance", "volume", "liquidity", "prob-yes", "prob-no"] = "relevance"):
+def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500), deduplicate: bool = False, sort: Literal["relevance", "volume", "liquidity", "prob-yes", "prob-no"] = "relevance", provider: Literal["all", "polymarket", "kalshi"] = "polymarket"):
     search_term = q.strip().removeprefix("$")
-    indexed=catalog_page(topic,exposure,offset,limit,sort) if not search_term and not deduplicate else None
+    indexed=catalog_page(topic,exposure,offset,limit,sort) if provider == "polymarket" and not search_term and not deduplicate else None
     if indexed is not None:
         scan,reviewed,count,rows=indexed
+        for row in rows:
+            row.setdefault("provider", "polymarket")
         return {"scan":scan,"reviewed":reviewed,"count":count,"markets":rows,
                 "scanning":lock.locked(),"reviewing":enrichment_lock.locked(),"scan_status":read_status(),"ai_usage":daily_usage(),"research_status":read_research_status(),
                 "query_mode":"indexed","caution":"Market prices are complementary evidence only; independently verify fundamentals and resolution rules."}
     search = re.compile(r"(?<!\w)" + re.escape(search_term) + r"(?!\w)", re.IGNORECASE) if search_term else None
-    scan, rows = current_markets(include_partial=True, search=search)
+    from app.options import kalshi_ingestion
+    scan, rows = current_markets(include_partial=True, search=search) if provider != "kalshi" else (None, [])
+    provider_scans = {"polymarket": scan}
+    for row in rows:
+        row.setdefault("provider", "polymarket")
+    if provider != "polymarket":
+        kalshi_scan, kalshi_rows = kalshi_catalog(search=search)
+        provider_scans["kalshi"] = kalshi_scan
+        if search:
+            kalshi_rows = [row for row in kalshi_rows if search.search(row["title"]) or search.search(row["description"])]
+        rows.extend(kalshi_rows)
+        if scan is None:
+            scan = kalshi_scan
     reviewed = sum(r["research"] is not None for r in rows)
     if topic != "All":
         rows = [r for r in rows if topic in r["topics"] or (topic == "Unclassified" and not r["topics"])]
@@ -861,10 +925,12 @@ def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int 
     rows.sort(key=priority,reverse=True)
     matching_count = len(rows)
     if deduplicate:
-        rows = without_duplicate_markets(rows)
+        rows = without_duplicate_markets([r for r in rows if r.get("provider") != "kalshi"]) + without_duplicate_markets([r for r in rows if r.get("provider") == "kalshi"])
+        rows.sort(key=priority, reverse=True)
     metric = {"volume": "volume24h", "liquidity": "liquidity"}.get(sort)
     if metric:
-        rows.sort(key=lambda row: (row[metric] is not None, row[metric] or 0), reverse=True)
+        # Volume units differ across exchanges. Rank within provider, not across units.
+        rows.sort(key=lambda row: (row.get("provider") or "polymarket", row[metric] is not None, row[metric] or 0), reverse=True)
     elif sort in PROBABILITY_SORT_OUTCOMES:
         outcome = PROBABILITY_SORT_OUTCOMES[sort]
 
@@ -873,21 +939,28 @@ def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int 
                         if label.lower() == outcome), default=-1)
 
         rows.sort(key=probability, reverse=True)
-    return {"scan":scan,"reviewed":reviewed,"count":len(rows),"duplicates_removed":matching_count-len(rows),"direct_search":bool(search),"markets":rows[offset:offset+limit],
-            "scanning":lock.locked(),"reviewing":enrichment_lock.locked(),"scan_status":read_status(),"ai_usage":daily_usage(),"research_status":read_research_status(),
+    return {"scan":scan,"reviewed":reviewed,"count":len(rows),"duplicates_removed":matching_count-len(rows),"direct_search":bool(search),"markets":rows[offset:offset+limit],"provider_scans":provider_scans,"kalshi_status":kalshi_ingestion.read_status() if provider != "polymarket" else None,
+            "scanning":(lock.locked() if provider != "kalshi" else False) or (kalshi_ingestion.lock.locked() if provider != "polymarket" else False),"reviewing":enrichment_lock.locked(),"scan_status":read_status() if provider != "kalshi" else None,"ai_usage":daily_usage(),"research_status":read_research_status(),
             "caution":"Market prices are complementary evidence only; independently verify fundamentals and resolution rules."}
 
 @router.post("/refresh",status_code=202)
-async def refresh_markets():
-    if lock.locked():
-        raise HTTPException(409,"Scan already running")
-    async def run():
+async def refresh_markets(provider: Literal["all", "polymarket", "kalshi"] = "polymarket"):
+    from app.options import kalshi_ingestion
+    workers = []
+    if provider != "kalshi" and not lock.locked():
+        workers.append(("polymarket", refresh))
+    if provider != "polymarket" and not kalshi_ingestion.lock.locked():
+        workers.append(("kalshi", kalshi_ingestion.refresh))
+    if not workers:
+        raise HTTPException(409,"Requested scans already running")
+    async def run(name, worker):
         try:
-            await refresh()
+            await worker()
         except Exception:
-            log.exception("Manual scan failed; previous snapshot retained")
-    asyncio.create_task(run())
-    return {"status":"queued"}
+            log.exception("Manual %s scan failed; previous snapshot retained", name)
+    for name, worker in workers:
+        asyncio.create_task(run(name, worker))
+    return {"status":"queued","providers":[name for name,_ in workers]}
 
 from fastapi.responses import FileResponse
 page_router = APIRouter()
