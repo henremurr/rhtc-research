@@ -67,7 +67,6 @@ _benchmark = None
 
 def catalog_benchmark():
     # Bounded read-only sample; run at audit cadence, not UI polling cadence.
-    from app.options import kalshi_ingestion as ki
     from app.options.api import watchlist_db_path
     import sqlite3
     result={}
@@ -102,6 +101,10 @@ def latest_health():
         result["storage"]=storage_metrics()
         result["efficiency"]=pm.research_efficiency()
         result["benchmark"]=_benchmark or result.get("benchmark")
+        kalshi=result["ingestion"].get("Kalshi",{})
+        completed=kalshi.get("last_completed")
+        completed_at=kalshi.get("updated_at") if kalshi.get("state")=="completed" else None
+        result["kalshi_audit_after_completion"]=(bool(result.get("checked_at") and completed_at and result["checked_at"]>=completed_at) if completed and completed_at else None)
         return result
     except Exception:
         log.exception("Prediction health read failed")
@@ -280,6 +283,7 @@ async def run_health():
     log.warning("Prediction catalog sample: %s",json.dumps(_benchmark))
     log.warning("Prediction storage metrics: %s",json.dumps(storage_metrics()))
     log.warning("Prediction research efficiency: %s",json.dumps(pm.research_efficiency()))
+    log.warning("Prediction ingestion at audit: %s",json.dumps(live_progress()))
     for c in checks:
         if c["state"] in ("fail","warn","pending"):
             log.warning("Prediction health %s: %s — %s",c["state"],c["name"],c["detail"])
