@@ -1008,6 +1008,7 @@ async def get_news(
     topic: str | None = Query(default=None, max_length=120),
     relevance: str | None = Query(default=None, max_length=20),
     story_range: str = Query(default="all", max_length=20),
+    summary_preview: bool = False,
 ):
     query = """SELECT url,title,source,published_at,snippet,peak,topic,relevance_score,youtube_series,first_seen_at,last_seen_at,youtube_published,youtube_video_id,youtube_url,youtube_published_at,youtube_privacy_status,x_published,x_post_id,x_post_url,x_published_at FROM news_items"""
     count_query = """SELECT
@@ -1021,12 +1022,16 @@ async def get_news(
     params: list[Any] = []
     # Use the publication date when available; otherwise the date first retrieved.
     # Do not use last_seen_at: a rescan must not make an old article appear new.
-    today = now_pacific().date()
+    now = now_pacific()
+    today = now.date()
     range_days = {"today": 1, "3d": 3, "7d": 7, "14d": 14, "30d": 30, "3m": 90, "6m": 180}
     if story_range in range_days:
         cutoff = today - timedelta(days=range_days[story_range] - 1)
         filters.append("date(COALESCE(NULLIF(published_at, ''), first_seen_at)) >= date(?)")
         params.append(cutoff.isoformat())
+    elif story_range == "48h":
+        filters.append("julianday(COALESCE(NULLIF(published_at, ''), first_seen_at)) >= julianday(?)")
+        params.append((now.astimezone(timezone.utc) - timedelta(hours=48)).isoformat())
     elif story_range == "year":
         filters.append("date(COALESCE(NULLIF(published_at, ''), first_seen_at)) >= date(?)")
         params.append(today.replace(month=1, day=1).isoformat())
@@ -1061,6 +1066,8 @@ async def get_news(
         term = f"%{q.strip()}%"
         params.extend([term, term, term])
     where_clause = " WHERE " + " AND ".join(filters) if filters else ""
+    if summary_preview:
+        query = "SELECT url FROM news_items"
     query += where_clause
     if relevance_filter:
         query += " AND " + relevance_filter if where_clause else " WHERE " + relevance_filter
@@ -1078,6 +1085,9 @@ async def get_news(
                     (now_pacific().isoformat(),),
                 )
                 connection.commit()
+        if summary_preview:
+            urls = [row["url"] for row in connection.execute(query, params)]
+            return {"urls": urls}
         relevance_count_row = connection.execute(count_query + where_clause, params).fetchone()
         relevance_counts = {
             key: int(relevance_count_row[key] or 0)

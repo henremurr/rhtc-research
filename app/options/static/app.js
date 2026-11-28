@@ -1683,13 +1683,56 @@ function updateNewsSummaryProgress(printWindow,job){
   track.setAttribute('aria-valuenow',String(value));
   count.textContent=(Number(job.completed_stories)||0)+' of '+(Number(job.total_stories)||0)+' stories processed';
 }
-async function summarizeFilteredNews(){
-  const button=$('#summarize-news');const cards=[...document.querySelectorAll('#news-items .news-item')];const urls=[...new Set(cards.map(card=>card.dataset.newsUrl||'').filter(url=>/^https?:\/\//i.test(url)))];
-  if(!urls.length){toast('There are no filtered stories available to summarize.');return}
+const newsSummaryDialog = $('#news-summary-dialog');
+const newsSummaryRange = $('#news-summary-range');
+const newsSummaryRun = $('#news-summary-run');
+let newsSummaryPreview;
+let newsSummaryRequest;
+
+async function previewNewsSummary(){
+  newsSummaryRequest?.abort();
+  const request = new AbortController();
+  newsSummaryRequest = request;
+  newsSummaryPreview = null;
+  newsSummaryRun.disabled = true;
+  const count = $('#news-summary-count');
+  count.textContent = 'Counting matching stories…';
+  const filters = [
+    ['Peak', 'peak', $('#news-peak')],
+    ['Publication', 'publication', $('#news-publication')],
+    ['Topic', 'topic', $('#news-topic')],
+    ['Relevance', 'relevance', $('#news-relevance')],
+    ['Story range', 'story_range', newsSummaryRange],
+    ['Search', 'q', $('#news-search')],
+  ];
+  const params = new URLSearchParams({summary_preview: 'true'});
+  for(const [,key,control] of filters)params.set(key,control.value.trim());
+  const scope = filters.map(([label,,control])=>{
+    const value = control.selectedOptions?.[0]?.textContent || control.value.trim() || 'None';
+    return label+': '+value;
+  }).join(' · ');
+  try{
+    const response = await fetch('/options/api/news?'+params,{signal:request.signal,cache:'no-store'});
+    if(!response.ok)throw Error('Could not count matching stories.');
+    const data = await response.json();
+    if(request.signal.aborted)return;
+    const urls = [...new Set(data.urls.filter(url=>/^https?:\/\//i.test(url)))];
+    newsSummaryPreview = {urls,scope};
+    count.textContent = urls.length
+      ? urls.length.toLocaleString()+(urls.length===1?' matching story':' matching stories')
+      : 'No matching stories.';
+    newsSummaryRun.disabled = !urls.length;
+  }catch(error){
+    if(!request.signal.aborted)count.textContent = 'Could not count matching stories. Close and reopen to retry.';
+  }
+}
+
+async function summarizeFilteredNews({urls,scope}){
+  const button = $('#summarize-news');
   const theme=document.documentElement.dataset.theme==='dark'?'dark':'light';const printWindow=window.open('','_blank');if(!printWindow){toast('Allow pop-ups for this site to open the printable summary.');return}
-  printWindow.document.write(newsSummaryStatusPage(theme,'Preparing your RHTC news summary…','Summarizing '+urls.length+' currently filtered stories. Keep this tab open.','This uses OpenAI API credits.',0,'Starting summary'));printWindow.document.close();
+  newsSummaryDialog.close();
+  printWindow.document.write(newsSummaryStatusPage(theme,'Preparing your RHTC news summary…','Summarizing '+urls.length+' matching stories. Keep this tab open.','This uses OpenAI API credits.',0,'Starting summary'));printWindow.document.close();
   const original=button.textContent;button.disabled=true;button.textContent='Summarizing…';
-  const scope=[['Peak',$('#news-peak').selectedOptions[0]?.textContent],['Publication',$('#news-publication').selectedOptions[0]?.textContent],['Topic',$('#news-topic').selectedOptions[0]?.textContent],['Relevance',$('#news-relevance').selectedOptions[0]?.textContent],['Story range',$('#news-story-range').selectedOptions[0]?.textContent],['Search',$('#news-search').value.trim()||'None']].map(([label,value])=>label+': '+value).join(' · ');
   try{
     const response=await fetch('/options/api/news/summarize',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({urls})});
     const initial=await response.json();
@@ -2379,7 +2422,23 @@ $('#peak-filter').addEventListener('change',e=>{const selection=e.target.value,a
 function updateScoreMissingFilters(){state.stockScoreFilter=$('#stock-score-filter').value;state.callScoreFilter=$('#call-score-filter').value;state.mode='overview';state.selectedOnly=false;setMode('overview');loadRows({ai:false,snapshot:false})}
 $('#stock-score-filter').addEventListener('change',updateScoreMissingFilters);$('#call-score-filter').addEventListener('change',updateScoreMissingFilters);
 document.querySelectorAll('.nav-item').forEach(el=>el.addEventListener('click',()=>{const wasCostOnly=state.costOnly;state.costOnly=false;setMode(el.dataset.filter||'overview');if(wasCostOnly)loadRows({ai:false,snapshot:false})}));
-$('#summarize-news').addEventListener('click',summarizeFilteredNews);$('#scan-news').addEventListener('click',()=>scanNews());$('#add-news-url').addEventListener('click',addNewsUrl);$('#paste-news-content').addEventListener('click',openPasteNewsModal);$('#paste-news-form').addEventListener('submit',submitPastedNews);$('#dedupe-news').addEventListener('click',deduplicateNews);$('#build-topic-filters').addEventListener('click',buildNewsTopicFilters);$('#rank-news-relevance').addEventListener('click',rankNewsRelevance);$('#news-search-form').addEventListener('submit',event=>{event.preventDefault();scanNews($('#news-search').value.trim())});$('#news-peak').addEventListener('change',()=>loadNews());$('#news-publication').addEventListener('change',()=>loadNews());$('#news-topic').addEventListener('change',()=>loadNews());$('#news-relevance').addEventListener('change',()=>loadNews());$('#news-story-range').addEventListener('change',()=>loadNews());let newsSearchTimer;$('#news-search').addEventListener('input',()=>{clearTimeout(newsSearchTimer);newsSearchTimer=setTimeout(()=>loadNews({quiet:true}),220)});
+$('#summarize-news').addEventListener('click',()=>{
+  newsSummaryDialog.showModal();
+  void previewNewsSummary();
+});
+newsSummaryRange.addEventListener('change',previewNewsSummary);
+newsSummaryDialog.addEventListener('close',()=>{
+  // A rapid reopen can occur before the previous close event is delivered.
+  if(!newsSummaryDialog.open)newsSummaryRequest?.abort();
+});
+$('#news-summary-cancel').addEventListener('click',()=>newsSummaryDialog.close());
+$('#news-summary-form').addEventListener('submit',event=>{
+  event.preventDefault();
+  if(newsSummaryPreview?.urls.length&&!newsSummaryRun.disabled){
+    void summarizeFilteredNews(newsSummaryPreview);
+  }
+});
+$('#scan-news').addEventListener('click',()=>scanNews());$('#add-news-url').addEventListener('click',addNewsUrl);$('#paste-news-content').addEventListener('click',openPasteNewsModal);$('#paste-news-form').addEventListener('submit',submitPastedNews);$('#dedupe-news').addEventListener('click',deduplicateNews);$('#build-topic-filters').addEventListener('click',buildNewsTopicFilters);$('#rank-news-relevance').addEventListener('click',rankNewsRelevance);$('#news-search-form').addEventListener('submit',event=>{event.preventDefault();scanNews($('#news-search').value.trim())});$('#news-peak').addEventListener('change',()=>loadNews());$('#news-publication').addEventListener('change',()=>loadNews());$('#news-topic').addEventListener('change',()=>loadNews());$('#news-relevance').addEventListener('change',()=>loadNews());$('#news-story-range').addEventListener('change',()=>loadNews());let newsSearchTimer;$('#news-search').addEventListener('input',()=>{clearTimeout(newsSearchTimer);newsSearchTimer=setTimeout(()=>loadNews({quiet:true}),220)});
 $('#analysis-read-btn').addEventListener('click',toggleAnalysisSpeech);$('#analysis-stop-btn').addEventListener('click',()=>stopAnalysisSpeech());
 $('#analysis-mp3-btn').addEventListener('click',createAnalysisPodcast);$('#analysis-copy-transcript').addEventListener('click',copyAnalysisPodcastTranscript);$('#youtube-publish-btn').addEventListener('click',publishAnalysisToYouTube);$('#youtube-series').addEventListener('change',()=>{if(!activeNewsStory)return;const field=$('#youtube-video-title'),current=field.value,separator=current.indexOf(' | '),headline=separator>=0?current.slice(separator+3).trim():activeNewsStory.title;field.value=youtubeTitleForTheme(headline,$('#youtube-series').value)});$('#youtube-review-confirm').addEventListener('change',updateYouTubePublishButton);
 $('#news-items').addEventListener('click',event=>{const button=event.target.closest('[data-news-action]');if(!button)return;const card=button.closest('.news-item');if(!card)return;if(button.dataset.newsAction==='read')toggleNewsSpeech(card);else if(button.dataset.newsAction==='stop')stopNewsSpeech();else if(button.dataset.newsAction==='analyze')analyzeNewsStory(card,button);else if(button.dataset.newsAction==='publish')publishNewsStory(card,button);else if(button.dataset.newsAction==='republish')republishNewsStory(card,button);else if(button.dataset.newsAction==='retry-x')unlockXRetry(card);else if(button.dataset.newsAction==='translate')translateNewsStory(card,button);else if(button.dataset.newsAction==='change-peak'){const select=card.querySelector('.news-peak-select');select.hidden=!select.hidden;if(!select.hidden)select.focus()}else if(button.dataset.newsAction==='change-topic'){const select=card.querySelector('.news-topic-select');select.hidden=!select.hidden;if(!select.hidden)select.focus()}else if(button.dataset.newsAction==='change-relevance'){const select=card.querySelector('.news-relevance-select');select.hidden=!select.hidden;if(!select.hidden)select.focus()}else if(button.dataset.newsAction==='delete-story')deleteNewsStory(card,button)});
