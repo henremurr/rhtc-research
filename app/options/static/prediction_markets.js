@@ -19,7 +19,7 @@ if(resultsKey!==lastResultsKey){
   el('prev').disabled=true;
   el('next').disabled=true;
 }
-const r=await fetch('/options/api/prediction-markets?'+params,{cache:'no-store',signal:controller.signal});if(!r.ok)throw Error('Unable to retrieve market research ('+r.status+')');const data=await r.json();if(request!==serial)return;lastResultsKey=resultsKey;total=data.count;el('rows').replaceChildren(...data.markets.map(render));
+const r=await fetch('/options/api/prediction-markets?'+params,{cache:'no-store',signal:controller.signal});if(!r.ok)throw Error('Unable to retrieve market research ('+r.status+')');const data=await r.json();if(request!==serial)return;lastResultsKey=resultsKey;total=data.count;el('rows').replaceChildren(...data.markets.map(render));if(data.index_pending){el('status').textContent='Catalog indexing in progress. '+total.toLocaleString()+' contracts retained; results will be available after indexing.';el('prev').disabled=true;el('next').disabled=true;return;}
 if(data.scan&&total===0){
   const empty=document.createElement('p');
   empty.textContent=data.direct_search?'No contracts directly match the search and current filters.':'No markets match the current filters.';
@@ -45,4 +45,4 @@ el('deduplicate').onclick=()=>{
   offset=0;
   load();
 };
-el('print').onclick=()=>window.print();el('refresh').onclick=async()=>{el('refresh').disabled=true;try{const r=await fetch('/options/api/prediction-markets/refresh?'+new URLSearchParams({provider:el('provider').value}),{method:'POST'});if(!r.ok)throw Error('Refresh unavailable ('+r.status+')');el('status').textContent='Scan queued. Previously saved data remains available.';setTimeout(load,2000)}catch(e){el('status').textContent=e.message}finally{el('refresh').disabled=false}};load();setInterval(()=>{if(!document.hidden&&!deduplicate&&!activeRequest&&!el('search').value.trim())load()},30000);
+el('print').onclick=()=>window.print();el('refresh').onclick=async()=>{el('refresh').disabled=true;try{const r=await fetch('/options/api/prediction-markets/refresh?'+new URLSearchParams({provider:el('provider').value}),{method:'POST'});if(!r.ok)throw Error('Refresh unavailable ('+r.status+')');el('status').textContent='Scan queued. Previously saved data remains available.';setTimeout(load,2000)}catch(e){el('status').textContent=e.message}finally{el('refresh').disabled=false}};load();setInterval(()=>{if(!document.hidden&&!deduplicate&&!activeRequest&&!el('search').value.trim())load()},60000);
