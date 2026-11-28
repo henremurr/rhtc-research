@@ -319,12 +319,25 @@ def hydrate_many(db, raw):
         metadata.update((r["key"],r["payload"]) for r in db.execute("SELECT key,payload FROM market_metadata WHERE key IN ("+",".join("?" for _ in chunk)+")",chunk))
     return [hydrate_snapshot(p,metadata) for p in raw]
 
-def latest(include_partial=False):
+def latest(include_partial=False, search=None):
     with closing(connect()) as db:
         scan=snapshot_info(db,include_partial)
         if not scan:
             return None,[]
-        raw=[r[0] for r in db.execute("SELECT payload FROM snapshots WHERE stamp=?",(scan["stamp"],))]
+        if search is None:
+            raw = [r[0] for r in db.execute("SELECT payload FROM snapshots WHERE stamp=?", (scan["stamp"],))]
+        else:
+            def matches(payload, metadata):
+                text = json.loads(zlib.decompress(metadata)) if metadata is not None else json.loads(payload)
+                return bool(search.search(text.get("title") or "") or search.search(text.get("description") or ""))
+
+            db.create_function("contract_matches", 2, matches, deterministic=True)
+            raw = [r[0] for r in db.execute("""
+                SELECT s.payload FROM snapshots s
+                LEFT JOIN market_metadata m ON m.key = json_extract(s.payload, '$._metadata')
+                WHERE s.stamp = ? AND contract_matches(s.payload, m.payload)
+            """, (scan["stamp"],))]
+
         return scan,hydrate_many(db,raw)
 
 def latest_reviewed():
@@ -725,9 +738,9 @@ def catalog_page(topic,exposure,offset,limit,sort="relevance"):
         rows=hydrate_many(db,[payloads[i] for i in ids])
     return scan,reviewed,count,map_portfolio(add_history(scan,attach_research(rows)),watchlist)
 
-def current_markets(include_partial=False):
+def current_markets(include_partial=False, search=None):
     from app.options.api import read_watchlist
-    scan, rows = latest(include_partial=include_partial)
+    scan, rows = latest(include_partial=include_partial, search=search)
     if not scan:
         return scan, rows
     return scan, map_portfolio(add_history(scan,attach_research(rows)),read_watchlist())
@@ -826,7 +839,8 @@ def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int 
         return {"scan":scan,"reviewed":reviewed,"count":count,"markets":rows,
                 "scanning":lock.locked(),"reviewing":enrichment_lock.locked(),"scan_status":read_status(),"ai_usage":daily_usage(),"research_status":read_research_status(),
                 "query_mode":"indexed","caution":"Market prices are complementary evidence only; independently verify fundamentals and resolution rules."}
-    scan, rows = current_markets(include_partial=True)
+    search = re.compile(r"(?<!\w)" + re.escape(search_term) + r"(?!\w)", re.IGNORECASE) if search_term else None
+    scan, rows = current_markets(include_partial=True, search=search)
     reviewed = sum(r["research"] is not None for r in rows)
     if topic != "All":
         rows = [r for r in rows if topic in r["topics"] or (topic == "Unclassified" and not r["topics"])]
@@ -836,11 +850,6 @@ def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int 
         rows = [r for r in rows if r["watchlist_matches"]]
     elif exposure == "Emerging":
         rows = [r for r in rows if r["outside_candidates"] or (r["relevance"] or 0)>=5 and not r["watchlist_matches"]]
-    if search_term:
-        # Match terms in provider-authored contract text. Portfolio associations
-        # and research annotations can reference tickers unrelated to the question.
-        pattern = re.compile(r"(?<!\w)" + re.escape(search_term) + r"(?!\w)", re.IGNORECASE)
-        rows = [r for r in rows if pattern.search(r["title"]) or pattern.search(r["description"])]
     rows.sort(key=priority,reverse=True)
     matching_count = len(rows)
     if deduplicate:
@@ -848,7 +857,7 @@ def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int 
     metric = {"volume": "volume24h", "liquidity": "liquidity"}.get(sort)
     if metric:
         rows.sort(key=lambda row: (row[metric] is not None, row[metric] or 0), reverse=True)
-    return {"scan":scan,"reviewed":reviewed,"count":len(rows),"duplicates_removed":matching_count-len(rows),"markets":rows[offset:offset+limit],
+    return {"scan":scan,"reviewed":reviewed,"count":len(rows),"duplicates_removed":matching_count-len(rows),"direct_search":bool(search),"markets":rows[offset:offset+limit],
             "scanning":lock.locked(),"reviewing":enrichment_lock.locked(),"scan_status":read_status(),"ai_usage":daily_usage(),"research_status":read_research_status(),
             "caution":"Market prices are complementary evidence only; independently verify fundamentals and resolution rules."}
 
