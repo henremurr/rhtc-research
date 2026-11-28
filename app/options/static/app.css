@@ -1914,7 +1914,7 @@ body.news-mode .news-research-title {
   font-variant-numeric:tabular-nums;
 }
 .market-session-block {
-  grid-column:1;
+  grid-column:5;
   grid-row:1/4;
   display:grid;
   row-gap:3px;
@@ -1927,7 +1927,7 @@ body.news-mode .news-research-title {
   white-space:nowrap;
 }
 .market-snapshot .market-index {
-  grid-column:2/6;
+  grid-column:1/5;
   display:grid;
   grid-template-columns:subgrid;
   color:var(--ink);
