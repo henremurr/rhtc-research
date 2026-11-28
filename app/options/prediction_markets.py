@@ -612,7 +612,9 @@ def map_portfolio(rows, watchlist):
         row["watchlist_matches"]=sorted(symbols & candidates)
         row["outside_candidates"]=sorted(candidates-symbols)
         row["holdings"]=[h for symbol in sorted(candidates) for h in held_by_symbol.get(symbol,[])]
-        row["thematic_exposure"]=sorted(set().union(*(held_by_peak.get(t,set()) for t in row["topics"])))
+        effective_topics=set(row["topics"]) | set(review.get("topics",[]))
+        row["topics"]=sorted(effective_topics)
+        row["thematic_exposure"]=sorted(set().union(*(held_by_peak.get(t,set()) for t in effective_topics)))
         row["relevance"]=review.get("relevance") if row["research"] else None
     return rows
 
