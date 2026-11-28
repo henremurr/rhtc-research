@@ -3297,7 +3297,13 @@ async def _public_market_index(client: httpx.AsyncClient, symbol: str) -> dict[s
         timestamp = _finnhub_finite_number(meta.get("regularMarketTime"))
         if price is None or price <= 0 or timestamp is None or timestamp <= 0:
             return None
-        return {"price": price, "trade_time_ms": timestamp * 1000, "source": "Yahoo Finance"}
+        previous_close = _finnhub_finite_number(meta.get("chartPreviousClose"))
+        return {
+            "price": price,
+            "change": price - previous_close if previous_close is not None and previous_close > 0 else None,
+            "trade_time_ms": timestamp * 1000,
+            "source": "Yahoo Finance",
+        }
     except (httpx.HTTPError, ValueError, KeyError, TypeError, IndexError, AttributeError):
         return None
 
@@ -3335,6 +3341,7 @@ async def market_snapshot() -> dict[str, Any]:
                     snapshot["indices"][symbol] = {
                         "price": price,
                         "source": "Tradier",
+                        "change": _finnhub_finite_number(quote.get("change")),
                         "trade_time_ms": _finnhub_finite_number(quote.get("trade_date")),
                     }
         missing = [symbol for symbol in MARKET_INDEX_SYMBOLS if symbol not in snapshot["indices"]]
