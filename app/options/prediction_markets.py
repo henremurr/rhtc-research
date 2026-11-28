@@ -501,14 +501,18 @@ async def enrich_pending():
         return
     async with enrichment_lock:
         from openai import AsyncOpenAI
+        from app.options import kalshi_ingestion
         scan, rows = await asyncio.to_thread(latest,True)
-        if not scan:
+        kalshi_scan, kalshi_rows = await asyncio.to_thread(kalshi_ingestion.latest)
+        classify_kalshi(kalshi_rows)
+        if not scan and not kalshi_scan:
             research_status("waiting",reason="No market snapshot yet")
             return
-        pending = [r for r in await asyncio.to_thread(attach_research,rows) if r["research"] is None]
+        pending = [r for r in await asyncio.to_thread(attach_research,rows+kalshi_rows) if r["research"] is None]
         from app.options.api import read_watchlist
         held={w["symbol"] for w in await asyncio.to_thread(read_watchlist) if (number(w.get("quantity")) or 0)>0}
-        await asyncio.to_thread(add_history,scan,pending)
+        await asyncio.to_thread(add_history,scan,[r for r in pending if r.get("provider")!="kalshi"])
+        await asyncio.to_thread(kalshi_ingestion.add_history,kalshi_scan,[r for r in pending if r.get("provider")=="kalshi"])
         # Reserve every fifth batch for unclassified markets to prevent starvation.
         ranked=sorted((r for r in pending if r["topics"] or direct_exposure(r,held)),key=lambda r:research_priority(r,held),reverse=True)
         unexplored=iter(sorted((r for r in pending if not r["topics"] and not direct_exposure(r,held)),key=lambda r:research_priority(r,held),reverse=True))
@@ -537,7 +541,7 @@ async def enrich_pending():
                 if not queue:
                     queue,deferred=deferred,deque()
                 batch=[queue.popleft() for _ in range(min(size,len(queue)))]
-                payload=[{"id":r["id"],"question":r["title"][:500],"rules":r["description"][:1500],"resolution_source":r.get("resolution_source")} for r in batch]
+                payload=[{"id":r["id"],"provider":r.get("provider","polymarket"),"question":r["title"][:500],"rules":r["description"][:1500],"resolution_source":r.get("resolution_source")} for r in batch]
                 day=await asyncio.to_thread(reserve_request)
                 if day is None:
                     research_status("budget limited",pending=max(0,len(pending)-reviewed),reviewed=reviewed)
@@ -838,15 +842,19 @@ def without_duplicate_markets(rows):
     return sorted(winners, key=priority, reverse=True)
 
 
-def kalshi_catalog():
-    from app.options.kalshi_ingestion import latest
-    from app.options.api import read_watchlist
-    scan, rows = latest()
+def classify_kalshi(rows):
     for row in rows:
         row["topics"] = [key for key, pattern in TOPICS.items()
                          if re.search(pattern, row["title"] + " " + row["description"], re.I)]
-        row["changes_pp"] = {}
-    return scan, map_portfolio(attach_research(rows), read_watchlist())
+    return rows
+
+
+def kalshi_catalog():
+    from app.options import kalshi_ingestion
+    from app.options.api import read_watchlist
+    scan, rows = kalshi_ingestion.latest()
+    classify_kalshi(rows)
+    return scan, map_portfolio(kalshi_ingestion.add_history(scan, attach_research(rows)), read_watchlist())
 
 
 @router.get("")
