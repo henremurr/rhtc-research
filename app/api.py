@@ -14,6 +14,7 @@ from app.models import BatchRequest
 from app.options.api import app as options_app
 from app.legal import router as legal_router
 from app.options.news import start_daily_news_scheduler
+from app.options.kalshi_ingestion import scheduler as kalshi_scheduler
 from app.options.prediction_health import scheduler as prediction_health_scheduler
 from app.options.prediction_markets import maintenance_scheduler as prediction_maintenance_scheduler, catalog_scheduler as prediction_catalog_scheduler
 from app.options.prediction_markets import router as prediction_router, page_router as prediction_page_router, scheduler as prediction_scheduler, research_scheduler as prediction_research_scheduler
@@ -43,6 +44,7 @@ app.include_router(legal_router)
 async def start_news_scheduler() -> None:
     app.state.news_scheduler = start_daily_news_scheduler()
     app.state.prediction_scheduler = asyncio.create_task(prediction_scheduler())
+    app.state.kalshi_scheduler = asyncio.create_task(kalshi_scheduler())
     app.state.prediction_research_scheduler = asyncio.create_task(prediction_research_scheduler())
     app.state.prediction_health_scheduler = asyncio.create_task(prediction_health_scheduler())
     app.state.prediction_maintenance_scheduler = asyncio.create_task(prediction_maintenance_scheduler())
@@ -51,7 +53,7 @@ async def start_news_scheduler() -> None:
 
 @app.on_event("shutdown")
 async def stop_prediction_scheduler():
-    tasks = [getattr(app.state, name, None) for name in ("prediction_scheduler", "prediction_research_scheduler", "prediction_health_scheduler", "prediction_maintenance_scheduler", "prediction_catalog_scheduler")]
+    tasks = [getattr(app.state, name, None) for name in ("prediction_scheduler", "prediction_research_scheduler", "prediction_health_scheduler", "prediction_maintenance_scheduler", "prediction_catalog_scheduler", "kalshi_scheduler")]
     tasks = [task for task in tasks if task]
     for task in tasks:
         task.cancel()
