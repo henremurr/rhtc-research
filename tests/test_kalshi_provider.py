@@ -51,3 +51,17 @@ class KalshiProviderTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "stopped advancing"):
                     await k.fetch_page(client, "same")
         asyncio.run(run())
+
+    def test_quality_gates(self):
+        from datetime import datetime, timezone, timedelta
+        market = {"ticker": "TEST", "yes_bid_dollars": ".50", "yes_ask_dollars": ".52",
+                  "yes_bid_size_fp": "100", "yes_ask_size_fp": "100",
+                  "volume_24h_fp": "1000", "open_interest_fp": "1000",
+                  "liquidity_dollars": "10000", "rules_primary": "Rules",
+                  "updated_time": datetime.now(timezone.utc).isoformat()}
+        self.assertEqual(k.normalize(market)["quality"], "higher liquidity")
+        for change in ({"yes_bid_size_fp": "99"}, {"volume_24h_fp": "999"},
+                       {"open_interest_fp": "999"}, {"liquidity_dollars": "9999"},
+                       {"yes_ask_dollars": ".6"}, {"rules_primary": ""},
+                       {"updated_time": (datetime.now(timezone.utc)-timedelta(hours=2)).isoformat()}):
+            self.assertEqual(k.normalize(market | change)["quality"], "limited")
