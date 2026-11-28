@@ -3,7 +3,7 @@
 **For:** RHTC internal research users<br>
 **Stable release:** v2026.11.22<br>
 **Last checked:** November 22, 2026
-**Documentation update:** November 27, 2026 (Prediction Market Intelligence supplement)<br>
+**Documentation update:** November 27, 2026 (Prediction Market Intelligence, FIS and execution audit supplement)<br>
 **Application:** Covered Call Screener / Income Engine and RHTC News Feed
 
 ## Table of contents
@@ -397,7 +397,7 @@ The current stable release is **v2026.11.22** at Git reference **`stable/v2026.1
 
 ## Prediction Market Intelligence
 
-Added to the main development branch on November 27, 2026, through PRs #263–266. This section documents the implementation and its intended analytical purpose; it does not promote the stable release or certify production runtime validation.
+Introduced on November 27, 2026, and extended through PRs #263–276. This supplement describes the main development branch, including features deployed after the v2026.11.22 stable baseline. It does not promote a new stable release.
 
 ### Purpose and model influence
 
@@ -407,13 +407,13 @@ Prediction Market Intelligence adds a **forward-looking evidence layer** to RHTC
 | --- | --- | --- |
 | News Summary | Integrated in source | Compare independently reported developments with changing market expectations. |
 | The Long Game | Integrated in source | Evaluate strategic risks, emerging opportunities, and possible portfolio misalignment. |
-| Stock Analysis | Proposed | Identify external catalysts and company-specific risks. |
-| Buffett Model | Proposed, contextual only | Investigate threats to durable business economics and competitive advantages. |
-| CEO Risk | Proposed | Investigate leadership, succession, and regulatory risks. |
-| Covered Call Analysis | Proposed | Identify event risk within the recorded contract life. |
-| RHTC Composite Score | Proposed | Consider corroborated forward-looking risks and opportunities without double-counting existing factors. |
+| Stock Analysis | Integrated | Identify external catalysts and company-specific risks. |
+| Buffett Model | Integrated, contextual only | Investigate threats to durable business economics and competitive advantages. |
+| CEO Risk | Integrated | Investigate leadership, succession, and regulatory risks. |
+| Covered Call Analysis | Integrated | Identify event risk within the recorded contract life. |
+| RHTC Composite Score | Integrated, reviewed adjustment only | Consider corroborated forward-looking risks and opportunities without double-counting existing factors. |
 
-Prediction-market evidence does **not currently directly change numerical stock, call, Buffett, CEO Risk, or composite scores**. News Summary and The Long Game receive selected evidence from completed saved scans, including market-implied probabilities, available historical changes, quality indicators, research hypotheses, recorded exposure, and confirmation requirements. The Long Game retains that context with the job inputs for reproducible historical analysis and checkpoint recovery.
+Prediction-market probabilities do **not directly change numerical stock, call, Buffett or CEO Risk scores**. Independently verified facts may inform existing analytical criteria. The Composite Score can receive a separate, bounded adjustment only after explicit review of an eligible FIS assessment. News Summary and The Long Game receive selected evidence from completed saved scans, including market-implied probabilities, available historical changes, quality indicators, research hypotheses, recorded exposure, and confirmation requirements. The Long Game retains that context with the job inputs for reproducible historical analysis and checkpoint recovery.
 
 ### Research methodology
 
@@ -438,20 +438,35 @@ The following examples are hypothetical, not live market readings or verified co
 | Increased probability of commercial fusion breakthroughs | Investigate infrastructure and component suppliers. |
 | Increased probability of accelerated AI adoption | Investigate second-order beneficiaries in electricity, cooling, optical networking and memory. |
 
-### Proposed Forward Intelligence Score (FIS)
+### Forward Intelligence Score (FIS)
 
-A separate Forward Intelligence Score is recommended for future development rather than allowing prediction markets to distort fundamental scores. The following weights are illustrative and **not implemented**:
+The implemented FIS measures the strength of a company-specific forward intelligence assessment on a 0–100 scale. It is distinct from semantic market relevance (0–10), market-implied probability, and expected investment return. Direction (positive or negative) is recorded separately.
 
-| Factor | Proposed weight |
-| --- | ---: |
-| Potential economic impact | 25% |
-| Independent corroboration | 25% |
-| Three Peaks strategic relevance | 20% |
-| Market liquidity and credibility | 15% |
-| Probability movement | 10% |
-| Event proximity | 5% |
+| Factor | Weight | Factor scale (0–1) |
+| --- | ---: | --- |
+| Potential economic impact | 25% | Analyst-proposed: immaterial to thesis-changing. |
+| Independent corroboration | 25% | Analyst-proposed: unsupported to direct primary evidence. |
+| Strategic relevance | 20% | Validated semantic relevance divided by ten. |
+| Market liquidity and credibility | 15% | Higher-liquidity quality gate; limited quality is not eligible. |
+| Probability movement | 10% | Largest available absolute historical percentage-point movement divided by 20, capped at 1. |
+| Event proximity | 5% | One minus days to market end divided by 90, floored at zero; past or unknown dates are unavailable. |
 
-This proposed score is distinct from the existing semantic market relevance score (0–10). Probability movement alone would carry only 10% of the proposed weighting. Before implementing FIS, define factor scales, missing-evidence treatment, directional impact, validation and safeguards against double-counting correlated markets. Do not treat a high FIS as a buy or sell instruction.
+FIS is the sum of each factor multiplied by its weight. All six factors must be finite numbers between zero and one; missing factors produce an incomplete assessment, not an imputed score. The model proposes the first two factors; an independent human review remains necessary. Market end dates are not verified event dates.
+
+When running Stock Analysis, a material direct-ticker catalyst may produce a provisional assessment using the existing AI request. The candidate must refer to a supplied higher-liquidity market and cite an independent HTTPS source returned in the report's citations. The model must identify a catalyst not already incorporated in the stock rating. These are screening gates, not proof of source reliability. Assessments are stored with their corresponding stock report ID, factors, rationale, source and snapshot date. A new stock report without an eligible assessment does not inherit the prior assessment.
+
+### RHTC Composite Score and review
+
+The base RHTC Score remains Stock Score (1–5) plus Covered Call Score (0–5), with a maximum of 10. Missing component scores do not create a composite score.
+
+An eligible FIS assessment may add +0.25 for a positive catalyst or subtract 0.25 for a negative catalyst, bounded within 0–10. There is no adjustment for an incomplete, stale, unapproved, rejected or superseded assessment. Approval requires:
+
+- A complete FIS of at least 75/100, tied to the latest saved Stock Analysis report.
+- A completed prediction snapshot no more than 12 hours old.
+- Explicit review of independent evidence, materiality and absence of double-counting.
+- A nonempty review rationale.
+
+In the Covered Call Screener or Watchlist Manager, an available FIS assessment appears beside the Composite Score. Open the FIS control to inspect the event, direction, source, factors and review status. Read and independently verify the source before approving. Enter a rationale and select **Approve** or **Reject**. Rejection removes the adjustment. The adjustment expires after the freshness window; rerun research when new evidence warrants it. The ranking and displayed composite use the eligibility rules, without changing underlying component ratings. No automatic trades are executed.
 
 ### Using the research screen
 
@@ -463,7 +478,9 @@ Open **Dashboard menu → Other Reports → Prediction Market Intelligence** (lo
 
 The current implementation is designed to scan active, non-closed markets approximately every six hours using cursor pagination. Each retrieved page and its cursor are stored atomically in SQLite on persistent storage. Interrupted scans resume from a saved checkpoint where the provider cursor remains valid. Completed snapshots retain a rolling 35-day history. Historical 1-, 7- and 30-day comparisons require sufficiently close saved observations; unavailable comparisons are not fabricated.
 
-A separate semantic research worker prioritizes economically relevant markets and reserves processing capacity for unclassified markets. Unchanged questions and resolution rules reuse cached analysis. Discovery is comprehensive by design, but semantic coverage is progressive and not guaranteed to be complete at any given time. AI usage is tracked by UTC day, with defaults of 100 requests and a 1,000,000-token threshold per day, and batches of up to 20 markets. A final request can exceed the token threshold; failed requests may have unknown usage. Estimated dollar costs require configured model pricing and are unavailable when usage is unknown.
+A separate semantic research worker prioritizes economically relevant markets and reserves processing capacity for unclassified markets. Unchanged questions and resolution rules reuse cached analysis. Discovery is comprehensive by design, but semantic coverage is progressive and not guaranteed to be complete at any given time. AI usage is tracked by UTC day, with defaults of 100 requests and a 1,000,000-token threshold per day. Semantic batches start at 10 markets and shrink on transient failure; successful records persist and failed records may be retried or deferred. A final request can exceed the token threshold. The persistent request ledger separates in-flight, completed, explicitly rejected and unresolved requests, preventing double-counting. Historical unresolved aggregate usage cannot be reconstructed from counts alone. Estimated dollar costs require configured model pricing and are unavailable when usage is unknown. Research prioritizes direct holdings exposure, liquidity and probability movement while reserving capacity for unclassified markets. Database maintenance runs at startup and approximately daily; persistent volume headroom warnings and discovery safeguards protect against excessive storage growth.
+
+Indexed catalog retrieval supports database-side pagination for non-text dashboard filters after incremental indexing completes. During incomplete indexing, or when full-text search is requested, the existing full-catalog retrieval remains available. Report evidence retrieval selects cached research candidates and validates snapshot fingerprints. Historical probability queries use targeted indexed reads for small selections. Storage and latency improvements require measurement against production workloads.
 
 ### Interpretation and strategic safeguards
 
@@ -471,4 +488,10 @@ Market-implied probabilities are not objective forecasts. Thin liquidity, wide s
 
 The strategic objective is to detect emerging investment opportunities and threats before they reach the watchlist, challenge existing assumptions, identify portfolio misalignment, and improve the timing of research, capital allocation and covered-call review. Independent evidence, business fundamentals, current valuation, liquidity, verified account exposure and contract details remain necessary for investment decisions.
 
-**Validation status:** the implementation is merged into main, but complete live discovery, semantic processing, report integration and corrected mobile rendering have not been independently verified. The stable release baseline remains unchanged.
+### Infrastructure Audit and automated validation
+
+The existing RHTC Infrastructure Audit reports provider connectivity, completed snapshot integrity and freshness, checkpoint status, discovery and semantic worker state, request/token accounting, volume headroom, model wiring and available report context. It refreshes approximately hourly and can refresh after successful worker activity. PASS indicates the listed check passed; WARN identifies degraded, unresolved or pending conditions; FAIL identifies a failed check. Unknown historical AI usage is not silently discarded.
+
+PR #276 adds execution fixtures for News Summary, The Long Game, Stock Analysis, Buffett, CEO Risk, Covered Call Analysis and Composite Score. These run in a separate process at startup and no more often than hourly, with temporary databases, simulated provider responses and no production API credentials. GitHub Actions runs the regression suites and the execution fixture on pull requests. The fixture exercises application logic, not live inference quality; the Long Game fixture checks checkpoint creation in memory rather than production crash recovery. Mobile interaction, live inference quality and production performance measurements remain distinct validation activities.
+
+**Validation status (November 27, 2026):** PR #275 passed automated regression checks and deployed successfully. PR #276 passed the seven execution fixture checks in GitHub Actions (run 46086169517) and merged; production audit execution must be verified separately. The stable release remains v2026.11.22 until explicitly promoted after validation. See [PR #275](https://github.com/henremurr/rhtc-research/pull/275), [PR #276](https://github.com/henremurr/rhtc-research/pull/276) and [the successful regression run](https://github.com/henremurr/rhtc-research/actions/runs/46086169517).
