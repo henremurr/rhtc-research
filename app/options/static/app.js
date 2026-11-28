@@ -2452,7 +2452,39 @@ function recoverTickerReportLayout(){
   detailModal.classList.toggle('report-preview-mode',!report.hidden);
 }
 window.addEventListener('pageshow',recoverTickerReportLayout);recoverTickerReportLayout();
-$('#market-clock').textContent=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date())+' ET';
+const marketTime = new Intl.DateTimeFormat('en-US',{
+  timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',hour12:false,
+});
+const marketQuoteTime = new Intl.DateTimeFormat('en-US',{
+  timeZone:'America/New_York',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',
+});
+
+async function refreshMarketSnapshot(){
+  $('#market-clock').textContent = marketTime.format(new Date())+' ET';
+  const session = $('#market-session');
+  let data = {};
+  try{
+    const response = await fetch('/options/api/market-snapshot',{cache:'no-store'});
+    if(response.ok)data = await response.json();
+  }catch{
+    // Leave unavailable values visible while the next refresh retries.
+  }
+  const extended = {premarket:'Premarket',postmarket:'After hours'};
+  session.textContent = extended[data.session] ? 'Extended' : '';
+  session.title = extended[data.session] || ({open:'Regular session open',closed:'Market closed'})[data.session] || 'Session status unavailable';
+  session.parentElement.dataset.session = data.session || '';
+  for(const [symbol,name] of [['COMP','Nasdaq Composite'],['NYA','NYSE Composite']]){
+    const value = $('#market-'+symbol.toLowerCase());
+    const quote = data.indices?.[symbol];
+    value.textContent = quote ? quote.price.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
+    const stamp = quote?.trade_time_ms > 0 ? ' · '+marketQuoteTime.format(new Date(quote.trade_time_ms))+' ET' : '';
+    value.title = quote ? name+' · '+quote.source+' · May be delayed'+stamp : name+' · Quote unavailable';
+  }
+}
+void refreshMarketSnapshot();
+setInterval(()=>{
+  if(!document.hidden)void refreshMarketSnapshot();
+},60000);
 initializeWatchlist();
 loadNews({quiet:true});
 $('#orphaned-tickers-btn').addEventListener('click',showOrphanedTickers);
