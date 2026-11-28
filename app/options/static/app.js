@@ -2459,6 +2459,10 @@ const marketQuoteTime = new Intl.DateTimeFormat('en-US',{
   timeZone:'America/New_York',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',
 });
 
+const marketChangeFormat = new Intl.NumberFormat('en-US',{
+  minimumFractionDigits:2,maximumFractionDigits:2,signDisplay:'exceptZero',
+});
+
 async function refreshMarketSnapshot(){
   $('#market-clock').textContent = marketTime.format(new Date())+' ET';
   const session = $('#market-session');
@@ -2479,7 +2483,16 @@ async function refreshMarketSnapshot(){
     value.textContent = quote ? quote.price.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
     const change = quote?.change;
     const direction = Number.isFinite(change) ? Math.sign(Math.round(change * 100)) : 0;
-    value.dataset.direction = direction > 0 ? 'up' : direction < 0 ? 'down' : '';
+    const directionLabel = direction > 0 ? 'up' : direction < 0 ? 'down' : '';
+    value.dataset.direction = directionLabel;
+    const points = $('#market-'+symbol.toLowerCase()+'-points');
+    const percent = $('#market-'+symbol.toLowerCase()+'-percent');
+    const previousClose = quote?.price - change;
+    points.textContent = Number.isFinite(change) ? marketChangeFormat.format(change)+' pts' : '—';
+    const changePercent = Number.isFinite(change) && previousClose > 0 ? change / previousClose * 100 : null;
+    percent.textContent = Number.isFinite(changePercent) ? marketChangeFormat.format(changePercent)+'%' : '—';
+    points.dataset.direction = directionLabel;
+    percent.dataset.direction = Number.isFinite(changePercent) ? directionLabel : '';
     const movement = direction > 0 ? ' · Up from previous close' : direction < 0 ? ' · Down from previous close' : '';
     const stamp = quote?.trade_time_ms > 0 ? ' · '+marketQuoteTime.format(new Date(quote.trade_time_ms))+' ET' : '';
     value.title = quote ? name+' · '+quote.source+' · May be delayed'+stamp+movement : name+' · Quote unavailable';
