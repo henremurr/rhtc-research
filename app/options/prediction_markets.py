@@ -521,15 +521,20 @@ def prioritize_pending(pending, held, size):
     # roughly 20% of the queue for exploratory/unclassified contracts.
     from collections import deque
     def ranked_group(records):
-        ranked=sorted(records,key=lambda r:research_priority(r,held),reverse=True)
-        providers={}
-        for row in ranked:
-            providers.setdefault(row.get("provider","polymarket"),deque()).append(row)
+        # Preserve priority tiers before balancing providers within each tier.
+        tiers={}
+        for row in records:
+            priority=research_priority(row,held)
+            tiers.setdefault(priority[:4],[]).append(row)
         result=[]
-        while any(providers.values()):
-            for q in providers.values():
-                if q:
-                    result.append(q.popleft())
+        for tier in sorted(tiers,reverse=True):
+            providers={}
+            for row in sorted(tiers[tier],key=lambda r:research_priority(r,held),reverse=True):
+                providers.setdefault(row.get("provider","polymarket"),deque()).append(row)
+            while any(providers.values()):
+                for q in providers.values():
+                    if q:
+                        result.append(q.popleft())
         return result
     ranked=ranked_group([r for r in pending if r["topics"] or direct_exposure(r,held)])
     exploratory=deque(ranked_group([r for r in pending if not r["topics"] and not direct_exposure(r,held)]))
