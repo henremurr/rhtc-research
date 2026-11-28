@@ -76,8 +76,10 @@ def normalize(m):
     }
 
 
-async def fetch_page(client, cursor=None):
-    params = {"status": "open", "limit": 100, "mve_filter": "exclude"}
+async def fetch_page(client, cursor=None, *, limit=100):
+    if not isinstance(limit,int) or not 1 <= limit <= 1000:
+        raise ValueError("Invalid Kalshi page size")
+    params = {"status": "open", "limit": limit, "mve_filter": "exclude"}
     if cursor:
         params["cursor"] = cursor
     for attempt in range(4):
