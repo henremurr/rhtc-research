@@ -3,7 +3,7 @@
 **For:** RHTC internal research users<br>
 **Stable release:** v2026.11.22<br>
 **Last checked:** November 22, 2026
-**Documentation update:** November 28, 2026 (Kalshi integration supplement; proposed in draft PR #294)<br>
+**Documentation update:** November 28, 2026 (dual-provider catalog optimization supplement)<br>
 **Application:** Covered Call Screener / Income Engine and RHTC News Feed
 
 ## Table of contents
@@ -397,9 +397,9 @@ The current stable release is **v2026.11.22** at Git reference **`stable/v2026.1
 
 ## Prediction Market Intelligence
 
-### Proposed dual-provider extension — Kalshi (PR #294)
+### Dual-provider extension — Kalshi (PR #294)
 
-This section describes development-branch functionality, **not a verified production release**. The approved stable baseline remains v2026.11.22.
+PR #294 is deployed; subsequent PRs #295–297 added health refresh, throughput and telemetry. The approved stable baseline remains v2026.11.22. The proposed catalog optimization below requires separate validation.
 
 - Choose All providers, Polymarket or Kalshi on the Prediction Market Intelligence screen. Refresh markets requests the selected provider(s). Text filtering examines only contract titles and descriptions. Provider attribution remains visible. Volume and liquidity sorts group providers rather than compare incompatible units directly.
 - Kalshi uses its public read-only market-data API, without trading credentials. Only active binary markets are ingested; unavailable or invalid quotes do not produce probabilities. A two-sided quote midpoint is an indicative probability, not an independent forecast.
@@ -511,3 +511,15 @@ The existing RHTC Infrastructure Audit reports provider connectivity, completed 
 PR #276 adds execution fixtures for News Summary, The Long Game, Stock Analysis, Buffett, CEO Risk, Covered Call Analysis and Composite Score. These run in a separate process at startup and no more often than hourly, with temporary databases, simulated provider responses and no production API credentials. GitHub Actions runs the regression suites and the execution fixture on pull requests. The fixture exercises application logic, not live inference quality; the Long Game fixture checks checkpoint creation in memory rather than production crash recovery. Mobile interaction, live inference quality and production performance measurements remain distinct validation activities.
 
 **Validation status (November 27, 2026):** PR #275 passed automated regression checks and deployed successfully. PR #276 passed the seven execution fixture checks in GitHub Actions (run 46086169517) and merged; production audit execution must be verified separately. The stable release remains v2026.11.22 until explicitly promoted after validation. See [PR #275](https://github.com/henremurr/rhtc-research/pull/275), [PR #276](https://github.com/henremurr/rhtc-research/pull/276) and [the successful regression run](https://github.com/henremurr/rhtc-research/actions/runs/46086169517).
+
+
+### Dual-provider catalog optimization release candidate
+
+- New Kalshi full scans use up to 1,000 records per page; existing 100-record checkpoints retain their original page size. Six-hour full reconciliation remains authoritative.
+- Standard catalog filters and sorts use both provider indexes before hydrating the selected result page. Full text searches and duplicate removal retain the existing fallback. Incomplete indexes must not silently omit records.
+- New Kalshi observations store compressed immutable contract metadata by SHA-256 content hash. Existing inline snapshots remain readable. Historical rules and probabilities are not rewritten.
+- Optional shadow metadata and quote workers are controlled by RHTC_KALSHI_SHADOW_SYNC (default disabled). Metadata windows overlap and advance their watermark only after complete retrieval. Quotes are stored separately and are not substituted into production reports. Enable only after live compatibility and reconciliation checks.
+- Infrastructure Audit compares full snapshot counts and shadow lifecycle/coverage discrepancies without deleting or replacing production records. Storage and indexed page metrics are measured separately from full HTTP latency.
+- The daily AI budget remains 100 requests and a 1,000,000-token threshold. Default batch size is 16. Actual yield and token efficiency are measured when research resumes.
+- Production baseline observed November 28: 153,940 Polymarket and 191,447 Kalshi contracts; combined count 345,387 before deduplication. Storage including sidecars: 880.78 and 454.83 MiB respectively. Indexed 100-row storage reads: 6.14 and 61.49 ms respectively. These are pre-optimization observations, not post-release performance claims.
+- No stable-release promotion is implied by merging or deploying this candidate.

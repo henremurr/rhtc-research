@@ -102,3 +102,38 @@ class KalshiIngestionTests(unittest.TestCase):
                 asyncio.run(k.refresh())
             self.assertEqual(k.read_status()["state"], "failed")
             notify.assert_not_called()
+
+    def test_content_addressed_metadata_and_legacy_compatibility(self):
+        import re
+        first=dict(market("A"),title="AI infrastructure",rules_primary="Original settlement rules")
+        cp=k.persist(k.begin(),[first],None)
+        k.finish(cp)
+        scan1,rows1=k.latest()
+        self.assertEqual(rows1[0]["description"],"Original settlement rules")
+        cp=k.persist(k.begin(),[first],None)
+        k.finish(cp)
+        scan2,rows2=k.latest()
+        with closing(k.connect()) as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM market_metadata").fetchone()[0],1)
+        revised=dict(first,rules_primary="Revised settlement rules")
+        cp=k.persist(k.begin(),[revised],None)
+        k.finish(cp)
+        with closing(k.connect()) as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM market_metadata").fetchone()[0],2)
+            raw=db.execute("SELECT payload FROM snapshots WHERE stamp=?",(scan1["stamp"],)).fetchone()[0]
+            self.assertEqual(k.hydrate_many(db,[raw])[0]["description"],"Original settlement rules")
+            legacy=json.dumps({"id":"legacy","title":"Legacy","description":"Inline"})
+            self.assertEqual(k.hydrate_many(db,[legacy])[0]["description"],"Inline")
+        self.assertEqual(len(k.latest(search=re.compile("Revised"))[1]),1)
+        self.assertEqual(len(k.latest(search=re.compile("Original"))[1]),0)
+
+    def test_checkpoint_page_size_preservation(self):
+        with closing(k.connect()) as db,db:
+            db.execute("INSERT INTO checkpoint VALUES(1,?, ?,5,0)",(k.now().isoformat(),"legacy-cursor"))
+        cp=k.begin()
+        self.assertEqual(k.page_size(cp),100)
+        self.assertEqual(cp["cursor"],"legacy-cursor")
+        cp=k.persist(cp,[market("A")],None)
+        k.finish(cp)
+        cp=k.begin()
+        self.assertEqual(k.page_size(cp),1000)

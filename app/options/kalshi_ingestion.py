@@ -4,6 +4,8 @@ import json
 import logging
 import sqlite3
 import shutil
+import hashlib
+import zlib
 from contextlib import closing
 from datetime import datetime, timezone, timedelta
 import httpx
@@ -24,11 +26,16 @@ def connect():
     db.execute("PRAGMA journal_mode=WAL")
     db.executescript("""
         CREATE TABLE IF NOT EXISTS scans(stamp TEXT PRIMARY KEY, count INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS market_metadata(key TEXT PRIMARY KEY,payload BLOB NOT NULL);
         CREATE TABLE IF NOT EXISTS snapshots(stamp TEXT NOT NULL,id TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(stamp,id));
         CREATE INDEX IF NOT EXISTS snapshot_history ON snapshots(id,stamp);
         CREATE TABLE IF NOT EXISTS checkpoint(id INTEGER PRIMARY KEY CHECK(id=1),stamp TEXT NOT NULL,cursor TEXT,pages INTEGER NOT NULL,exhausted INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS cursors(stamp TEXT NOT NULL,cursor TEXT NOT NULL,PRIMARY KEY(stamp,cursor));
         CREATE TABLE IF NOT EXISTS status(id INTEGER PRIMARY KEY CHECK(id=1),payload TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS scan_settings(stamp TEXT PRIMARY KEY,page_size INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS market_catalog(stamp TEXT NOT NULL,id TEXT NOT NULL,fingerprint TEXT NOT NULL,topics TEXT NOT NULL,tickers TEXT NOT NULL,search_text TEXT NOT NULL,liquidity REAL NOT NULL,quality INTEGER NOT NULL,PRIMARY KEY(stamp,id));
+        CREATE INDEX IF NOT EXISTS market_catalog_order ON market_catalog(stamp,quality DESC,liquidity DESC,id);
+        CREATE TABLE IF NOT EXISTS market_catalog_state(stamp TEXT PRIMARY KEY,last_id TEXT NOT NULL,complete INTEGER NOT NULL DEFAULT 0);
     """)
     return db
 
@@ -36,8 +43,21 @@ def connect():
 def begin():
     with closing(connect()) as db, db:
         db.execute("BEGIN IMMEDIATE")
-        db.execute("INSERT OR IGNORE INTO checkpoint VALUES(1,?,NULL,0,0)", (now().isoformat(),))
+        existing=db.execute("SELECT * FROM checkpoint WHERE id=1").fetchone()
+        if existing:
+            # Legacy checkpoints were created with 100-item pages.
+            db.execute("INSERT OR IGNORE INTO scan_settings VALUES(?,100)",(existing["stamp"],))
+        else:
+            stamp=now().isoformat()
+            db.execute("INSERT INTO checkpoint VALUES(1,?,NULL,0,0)",(stamp,))
+            db.execute("INSERT INTO scan_settings VALUES(?,1000)",(stamp,))
         return dict(db.execute("SELECT * FROM checkpoint WHERE id=1").fetchone())
+
+
+def page_size(cp):
+    with closing(connect()) as db:
+        row=db.execute("SELECT page_size FROM scan_settings WHERE stamp=?",(cp["stamp"],)).fetchone()
+        return row[0] if row else 100
 
 
 def status(state, **details):
@@ -56,6 +76,36 @@ def assert_owner(db, cp):
     current = db.execute("SELECT * FROM checkpoint WHERE id=1").fetchone()
     if current is None or dict(current) != cp:
         raise ValueError("Kalshi checkpoint changed")
+
+
+STATIC_FIELDS=("title","description","end_date","expected_expiration","resolution_source","event_ticker","slug")
+
+def compact(row):
+    static={k:row[k] for k in STATIC_FIELDS if k in row}
+    encoded=json.dumps(static,ensure_ascii=False,sort_keys=True,separators=(",",":")).encode()
+    key=hashlib.sha256(encoded).hexdigest()
+    dynamic={k:v for k,v in row.items() if k not in STATIC_FIELDS}
+    dynamic["_metadata"]=key
+    return key,zlib.compress(encoded,6),json.dumps(dynamic,allow_nan=False,separators=(",",":"))
+
+
+def hydrate_many(db, raw, schema="main"):
+    if schema not in ("main","kalshi"):
+        raise ValueError("Unknown metadata schema")
+    rows=[json.loads(p) for p in raw]
+    keys=list({r["_metadata"] for r in rows if "_metadata" in r})
+    metadata={}
+    for start in range(0,len(keys),500):
+        chunk=keys[start:start+500]
+        sql=f"SELECT key,payload FROM {schema}.market_metadata WHERE key IN ("+",".join("?" for _ in chunk)+")"
+        metadata.update((r[0],json.loads(zlib.decompress(r[1]))) for r in db.execute(sql,chunk))
+    for row in rows:
+        key=row.pop("_metadata",None)
+        if key is not None:
+            if key not in metadata:
+                raise ValueError("Kalshi snapshot metadata missing")
+            row.update(metadata[key])
+    return rows
 
 
 def persist(cp, page, cursor):
@@ -77,8 +127,13 @@ def persist(cp, page, cursor):
             ).fetchone():
                 raise ValueError("Kalshi cursor stopped advancing")
             db.execute("INSERT INTO cursors VALUES(?,?)", (cp["stamp"], cursor))
+        packed=[(row["id"],*compact(row)) for row in rows]
+        db.executemany("INSERT OR IGNORE INTO market_metadata VALUES (?,?)",[(key,meta) for _,key,meta,_ in packed])
         db.executemany("INSERT OR REPLACE INTO snapshots VALUES(?,?,?)",
-                       [(cp["stamp"], r["id"], json.dumps(r, allow_nan=False)) for r in rows])
+                       [(cp["stamp"],mid,payload) for mid,_,_,payload in packed])
+        from app.options import prediction_markets as pm
+        pm.classify_kalshi(rows)
+        db.executemany("INSERT OR REPLACE INTO market_catalog VALUES (?,?,?,?,?,?,?,?)", [pm.catalog_record(cp["stamp"],r) for r in rows])
         db.execute("UPDATE checkpoint SET cursor=?,pages=pages+1,exhausted=? WHERE id=1",
                    (cursor, int(not cursor)))
         return dict(db.execute("SELECT * FROM checkpoint WHERE id=1").fetchone())
@@ -100,12 +155,42 @@ def finish(cp):
             db.execute("DELETE FROM cursors WHERE stamp=?", (cp["stamp"],))
             db.execute("DELETE FROM checkpoint WHERE id=1")
             cutoff = (now() - timedelta(days=35)).isoformat()
+            db.execute("DELETE FROM market_catalog WHERE stamp IN (SELECT stamp FROM scans WHERE stamp<? AND stamp<>?)",(cutoff,cp["stamp"]))
+            db.execute("DELETE FROM market_catalog_state WHERE stamp IN (SELECT stamp FROM scans WHERE stamp<? AND stamp<>?)",(cutoff,cp["stamp"]))
             db.execute("DELETE FROM snapshots WHERE stamp IN (SELECT stamp FROM scans WHERE stamp<? AND stamp<>?)",
                        (cutoff, cp["stamp"]))
             db.execute("DELETE FROM scans WHERE stamp<? AND stamp<>?", (cutoff, cp["stamp"]))
+        db.execute("DELETE FROM scan_settings WHERE stamp=?",(cp["stamp"],))
     if not count:
         raise ValueError("Empty Kalshi scan; prior completed scan retained")
     return count
+
+
+def backfill_latest_catalog(batch_size=500):
+    """Index a bounded batch from the latest completed scan; never alter snapshots."""
+    from app.options import prediction_markets as pm
+    with closing(connect()) as db, db:
+        db.execute("BEGIN IMMEDIATE")
+        scan=db.execute("SELECT stamp,count FROM scans ORDER BY stamp DESC LIMIT 1").fetchone()
+        if not scan:
+            return True
+        stamp=scan["stamp"]
+        state=db.execute("SELECT last_id,complete FROM market_catalog_state WHERE stamp=?",(stamp,)).fetchone()
+        if state and state["complete"]:
+            return True
+        last=state["last_id"] if state else ""
+        records=db.execute("SELECT id,payload FROM snapshots WHERE stamp=? AND id>? ORDER BY id LIMIT ?",(stamp,last,batch_size)).fetchall()
+        if not records:
+            count=db.execute("SELECT COUNT(*) FROM market_catalog WHERE stamp=?",(stamp,)).fetchone()[0]
+            if count!=scan["count"]:
+                raise ValueError("Kalshi catalog count mismatch")
+            db.execute("INSERT OR REPLACE INTO market_catalog_state VALUES (?,?,1)",(stamp,last))
+            return True
+        rows=hydrate_many(db,[record["payload"] for record in records])
+        pm.classify_kalshi(rows)
+        db.executemany("INSERT OR IGNORE INTO market_catalog VALUES (?,?,?,?,?,?,?,?)",[pm.catalog_record(stamp,r) for r in rows])
+        db.execute("INSERT OR REPLACE INTO market_catalog_state VALUES (?,?,0)",(stamp,records[-1]["id"]))
+        return False
 
 
 def latest(search=None):
@@ -117,14 +202,16 @@ def latest(search=None):
         if search is None:
             records = db.execute("SELECT payload FROM snapshots WHERE stamp=?", (scan["stamp"],))
         else:
-            def matches(title, description):
-                return int(bool(search.search(title or "") or search.search(description or "")))
-            db.create_function("kalshi_matches", 2, matches, deterministic=True)
-            records = db.execute(
-                "SELECT payload FROM snapshots WHERE stamp=? AND "
-                "kalshi_matches(json_extract(payload,'$.title'),json_extract(payload,'$.description'))",
-                (scan["stamp"],))
-        rows = [json.loads(r[0]) for r in records]
+            def matches(payload, metadata):
+                row=json.loads(zlib.decompress(metadata)) if metadata is not None else json.loads(payload)
+                return int(bool(search.search(row.get("title") or "") or search.search(row.get("description") or "")))
+            db.create_function("kalshi_matches",2,matches,deterministic=True)
+            records=db.execute("""
+                SELECT s.payload FROM snapshots s LEFT JOIN market_metadata m
+                ON m.key=json_extract(s.payload,'$._metadata')
+                WHERE s.stamp=? AND kalshi_matches(s.payload,m.payload)
+                """,(scan["stamp"],))
+        rows=hydrate_many(db,[r[0] for r in records])
         return dict(scan), rows
 
 
@@ -174,11 +261,12 @@ async def refresh():
         try:
             await asyncio.to_thread(status, "running", pages=cp["pages"])
             log.warning("Kalshi discovery started or resumed: %d pages", cp["pages"])
+            limit=await asyncio.to_thread(page_size,cp)
             async with httpx.AsyncClient(timeout=30) as client:
                 while not cp["exhausted"]:
                     if cp["pages"] % 20 == 0 and headroom() < .15:
                         raise ValueError("Storage above 85% utilization; Kalshi scan paused")
-                    page, cursor = await kalshi_provider.fetch_page(client, cp["cursor"])
+                    page, cursor = await kalshi_provider.fetch_page(client, cp["cursor"], limit=limit)
                     cp = await asyncio.to_thread(persist, cp, page, cursor)
                     await asyncio.to_thread(status, "running", pages=cp["pages"])
                     if cp["pages"] % 20 == 0:
