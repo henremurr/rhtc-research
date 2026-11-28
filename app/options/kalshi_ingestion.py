@@ -173,6 +173,7 @@ async def refresh():
         cp = await asyncio.to_thread(begin)
         try:
             await asyncio.to_thread(status, "running", pages=cp["pages"])
+            log.warning("Kalshi discovery started or resumed: %d pages", cp["pages"])
             async with httpx.AsyncClient(timeout=30) as client:
                 while not cp["exhausted"]:
                     if cp["pages"] % 20 == 0 and headroom() < .15:
@@ -180,9 +181,14 @@ async def refresh():
                     page, cursor = await kalshi_provider.fetch_page(client, cp["cursor"])
                     cp = await asyncio.to_thread(persist, cp, page, cursor)
                     await asyncio.to_thread(status, "running", pages=cp["pages"])
+                    if cp["pages"] % 20 == 0:
+                        log.warning("Kalshi discovery progress: %d pages", cp["pages"])
                     await asyncio.sleep(.1)
             count = await asyncio.to_thread(finish, cp)
             await asyncio.to_thread(status, "completed", pages=cp["pages"], active=count)
+            log.warning("Kalshi discovery completed: %d active markets, %d pages", count, cp["pages"])
+            from app.options.prediction_health import request_refresh
+            request_refresh()
             return {"as_of": cp["stamp"], "count": count}
         except asyncio.CancelledError:
             await asyncio.to_thread(status, "interrupted", pages=cp["pages"])
