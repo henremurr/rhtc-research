@@ -64,13 +64,15 @@ def ticker_context(symbol, purpose, expiry=None):
                 continue
             candidates.append((direct,row))
         candidates.sort(key=lambda p:(p[0],(p[1]["research"] or {}).get("relevance",0),p[1]["quality"]=="higher liquidity",p[1]["liquidity"] or 0),reverse=True)
+        from app.options.prediction_comparison import compare
+        comparisons=compare([row for _,row in candidates[:8]])
         selected=[]
         for scan, records, history in sources:
             provider = records[0]["provider"] if records else None
             history(scan,[row for _,row in candidates[:8] if row["provider"] == provider])
         for direct,row in candidates[:8]:
             selected.append({k:row.get(k) for k in ("id","provider","snapshot_as_of","title","probabilities","quality","end_date","resolution_source","observed_at","research","slug","changes_pp")} | {"association":"candidate ticker" if direct else "broad theme","rules":row["description"][:1200]})
-        return {"status":"available","as_of":min(scan["stamp"] for scan, _, _ in sources),"selected":selected,"warning":POLICY}
+        return {"status":"available","as_of":min(scan["stamp"] for scan, _, _ in sources),"selected":selected,"cross_provider_comparisons":comparisons,"warning":POLICY}
     except Exception:
         log.exception("Ticker prediction context unavailable")
         return {"status":"unavailable","selected":[]}
