@@ -762,20 +762,42 @@ def priority(row):
             bool(row["holdings"]),row["quality"]=="higher liquidity",row["liquidity"] or 0)
 
 def research_context():
-    """Compact saved prediction evidence for existing report generators."""
+    """Compact, fresh, provider-attributed evidence for existing report generators."""
     try:
-        scan, rows = latest_reviewed()
-        if not scan:
-            return {"status":"No completed prediction scan"}
-        reviewed=len(rows)
+        from app.options import kalshi_ingestion
         from app.options.api import read_watchlist
-        eligible=[r for r in rows if (r["research"] or {}).get("relevance",0)>=5]
-        ranked=sorted(map_portfolio(add_history(scan,eligible),read_watchlist()),key=priority,reverse=True)[:20]
-        keys = ("id","title","topics","probabilities","changes_pp","quality","end_date","resolution_source","research","watchlist_matches","outside_candidates","holdings")
-        return {"as_of":scan["stamp"],"stale":(datetime.now(timezone.utc)-datetime.fromisoformat(scan["stamp"])).total_seconds()>43200,
-                "scanned":scan["count"],"semantically_reviewed":reviewed,
-                "selected":[{k:r[k] for k in keys} for r in ranked],
-                "warning":"Unverified market expectations and candidate mappings, not facts or standalone trade signals. Corroborate with independent research; selected subset only."}
+        sources = {}
+        eligible = []
+        reviewed = 0
+        for provider, load, history in (
+            ("polymarket", latest_reviewed, add_history),
+            ("kalshi", kalshi_ingestion.latest, kalshi_ingestion.add_history),
+        ):
+            try:
+                scan, rows = load()
+                if not scan:
+                    continue
+                age = datetime.now(timezone.utc)-datetime.fromisoformat(scan["stamp"])
+                if not timedelta(0) <= age <= timedelta(hours=12):
+                    continue
+                if provider == "kalshi":
+                    rows = [r for r in attach_research(classify_kalshi(rows)) if r["research"] is not None]
+                sources[provider] = scan
+                reviewed += len(rows)
+                selected = [r for r in rows if (r["research"] or {}).get("relevance",0)>=5]
+                for row in selected:
+                    row.update(provider=provider, snapshot_as_of=scan["stamp"])
+                eligible.extend(history(scan, selected))
+            except Exception:
+                log.exception("Research context provider unavailable: %s", provider)
+        if not sources:
+            return {"status":"No fresh completed prediction scan","selected":[]}
+        ranked=sorted(map_portfolio(eligible,read_watchlist()),key=priority,reverse=True)[:20]
+        keys = ("id","provider","snapshot_as_of","title","topics","probabilities","changes_pp","quality","end_date","resolution_source","research","watchlist_matches","outside_candidates","holdings")
+        return {"as_of":min(s["stamp"] for s in sources.values()),"stale":False,
+                "scanned":sum(s["count"] for s in sources.values()),"semantically_reviewed":reviewed,
+                "providers":sources,"selected":[{k:r.get(k) for k in keys} for r in ranked],
+                "warning":"Market expectations and candidate mappings are unverified leads, not facts or trade signals. Do not double-count shared catalysts. Exchange agreement is not independent corroboration; compare only identical event definitions and deadlines."}
     except Exception:
         log.exception("Prediction context unavailable")
         return {"status":"Prediction context unavailable"}
