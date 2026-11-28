@@ -819,7 +819,8 @@ def without_duplicate_markets(rows):
 
 @router.get("")
 def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500), deduplicate: bool = False, sort: Literal["relevance", "volume", "liquidity"] = "relevance"):
-    indexed=catalog_page(topic,exposure,offset,limit,sort) if not q and not deduplicate else None
+    search_term = q.strip().removeprefix("$")
+    indexed=catalog_page(topic,exposure,offset,limit,sort) if not search_term and not deduplicate else None
     if indexed is not None:
         scan,reviewed,count,rows=indexed
         return {"scan":scan,"reviewed":reviewed,"count":count,"markets":rows,
@@ -835,8 +836,11 @@ def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int 
         rows = [r for r in rows if r["watchlist_matches"]]
     elif exposure == "Emerging":
         rows = [r for r in rows if r["outside_candidates"] or (r["relevance"] or 0)>=5 and not r["watchlist_matches"]]
-    if q:
-        rows = [r for r in rows if q.casefold() in json.dumps(r,ensure_ascii=False).casefold()]
+    if search_term:
+        # Match terms in provider-authored contract text. Portfolio associations
+        # and research annotations can reference tickers unrelated to the question.
+        pattern = re.compile(r"(?<!\w)" + re.escape(search_term) + r"(?!\w)", re.IGNORECASE)
+        rows = [r for r in rows if pattern.search(r["title"]) or pattern.search(r["description"])]
     rows.sort(key=priority,reverse=True)
     matching_count = len(rows)
     if deduplicate:

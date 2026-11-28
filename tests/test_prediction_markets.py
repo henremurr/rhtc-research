@@ -12,6 +12,31 @@ class PredictionMarketTests(unittest.TestCase):
         self.assertIn("EFM/I", row["topics"])
         self.assertEqual(row["quality"], "limited")
 
+    def test_search_requires_contract_text_instead_of_thematic_exposure(self):
+        from unittest.mock import patch
+        from app.options import prediction_markets as pm
+
+        rows = []
+        for identifier, title, description in [
+            ("1", "Warriors vs. Trail Blazers", "Basketball game"),
+            ("2", "Will Oklo file an application?", ""),
+            ("3", "New reactor licensing", "Resolves based on a filing by Oklo Inc."),
+            ("4", "Different company", "A company named Roklo"),
+        ]:
+            row = pm.normalize({"id": identifier, "question": title, "description": description})
+            row.update(research=None, holdings=[], relevance=None, thematic_exposure=["OKLO"])
+            rows.append(row)
+
+        with patch.object(pm, "current_markets", return_value=(None, rows)), \
+             patch.object(pm, "read_status"), patch.object(pm, "daily_usage"), \
+             patch.object(pm, "read_research_status"):
+            result = pm.markets(q="  $oklo  ", offset=0, limit=1, sort="volume")
+            next_page = pm.markets(q="oklo", offset=1, limit=1, sort="volume")
+            self.assertEqual(result["count"], 2)
+            self.assertEqual([row["id"] for row in result["markets"]], ["2"])
+            self.assertEqual([row["id"] for row in next_page["markets"]], ["3"])
+            self.assertEqual(pm.markets(q="absent", offset=0, limit=10)["markets"], [])
+
     def test_all_pages_and_unclassified(self):
         async def run():
             def handler(request):
