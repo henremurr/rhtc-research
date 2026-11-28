@@ -1,4 +1,7 @@
 import sqlite3
+import json
+from contextlib import closing
+from datetime import datetime, timezone, timedelta
 import tempfile
 import unittest
 from pathlib import Path
@@ -60,3 +63,20 @@ class KalshiIngestionTests(unittest.TestCase):
         cp = k.persist(k.begin(), [market("A"), dict(market("B"), market_type="scalar"),
                                     dict(market("C"), status="closed")], None)
         self.assertEqual(k.finish(cp), 1)
+
+    def test_probability_history_and_missing_observations(self):
+        stamp = datetime(2026, 11, 27, 12, tzinfo=timezone.utc)
+        current = {"stamp": stamp.isoformat(), "count": 1}
+        row = {"id": "kalshi:A", "probabilities": {"Yes": .65, "No": .35}}
+        with closing(k.connect()) as db, db:
+            for days, hours, probability in [(1, 0, .5), (7, 13, .4), (30, 0, .3)]:
+                prior = (stamp - timedelta(days=days, hours=hours)).isoformat()
+                db.execute("INSERT INTO scans VALUES (?,1)", (prior,))
+                db.execute("INSERT INTO snapshots VALUES (?,?,?)",
+                    (prior, row["id"], json.dumps({"probabilities": {"Yes": probability, "No": 1-probability}})))
+        result = k.add_history(current, [row])[0]["changes_pp"]
+        self.assertEqual(result["1"], {"Yes": 15.0, "No": -15.0})
+        self.assertEqual(result["7"], {})
+        self.assertEqual(result["30"], {"Yes": 35.0, "No": -35.0})
+        other = {"id": "kalshi:B", "probabilities": {"Yes": .7}}
+        self.assertEqual(k.add_history(current, [other])[0]["changes_pp"], {"1": {}, "7": {}, "30": {}})
