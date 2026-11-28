@@ -68,6 +68,13 @@ def storage_checks():
     state=rs.get("state")
     checks.append(check("Semantic worker","fail" if state=="failed" else "warn" if state in ("disabled","budget limited","retrying","cycle completed with retries") else "pass" if reviewed and state in ("running","cycle completed","up to date") else "pending",f"{state}; {reviewed} distinct cached market IDs (all snapshots); {rs.get('reason','')}"))
     usage=pm.daily_usage()
+    limits = []
+    if usage["requests"] >= usage["request_limit"]:
+        limits.append("daily request limit reached")
+    if usage["input_tokens"] + usage["output_tokens"] >= usage["token_limit"]:
+        limits.append("daily token threshold reached")
+    checks.append(check("Semantic research capacity", "warn" if limits else "pass",
+        f"{usage['requests']}/{usage['request_limit']} requests; {usage['input_tokens']+usage['output_tokens']}/{usage['token_limit']} recorded tokens; " + ("; ".join(limits) if limits else "budget available") + "; resets midnight UTC"))
     checks.append(check("AI usage accounting","warn" if usage["unresolved_usage"] else "pass",f"{usage['requests']}/{usage['request_limit']} requests; {usage['input_tokens']+usage['output_tokens']}/{usage['token_limit']} recorded tokens; {usage['in_flight']} in progress; {usage['rejected']} rejected; {usage['failed_unknown']} unresolved new requests; {usage['legacy_unknown']} unresolved historical requests"))
     disk=shutil.disk_usage(path.parent)
     db_bytes=sum(p.stat().st_size for p in (path,Path(str(path)+"-wal"),Path(str(path)+"-shm")) if p.exists())
