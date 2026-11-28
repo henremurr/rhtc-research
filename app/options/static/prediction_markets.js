@@ -1,6 +1,6 @@
 
 'use strict';
-const el=id=>document.getElementById(id),pageSize=50;let offset=0,total=0,serial=0,deduplicate=false,activeRequest;
+const el=id=>document.getElementById(id),pageSize=50;let offset=0,total=0,serial=0,deduplicate=false,activeRequest,lastResultsKey='';
 function line(parent,label,value){if(value===null||value===undefined||value===''||Array.isArray(value)&&!value.length)return;const p=document.createElement('p'),b=document.createElement('strong');b.textContent=label+': ';p.append(b,document.createTextNode(String(value)));parent.append(p)}
 const pct=n=>Number.isFinite(n)?(n*100).toFixed(1)+'%':'Unavailable';
 function render(m){const a=document.createElement('article'),h=document.createElement('h2');h.textContent=m.title;a.append(h);line(a,'Classification',m.topics.join(' · ')||'Unclassified');line(a,'Market-implied probabilities',Object.entries(m.probabilities).map(([k,v])=>k+' '+pct(v)).join(' · ')||'Unavailable');line(a,'Relevance',m.relevance===null?'Semantic review pending':m.relevance+'/10');line(a,'Market quality',m.quality);line(a,'Liquidity / 24h volume',String(m.liquidity??'Unavailable')+' / '+String(m.volume24h??'Unavailable'));line(a,'Bid-ask spread',pct(m.spread));for(const d of ['1','7','30'])line(a,d+'-day change',Object.entries(m.changes_pp?.[d]||{}).map(([k,v])=>k+' '+(v>0?'+':'')+v+' pp').join(' · ')||'Insufficient history');line(a,'Event end date',m.end_date);line(a,'Watchlist research candidates',m.watchlist_matches);line(a,'Outside-watchlist candidates (unverified)',m.outside_candidates);line(a,'Recorded holdings possibly affected',m.holdings.map(x=>x.symbol+' — '+(x.account||'Unassigned')+' — '+x.quantity+' shares'+(x.call_expiration?' — call expiry '+x.call_expiration:'')+(x.additional_calls?.length?' — '+x.additional_calls.length+' additional call records':'')));line(a,'Broad thematic exposure (not direct links)',m.thematic_exposure);if(m.research){line(a,'Company research candidates',m.research.companies);line(a,'Opportunity hypothesis',m.research.opportunity);line(a,'Risk hypothesis',m.research.risk);line(a,'Independent confirmation required',m.research.confirmation);line(a,'Resolution clarity (AI assessment)',m.research.resolution_clarity)}const d=document.createElement('details'),s=document.createElement('summary');s.textContent='Resolution rules and source';d.append(s);line(d,'Rules',m.description||'Unavailable');line(d,'Resolution source',m.resolution_source||'Unavailable');line(d,'Provider market ID',m.id);if(m.slug&&/^[a-zA-Z0-9_-]+$/.test(m.slug)){const link=document.createElement('a');link.href='https://polymarket.com/market/'+m.slug;link.textContent='Original market reference';link.target='_blank';link.rel='noopener noreferrer';d.append(link)}a.append(d);return a}
@@ -11,7 +11,15 @@ const controller=new AbortController();
 activeRequest=controller;
 const timeout=setTimeout(()=>controller.abort(),25000);
 el('status').textContent='Loading saved research…';
-try{const params=new URLSearchParams({topic:el('topic').value,exposure:el('exposure').value,q:el('search').value,sort:el('sort').value,offset,limit:pageSize,deduplicate});const r=await fetch('/options/api/prediction-markets?'+params,{cache:'no-store',signal:controller.signal});if(!r.ok)throw Error('Unable to retrieve market research ('+r.status+')');const data=await r.json();if(request!==serial)return;total=data.count;el('rows').replaceChildren(...data.markets.map(render));
+try{const params=new URLSearchParams({topic:el('topic').value,exposure:el('exposure').value,q:el('search').value,sort:el('sort').value,offset,limit:pageSize,deduplicate});
+const resultsKey=params.toString();
+if(resultsKey!==lastResultsKey){
+  el('rows').replaceChildren();
+  total=0;
+  el('prev').disabled=true;
+  el('next').disabled=true;
+}
+const r=await fetch('/options/api/prediction-markets?'+params,{cache:'no-store',signal:controller.signal});if(!r.ok)throw Error('Unable to retrieve market research ('+r.status+')');const data=await r.json();if(request!==serial)return;lastResultsKey=resultsKey;total=data.count;el('rows').replaceChildren(...data.markets.map(render));
 if(data.scan&&total===0){
   const empty=document.createElement('p');
   empty.textContent=data.direct_search?'No contracts directly match the search and current filters.':'No markets match the current filters.';
@@ -23,7 +31,13 @@ el('status').textContent=(data.scan?(data.scan.partial?'Partial scan started: ':
   clearTimeout(timeout);
   if(activeRequest===controller)activeRequest=null;
 }}
-el('apply').onclick=el('sort').onchange=()=>{offset=0;load()};el('prev').onclick=()=>{offset=Math.max(0,offset-pageSize);load()};el('next').onclick=()=>{if(offset+pageSize<total){offset+=pageSize;load()}};el('reload').onclick=load;
+el('apply').onclick=el('sort').onchange=()=>{offset=0;load()};
+el('search').addEventListener('keydown',event=>{
+  if(event.key==='Enter'){
+    event.preventDefault();
+    el('apply').click();
+  }
+});el('prev').onclick=()=>{offset=Math.max(0,offset-pageSize);load()};el('next').onclick=()=>{if(offset+pageSize<total){offset+=pageSize;load()}};el('reload').onclick=load;
 el('deduplicate').onclick=()=>{
   deduplicate=!deduplicate;
   el('deduplicate').setAttribute('aria-pressed',String(deduplicate));
