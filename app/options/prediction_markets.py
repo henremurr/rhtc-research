@@ -57,7 +57,7 @@ def normalize(m):
     bid, ask = number(m.get("bestBid")), number(m.get("bestAsk"))
     spread = ask - bid if bid is not None and ask is not None and 0 <= bid <= ask <= 1 else None
     quality = "limited" if liquidity is None or liquidity < 10000 or volume is None or volume < 1000 or spread is None or spread > .1 else "higher liquidity"
-    return dict(id=str(m["id"]), title=title, description=description, topics=topics,
+    return dict(id=str(m["id"]), condition_id=m.get("conditionId"), title=title, description=description, topics=topics,
                 probabilities=probabilities, liquidity=liquidity, volume24h=volume, spread=spread,
                 quality=quality, end_date=m.get("endDate"), resolution_source=m.get("resolutionSource"),
                 slug=m.get("slug"), provider_updated_at=m.get("updatedAt"))
@@ -743,9 +743,71 @@ def research_context():
         log.exception("Prediction context unavailable")
         return {"status":"Prediction context unavailable"}
 
+def market_open_interest(condition_ids):
+    """Fetch open interest only for contracts tied on relevance."""
+    values = {}
+    if not condition_ids:
+        return values
+    with httpx.Client(timeout=4) as client:
+        for start in range(0, len(condition_ids), 20):
+            batch = condition_ids[start:start + 20]
+            try:
+                response = client.get(
+                    "https://data-api.polymarket.com/v2/oi",
+                    params={"condition": ",".join(batch)},
+                )
+                response.raise_for_status()
+                for item in response.json()["data"]:
+                    if not isinstance(item, dict):
+                        continue
+                    condition = item.get("condition_id")
+                    value = number(item.get("value"))
+                    if condition in batch and value is not None and value >= 0:
+                        values[condition] = value
+            except (httpx.HTTPError, ValueError, KeyError, TypeError):
+                log.info("Prediction market open interest unavailable for a duplicate batch")
+                break
+    return values
+
+
+def without_duplicate_markets(rows):
+    """Choose the highest-relevance contract, then open interest and 24-hour volume."""
+    groups = {}
+    for row in rows:
+        outcomes = tuple(sorted(row["probabilities"]))
+        if row["title"] and row["description"] and row["end_date"] and outcomes:
+            key = (fingerprint(row), row["end_date"], outcomes)
+        else:
+            key = row["id"]
+        groups.setdefault(key, []).append(row)
+
+    # The input is sorted by relevance first. Lower-relevance contracts cannot win.
+    finalists = [
+        [row for row in group if (row["relevance"] or 0) == (group[0]["relevance"] or 0)]
+        for group in groups.values()
+    ]
+    conditions = sorted({
+        condition for group in finalists if len(group) > 1 for row in group
+        if isinstance(condition := row.get("condition_id"), str)
+        and re.fullmatch(r"0x[0-9a-fA-F]{64}", condition)
+    })
+    interest = market_open_interest(conditions)
+    winners = []
+    for group in finalists:
+        open_interest = [interest.get(row.get("condition_id")) for row in group]
+        # Compare open interest only when it is known for every tied contract.
+        if len(group) > 1 and all(value is not None for value in open_interest):
+            highest = max(open_interest)
+            group = [row for row, value in zip(group, open_interest) if value == highest]
+        winners.append(max(group, key=lambda row: (
+            row["volume24h"] is not None, row["volume24h"] or 0,
+        )))
+    return sorted(winners, key=priority, reverse=True)
+
+
 @router.get("")
-def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500)):
-    indexed=catalog_page(topic,exposure,offset,limit) if not q else None
+def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500), deduplicate: bool = False):
+    indexed=catalog_page(topic,exposure,offset,limit) if not q and not deduplicate else None
     if indexed is not None:
         scan,reviewed,count,rows=indexed
         return {"scan":scan,"reviewed":reviewed,"count":count,"markets":rows,
@@ -764,7 +826,10 @@ def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int 
     if q:
         rows = [r for r in rows if q.casefold() in json.dumps(r,ensure_ascii=False).casefold()]
     rows.sort(key=priority,reverse=True)
-    return {"scan":scan,"reviewed":reviewed,"count":len(rows),"markets":rows[offset:offset+limit],
+    matching_count = len(rows)
+    if deduplicate:
+        rows = without_duplicate_markets(rows)
+    return {"scan":scan,"reviewed":reviewed,"count":len(rows),"duplicates_removed":matching_count-len(rows),"markets":rows[offset:offset+limit],
             "scanning":lock.locked(),"reviewing":enrichment_lock.locked(),"scan_status":read_status(),"ai_usage":daily_usage(),"research_status":read_research_status(),
             "caution":"Market prices are complementary evidence only; independently verify fundamentals and resolution rules."}
 
