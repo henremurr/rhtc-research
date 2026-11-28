@@ -50,8 +50,9 @@ def ticker_context(symbol, purpose, expiry=None):
             candidates.append((direct,row))
         candidates.sort(key=lambda p:(p[0],(p[1]["research"] or {}).get("relevance",0),p[1]["quality"]=="higher liquidity",p[1]["liquidity"] or 0),reverse=True)
         selected=[]
+        pm.add_history(scan,[row for _,row in candidates[:8]])
         for direct,row in candidates[:8]:
-            selected.append({k:row.get(k) for k in ("id","title","probabilities","quality","end_date","resolution_source","observed_at","research","slug")} | {"association":"candidate ticker" if direct else "broad theme","rules":row["description"][:1200]})
+            selected.append({k:row.get(k) for k in ("id","title","probabilities","quality","end_date","resolution_source","observed_at","research","slug","changes_pp")} | {"association":"candidate ticker" if direct else "broad theme","rules":row["description"][:1200]})
         return {"status":"available","as_of":scan["stamp"],"selected":selected,"warning":POLICY}
     except Exception:
         log.exception("Ticker prediction context unavailable")
@@ -130,7 +131,7 @@ def composite_score(stock,call,assessment=None):
     # Only an independently reviewed, explicitly approved, current overlay
     # may alter ranking; unverified AI hypotheses remain informational.
     adjustment=0
-    if assessment and assessment.get("review_approved") is True and (assessment.get("fis") or 0)>=75:
+    if assessment and eligible_adjustment(assessment):
         value=assessment.get("adjustment")
         if value in (-.25,.25):
             adjustment=value
@@ -148,3 +149,100 @@ def assess_forward_factors(event):
             "market_quality":1 if event.get("quality")=="higher liquidity" else None,
             "probability_movement":min(1,max(moves)/20) if moves else None,
             "event_proximity":max(0,1-days/90) if days is not None and days>=0 else None}
+
+
+def assess_fis_candidate(symbol, raw, context, citations):
+    """Compute only from complete, current evidence; model claims need human review."""
+    if not isinstance(raw,dict):
+        return None
+    candidate=validate_adjustment(raw,context,citations)
+    if not candidate:
+        return None
+    event=next(r for r in context["selected"] if r["id"]==candidate["market_id"])
+    factors=assess_forward_factors(event)
+    factors["economic_impact"]=raw.get("economic_impact")
+    # This is a model-proposed corroboration strength, not independent certification.
+    factors["corroboration"]=raw.get("corroboration")
+    fis=forward_score(factors)
+    candidate.update(symbol=symbol,factors=factors,fis=fis,direction=raw["direction"],
+                     review_approved=False,status="pending independent review" if fis is not None else "incomplete factors")
+    return candidate
+
+def extract_fis_candidate(analysis):
+    """A separate machine-readable tail must not leak into the saved prose."""
+    marker="\nFIS_CANDIDATE:"
+    if marker not in analysis:
+        return analysis,None
+    body,tail=analysis.rsplit(marker,1)
+    try:
+        raw=json.loads(tail.strip())
+    except (ValueError,TypeError):
+        raw=None
+    return body.rstrip(),raw
+
+def persist_fis(symbol,assessment,report_id):
+    from app.options.api import connect_watchlist_db
+    with closing(connect_watchlist_db()) as db, db:
+        db.execute("CREATE TABLE IF NOT EXISTS forward_assessments (report_id INTEGER PRIMARY KEY,symbol TEXT NOT NULL,created_at TEXT NOT NULL,payload TEXT NOT NULL)")
+        db.execute("CREATE INDEX IF NOT EXISTS forward_assessment_symbol ON forward_assessments(symbol,report_id DESC)")
+        db.execute("INSERT OR REPLACE INTO forward_assessments VALUES (?,?,?,?)",(report_id,symbol,datetime.now(timezone.utc).isoformat(),json.dumps(assessment)))
+
+def latest_fis():
+    from app.options.api import connect_watchlist_db
+    with closing(connect_watchlist_db()) as db, db:
+        db.execute("CREATE TABLE IF NOT EXISTS forward_assessments (report_id INTEGER PRIMARY KEY,symbol TEXT NOT NULL,created_at TEXT NOT NULL,payload TEXT NOT NULL)")
+        rows=db.execute("SELECT f.symbol,f.payload,f.report_id FROM forward_assessments f JOIN (SELECT symbol,MAX(report_id) AS report_id FROM stock_analysis_reports GROUP BY symbol) m ON m.symbol=f.symbol AND m.report_id=f.report_id").fetchall()
+    result={}
+    for row in rows:
+        item=json.loads(row["payload"])
+        if not item:
+            continue
+        try:
+            age=datetime.now(timezone.utc)-datetime.fromisoformat(item["as_of"])
+            item["stale"]=not timedelta(0)<=age<=timedelta(hours=12)
+        except (ValueError,TypeError,KeyError):
+            item["stale"]=True
+        item["report_id"]=row["report_id"]
+        result[row["symbol"]]=item
+    return result
+
+
+def review_fis(symbol,report_id,approved,note):
+    """Explicit user attestation; never trust a client-supplied score or adjustment."""
+    from app.options.api import connect_watchlist_db
+    from fastapi import HTTPException
+    with closing(connect_watchlist_db()) as db, db:
+        db.execute("BEGIN IMMEDIATE")
+        latest=db.execute("SELECT MAX(report_id) FROM stock_analysis_reports WHERE symbol=?",(symbol,)).fetchone()[0]
+        if latest!=report_id:
+            raise HTTPException(409,"Assessment is no longer the latest stock report")
+        row=db.execute("SELECT payload FROM forward_assessments WHERE symbol=? AND report_id=?",(symbol,report_id)).fetchone()
+        item=json.loads(row[0]) if row else None
+        if not item:
+            raise HTTPException(404,"No eligible forward assessment")
+        age=datetime.now(timezone.utc)-datetime.fromisoformat(item["as_of"])
+        if approved and (not timedelta(0)<=age<=timedelta(hours=12) or forward_score(item["factors"])!=item["fis"] or (item["fis"] or 0)<75 or not note.strip()):
+            raise HTTPException(409,"Approval requires fresh complete FIS of at least 75 and a review note")
+        item.update(review_approved=approved,review_note=note.strip()[:1000],reviewed_at=datetime.now(timezone.utc).isoformat(),status="approved" if approved else "rejected")
+        db.execute("UPDATE forward_assessments SET payload=? WHERE report_id=?",(json.dumps(item),report_id))
+    return item | {"report_id":report_id,"stale":not timedelta(0)<=age<=timedelta(hours=12)}
+
+
+def eligible_adjustment(assessment):
+    if not isinstance(assessment,dict) or assessment.get("review_approved") is not True:
+        return False
+    try:
+        now=datetime.now(timezone.utc)
+        return (timedelta(0)<=now-datetime.fromisoformat(assessment["as_of"])<=timedelta(hours=12)
+                and timedelta(0)<=now-datetime.fromisoformat(assessment["reviewed_at"])<=timedelta(hours=12)
+                and forward_score(assessment["factors"])==assessment["fis"]
+                and assessment["fis"]>=75 and assessment["adjustment"] in (-.25,.25)
+                and bool(assessment.get("review_note")))
+    except (ValueError,TypeError,KeyError):
+        return False
+
+def score_fields(stock,call,assessment):
+    base=composite_score(stock,call)
+    total=composite_score(stock,call,assessment)
+    return {"rhtc_base_score":base,"rhtc_composite_score":total,
+            "forward_adjustment":round(total-base,2) if total is not None and base is not None else 0}
