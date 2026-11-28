@@ -58,6 +58,7 @@ def persist(requested,markets):
     expected=set(requested)
     seen=set()
     rows=[]
+    metadata=[]
     for market in markets:
         row=kp.normalize(market)
         mid=row["id"]
@@ -67,7 +68,8 @@ def persist(requested,markets):
         state=market.get("status")
         if not isinstance(state,str) or not state:
             raise ValueError("Missing quote lifecycle state")
-        key,_,_=ki.compact(row)
+        key,blob,_=ki.compact(row)
+        metadata.append((key,blob))
         # Keep exact contract metadata identity with the quote. Do not
         # imply that a changed contract is comparable with its old history.
         data={k:row[k] for k in ("probabilities","probability_method","last_price","spread","volume24h","open_interest","liquidity","quality","provider_updated_at")}
@@ -78,11 +80,14 @@ def persist(requested,markets):
         rows.append((mid,stamp,json.dumps(data,allow_nan=False)))
     with closing(connect()) as db,db:
         db.execute("BEGIN IMMEDIATE")
+        db.executemany("INSERT OR IGNORE INTO market_metadata VALUES (?,?)",metadata)
         db.executemany("INSERT INTO quote_observations VALUES (?,?,?)",rows)
         db.executemany("""INSERT INTO quote_current VALUES (?,?,?) ON CONFLICT(id)
             DO UPDATE SET observed_at=excluded.observed_at,payload=excluded.payload
             WHERE excluded.observed_at>quote_current.observed_at""",rows)
         # Missing tickers are not given fabricated observations.
+        cutoff=(ki.now()-timedelta(days=35)).isoformat()
+        db.execute("DELETE FROM quote_observations WHERE observed_at<?",(cutoff,))
     return len(rows)
 
 async def refresh():
