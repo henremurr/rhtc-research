@@ -29,6 +29,23 @@ def normalize(m):
                  and bid_size is not None and ask_size is not None
                  and bid_size > 0 and ask_size > 0)
     probability = (bid + ask) / 2 if two_sided else None
+    volume = numeric(m.get("volume_24h_fp"))
+    interest = numeric(m.get("open_interest_fp"))
+    liquidity = numeric(m.get("liquidity_dollars"))
+    # Provisional provider-specific gates; contract counts are not USD turnover.
+    # Require a current two-sided quote and substantive resolution rules.
+    from datetime import datetime, timezone, timedelta
+    try:
+        observed = datetime.fromisoformat(str(m.get("updated_time")).replace("Z", "+00:00"))
+        fresh = timedelta(0) <= datetime.now(timezone.utc) - observed <= timedelta(hours=1)
+    except (ValueError, TypeError):
+        fresh = False
+    qualified = (two_sided and fresh and ask - bid <= .05
+                 and min(bid_size, ask_size) >= 100
+                 and volume is not None and volume >= 1000
+                 and interest is not None and interest >= 1000
+                 and liquidity is not None and liquidity >= 10000
+                 and bool(str(m.get("rules_primary") or "").strip()))
     return {
         "id": "kalshi:" + ticker,
         "provider": "kalshi",
@@ -49,7 +66,8 @@ def normalize(m):
         "open_interest_unit": "contracts",
         "liquidity": numeric(m.get("liquidity_dollars")),
         "liquidity_unit": "USD",
-        "quality": "limited",
+        "quality": "higher liquidity" if qualified else "limited",
+        "quality_policy": "kalshi-v1-provisional",
         "end_date": m.get("close_time"),
         "expected_expiration": m.get("expected_expiration_time"),
         "resolution_source": None,
