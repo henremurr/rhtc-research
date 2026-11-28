@@ -1913,22 +1913,27 @@ body.news-mode .news-research-title {
   line-height:1.2;
   font-variant-numeric:tabular-nums;
 }
+.market-session-block {
+  grid-column:1;
+  grid-row:1/4;
+  display:grid;
+  row-gap:3px;
+}
+.market-session-block #market-session:empty {display:none}
 .market-snapshot .market-label {
-  grid-column:1/5;
   display:flex;
   align-items:center;
   gap:6px;
   white-space:nowrap;
 }
 .market-snapshot .market-index {
-  grid-column:1/5;
+  grid-column:2/6;
   display:grid;
   grid-template-columns:subgrid;
   color:var(--ink);
   white-space:nowrap;
 }
 .market-index > span:not(.market-index-name) {text-align:right}
-.market-snapshot .market-index:last-child {grid-row:3}
 @media(max-width:420px) {
   .market-state.market-snapshot {font-size:10px;column-gap:7px}
 }
@@ -1941,7 +1946,7 @@ body.news-mode .news-research-title {
   .topbar > .top-actions {width:100%;flex-wrap:wrap;gap:8px;justify-content:flex-end}
   .top-actions > .market-snapshot {margin-right:auto}
 }
-.market-snapshot #market-clock,.market-snapshot #market-session {grid-column:5;text-align:right;white-space:nowrap}
+.market-snapshot #market-clock,.market-snapshot #market-session {white-space:nowrap}
 .market-snapshot #market-session {color:var(--gold)}
 .market-snapshot .market-dot {background:var(--muted)}
 .market-snapshot[data-session="open"] .market-dot {background:var(--green)}
