@@ -3,7 +3,7 @@
 **For:** RHTC internal research users<br>
 **Stable release:** v2026.11.22<br>
 **Last checked:** November 22, 2026
-**Documentation update:** November 27, 2026 (Prediction Market Intelligence, FIS and execution audit supplement)<br>
+**Documentation update:** November 28, 2026 (Kalshi integration supplement; proposed in draft PR #294)<br>
 **Application:** Covered Call Screener / Income Engine and RHTC News Feed
 
 ## Table of contents
@@ -396,6 +396,22 @@ The current stable release is **v2026.11.22** at Git reference **`stable/v2026.1
 
 
 ## Prediction Market Intelligence
+
+### Proposed dual-provider extension — Kalshi (PR #294)
+
+This section describes development-branch functionality, **not a verified production release**. The approved stable baseline remains v2026.11.22.
+
+- Choose All providers, Polymarket or Kalshi on the Prediction Market Intelligence screen. Refresh markets requests the selected provider(s). Text filtering examines only contract titles and descriptions. Provider attribution remains visible. Volume and liquidity sorts group providers rather than compare incompatible units directly.
+- Kalshi uses its public read-only market-data API, without trading credentials. Only active binary markets are ingested; unavailable or invalid quotes do not produce probabilities. A two-sided quote midpoint is an indicative probability, not an independent forecast.
+- Kalshi uses its own persistent SQLite database, durable cursor checkpoints and completed snapshots. The scheduler checks every 15 minutes and refreshes approximately every six hours. Completed history is retained for 35 days. A failed or empty scan cannot replace the previous complete snapshot.
+- Historical probability changes are measured in percentage points over 1, 7 and 30 days; observations outside the 12-hour lookback tolerance are not substituted. Both providers share the existing semantic research budget and portfolio mapping.
+- The provisional Kalshi higher-liquidity gate requires a valid two-sided quote, spread at most five percentage points, at least 100 contracts on each side, 1,000 contracts of daily volume and open interest, USD 10,000 reported liquidity, a provider update within one hour and settlement rules. Missing inputs fail the gate. These thresholds require live calibration.
+- Candidate cross-provider comparisons require matching normalized titles and complete rules, identical deadlines, unambiguous pairs and observation times within one hour. Differences up to five percentage points indicate agreement; ten or more indicate divergence. No averaging or automatic score uplift is permitted. Differently worded equivalent events may not be recognized.
+- Existing research models receive provider-attributed evidence from completed snapshots no more than 12 hours old. The FIS and Composite Score retain their existing approval and independent corroboration requirements. Exchange agreement does not establish independent facts.
+- Infrastructure Audit checks Kalshi API connectivity, pagination, snapshot integrity, freshness and ingestion worker status independently.
+
+**Validation:** Regression tests and CI workflow changes are included in PR #294; live connectivity, catalog performance, mobile behavior, scoring thresholds and production deployment remain subject to verification.
+
 
 Introduced on November 27, 2026, and extended through PRs #263–276. This supplement describes the main development branch, including features deployed after the v2026.11.22 stable baseline. It does not promote a new stable release.
 
