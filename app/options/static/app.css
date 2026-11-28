@@ -367,7 +367,9 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
 
 :root[data-theme="dark"] .screener-table .number.positive{color:#58d68d}:root[data-theme="dark"] .screener-table .number.negative{color:#ff6b6b}
 
-.screener-table .number.positive{color:#58d68d}.screener-table .number.negative{color:#ff6b6b}
+.market-index [data-direction="up"],
+.screener-table .number.positive{color:#58d68d}.market-index [data-direction="down"],
+.screener-table .number.negative{color:#ff6b6b}
 
 
 /* Right-align numeric market and sizing values in the screener table. */
@@ -1945,6 +1947,3 @@ body.news-mode .news-research-title {
 .market-snapshot[data-session="open"] .market-dot {background:var(--green)}
 .market-snapshot[data-session="premarket"] .market-dot,
 .market-snapshot[data-session="postmarket"] .market-dot {background:var(--gold)}
-
-.market-index [data-direction="up"] {color:var(--green)}
-.market-index [data-direction="down"] {color:var(--red)}
