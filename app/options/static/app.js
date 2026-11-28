@@ -2340,11 +2340,17 @@ function renderInfraSnippet(source){
   }
   return out.join('');
 }
+function predictionLiveMarkup(health){
+  const fmt=v=>v==null?'Not available':Number(v).toLocaleString();
+  const progress=Object.entries(health.ingestion||{}).map(([name,p])=>'<article class="infra-product"><b>'+safe(name)+' — '+safe(p.running?'Running':p.state||'Unknown')+'</b><p>Pages processed: '+safe(fmt(p.pages))+' · Last complete count: '+safe(fmt(p.completed_count))+'</p><p>Checkpoint started: '+safe(p.scan_started?new Date(p.scan_started).toLocaleString():'None')+' · Updated: '+safe(p.updated_at?new Date(p.updated_at).toLocaleString():'Unavailable')+'</p><p>'+safe(p.error||'Total pages unknown until discovery completes.')+'</p></article>').join('');
+  const e=health.efficiency||{},storage=health.storage||{};
+  return '<div id="infra-prediction-live"><div class="infra-product-grid">'+progress+'</div><p><b>Storage:</b> '+safe(Object.entries(storage.database_mib||{}).map(([k,v])=>k+' '+Number(v).toFixed(1)+' MiB').join(' · ')||'Unavailable')+' · Free MiB: '+safe(fmt(storage.free_mib))+'</p><p><b>Research efficiency ('+safe(e.day||'UTC day')+'):</b> '+safe(fmt(e.saved))+' saved reviews · '+safe(fmt(e.requests))+' successful measured requests · '+safe(fmt(e.reviews_per_successful_request))+' reviews/successful request · '+safe(fmt(e.tokens_per_metered_review))+' recorded tokens/metered review · '+safe(fmt(e.completion_pct))+'% batch completion. Historical uninstrumented requests excluded.</p><p><b>Catalog benchmark:</b> '+safe(health.benchmark?JSON.stringify(health.benchmark):'Awaiting measured sample')+'</p></div>';
+}
 function predictionHealthMarkup(data){
   const health=data?.prediction_health||{state:'pending',checks:[]};
   const checked=health.checked_at?new Date(health.checked_at).toLocaleString():'Not checked';
   const rows=(health.checks||[]).map(c=>'<article class="infra-product"><div class="infra-product-head"><div class="infra-product-name">'+safe(c.name)+'</div><strong>'+safe(String(c.state).toUpperCase())+'</strong></div><p>'+safe(c.detail)+'</p></article>').join('');
-  return '<section class="infra-group"><h3 class="infra-group-title">Prediction Market Intelligence — health check</h3><p><b>'+safe(String(health.state).toUpperCase())+'</b> · Last automated check: '+safe(checked)+(health.stale?' · Results stale or pending':'')+'</p><p>'+safe(health.scope||'Awaiting automated validation')+'</p><div class="infra-product-grid">'+rows+'</div><p>Checks run at startup and approximately hourly. No paid inference is initiated by this audit; live model execution is distinct from source wiring validation.</p></section>';
+  return '<section class="infra-group"><h3 class="infra-group-title">Prediction Market Intelligence — health check</h3><p><b>'+safe(String(health.state).toUpperCase())+'</b> · Last automated check: '+safe(checked)+(health.stale?' · Results stale or pending':'')+'</p><p>'+safe(health.scope||'Awaiting automated validation')+'</p>'+predictionLiveMarkup(health)+'<div class="infra-product-grid">'+rows+'</div><p>Checks run at startup and approximately hourly. No paid inference is initiated by this audit; live model execution is distinct from source wiring validation.</p></section>';
 }
 function infrastructureInventoryMarkup(data){
   const credentials=data?.credential_status||{};
@@ -2404,6 +2410,22 @@ async function runInfrastructureInventory(){
     button.disabled=false;button.textContent='↻ Recheck deployment';
   }
 }
+let predictionAuditPolling=false;
+async function refreshPredictionAuditLive(){
+  if(predictionAuditPolling||!$('#infra-modal').classList.contains('open')||!$('#infra-prediction-live'))return;
+  predictionAuditPolling=true;
+  try{
+    const response=await fetch('/options/api/prediction-markets/health',{credentials:'same-origin',cache:'no-store'});
+    if(!response.ok)return;
+    const health=await response.json();
+    if($('#infra-modal').classList.contains('open')&&$('#infra-prediction-live')){
+      const section=$('#infra-prediction-live').closest('section');
+      if(section) section.outerHTML=predictionHealthMarkup({prediction_health:health});
+    }
+  }catch(error){console.warn('Prediction audit live refresh unavailable');}
+  finally{predictionAuditPolling=false;}
+}
+setInterval(refreshPredictionAuditLive,15000);
 function showInfrastructureInventory(){
   $('#infra-title').textContent=$('#infra-audit-btn').textContent.trim();
   $('#infra-modal').classList.add('open');
