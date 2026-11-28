@@ -30,6 +30,9 @@ def connect():
         CREATE TABLE IF NOT EXISTS cursors(stamp TEXT NOT NULL,cursor TEXT NOT NULL,PRIMARY KEY(stamp,cursor));
         CREATE TABLE IF NOT EXISTS status(id INTEGER PRIMARY KEY CHECK(id=1),payload TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS scan_settings(stamp TEXT PRIMARY KEY,page_size INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS market_catalog(stamp TEXT NOT NULL,id TEXT NOT NULL,fingerprint TEXT NOT NULL,topics TEXT NOT NULL,tickers TEXT NOT NULL,search_text TEXT NOT NULL,liquidity REAL NOT NULL,quality INTEGER NOT NULL,PRIMARY KEY(stamp,id));
+        CREATE INDEX IF NOT EXISTS market_catalog_order ON market_catalog(stamp,quality DESC,liquidity DESC,id);
+        CREATE TABLE IF NOT EXISTS market_catalog_state(stamp TEXT PRIMARY KEY,last_id TEXT NOT NULL,complete INTEGER NOT NULL DEFAULT 0);
     """)
     return db
 
@@ -93,6 +96,9 @@ def persist(cp, page, cursor):
             db.execute("INSERT INTO cursors VALUES(?,?)", (cp["stamp"], cursor))
         db.executemany("INSERT OR REPLACE INTO snapshots VALUES(?,?,?)",
                        [(cp["stamp"], r["id"], json.dumps(r, allow_nan=False)) for r in rows])
+        from app.options import prediction_markets as pm
+        pm.classify_kalshi(rows)
+        db.executemany("INSERT OR REPLACE INTO market_catalog VALUES (?,?,?,?,?,?,?,?)", [pm.catalog_record(cp["stamp"],r) for r in rows])
         db.execute("UPDATE checkpoint SET cursor=?,pages=pages+1,exhausted=? WHERE id=1",
                    (cursor, int(not cursor)))
         return dict(db.execute("SELECT * FROM checkpoint WHERE id=1").fetchone())
@@ -114,6 +120,8 @@ def finish(cp):
             db.execute("DELETE FROM cursors WHERE stamp=?", (cp["stamp"],))
             db.execute("DELETE FROM checkpoint WHERE id=1")
             cutoff = (now() - timedelta(days=35)).isoformat()
+            db.execute("DELETE FROM market_catalog WHERE stamp IN (SELECT stamp FROM scans WHERE stamp<? AND stamp<>?)",(cutoff,cp["stamp"]))
+            db.execute("DELETE FROM market_catalog_state WHERE stamp IN (SELECT stamp FROM scans WHERE stamp<? AND stamp<>?)",(cutoff,cp["stamp"]))
             db.execute("DELETE FROM snapshots WHERE stamp IN (SELECT stamp FROM scans WHERE stamp<? AND stamp<>?)",
                        (cutoff, cp["stamp"]))
             db.execute("DELETE FROM scans WHERE stamp<? AND stamp<>?", (cutoff, cp["stamp"]))
@@ -121,6 +129,33 @@ def finish(cp):
     if not count:
         raise ValueError("Empty Kalshi scan; prior completed scan retained")
     return count
+
+
+def backfill_latest_catalog(batch_size=500):
+    """Index a bounded batch from the latest completed scan; never alter snapshots."""
+    from app.options import prediction_markets as pm
+    with closing(connect()) as db, db:
+        db.execute("BEGIN IMMEDIATE")
+        scan=db.execute("SELECT stamp,count FROM scans ORDER BY stamp DESC LIMIT 1").fetchone()
+        if not scan:
+            return True
+        stamp=scan["stamp"]
+        state=db.execute("SELECT last_id,complete FROM market_catalog_state WHERE stamp=?",(stamp,)).fetchone()
+        if state and state["complete"]:
+            return True
+        last=state["last_id"] if state else ""
+        records=db.execute("SELECT id,payload FROM snapshots WHERE stamp=? AND id>? ORDER BY id LIMIT ?",(stamp,last,batch_size)).fetchall()
+        if not records:
+            count=db.execute("SELECT COUNT(*) FROM market_catalog WHERE stamp=?",(stamp,)).fetchone()[0]
+            if count!=scan["count"]:
+                raise ValueError("Kalshi catalog count mismatch")
+            db.execute("INSERT OR REPLACE INTO market_catalog_state VALUES (?,?,1)",(stamp,last))
+            return True
+        rows=[json.loads(record["payload"]) for record in records]
+        pm.classify_kalshi(rows)
+        db.executemany("INSERT OR IGNORE INTO market_catalog VALUES (?,?,?,?,?,?,?,?)",[pm.catalog_record(stamp,r) for r in rows])
+        db.execute("INSERT OR REPLACE INTO market_catalog_state VALUES (?,?,0)",(stamp,records[-1]["id"]))
+        return False
 
 
 def latest(search=None):
