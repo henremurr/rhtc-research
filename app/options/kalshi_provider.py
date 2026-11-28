@@ -76,10 +76,19 @@ def normalize(m):
     }
 
 
-async def fetch_page(client, cursor=None, *, limit=100):
+async def fetch_page(client, cursor=None, *, limit=100, updated_window=None):
     if not isinstance(limit,int) or not 1 <= limit <= 1000:
         raise ValueError("Invalid Kalshi page size")
     params = {"status": "open", "limit": limit, "mve_filter": "exclude"}
+    if updated_window is not None:
+        lower,upper=updated_window
+        if type(lower) is not int or type(upper) is not int or lower<0 or upper<lower:
+            raise ValueError("Invalid Kalshi update window")
+        # Do not combine metadata timestamps with status filters; closed markets
+        # must also be discovered. The window excludes trading-only changes.
+        params.pop("status")
+        params["min_updated_ts"]=lower
+        params["max_updated_ts"]=upper
     if cursor:
         params["cursor"] = cursor
     for attempt in range(4):
