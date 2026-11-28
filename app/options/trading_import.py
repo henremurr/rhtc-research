@@ -15,6 +15,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 from .trade_pdf import build_cash_activity_report, build_report
 from .account_policy import import_status, status_label
+from .open_lot_safeguards import deletion_id, guarded_open_lots, delete_guarded_lots
 from .trade_pdf import INCOME_PERIOD_HEADINGS, build_tax_lot_report, build_open_tax_lot_report, weekly_income_rows, weekly_income_totals
 from starlette.concurrency import run_in_threadpool
 
@@ -395,7 +396,7 @@ def tax_lot_rows(db, account, year, open_only=False):
             for lot in open_lots:
                 # Calls whose OCC expiration date has passed are no longer open
                 # positions, even when the broker omits a separate expiry row.
-                expiration = re.search(r"(\\d{6})C\\d", security)
+                expiration = re.search(r"(\d{6})C\d", security)
                 if lot.get("call") and expiration and as_of_date:
                     try:
                         expiration_date = datetime.strptime("20" + expiration.group(1), "%Y%m%d").date()
@@ -426,7 +427,8 @@ def tax_lot_rows(db, account, year, open_only=False):
                            "quantity": format(qty.normalize(), "f"), "amount": amount_value,
                            "unit_amount": unit_value, "amount_type": "Premium" if is_option else ("Cost" if side == "long" else "Proceeds"),
                            "term": holding_term(acquired, as_of) if as_of else "short",
-                           "delete_id": hashlib.sha256(json.dumps(sorted(group["sources"])).encode()).hexdigest() ,
+                           "delete_id": deletion_id(account, group["sources"]),
+                           "deletable": group["deletable"],
                            "_sources": group["sources"] })
         def open_lot_sort_key(row):
             description = row["description"]
@@ -558,7 +560,7 @@ def register(app, database_path):
             bounds = db.execute("SELECT account, MIN(substr(trade_date,1,4)), MAX(substr(trade_date,1,4)) FROM trading_transactions GROUP BY account ORDER BY account").fetchall()
             periods = [(account_id, str(period_year)) for account_id, first, last in bounds
                        for period_year in range(int(last), int(first) - 1, -1)]
-            lots = tax_lot_rows(db, account, year, open_only=True) if account and 0 <= year <= 9998 else []
+            lots = guarded_open_lots(db, account, year, tax_lot_rows) if account and 0 <= year <= 9998 else []
             return {"periods": periods, "lots": [{k: v for k, v in lot.items() if k != "_sources"} for lot in lots], "account_status": report_status(db, account)}
 
     @app.post("/api/open-tax-lot-report/delete")
@@ -569,12 +571,8 @@ def register(app, database_path):
             raise HTTPException(422, "Select valid open lots from the report.")
         with closing(sqlite3.connect(database_path(), timeout=20)) as db, db:
             db.execute("BEGIN IMMEDIATE")
-            lots = {lot["delete_id"]: lot for lot in tax_lot_rows(db, account, payload["year"], open_only=True)}
-            if not set(ids).issubset(lots):
-                raise HTTPException(409, "Selected lots changed. Refresh the report.")
-            sources = {tuple(source) for ident in ids for source in lots[ident]["_sources"]}
-            db.executemany("DELETE FROM trading_transactions WHERE account=? AND fingerprint=? AND occurrence=?", [(account, *source) for source in sources])
-        return {"deleted_count": len(sources)}
+            deleted_count = delete_guarded_lots(db, account, payload["year"], ids, tax_lot_rows)
+        return {"deleted_count": deleted_count}
 
     @app.get("/api/open-tax-lot-report/pdf")
     def open_tax_lot_pdf(account: str, year: int, download: bool = False, title: str = ""):
