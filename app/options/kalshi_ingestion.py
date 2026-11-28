@@ -118,6 +118,32 @@ def latest():
         return dict(scan), rows
 
 
+def add_history(scan, rows):
+    if not scan:
+        return rows
+    stamp = datetime.fromisoformat(scan["stamp"])
+    ids = list(dict.fromkeys(row["id"] for row in rows))
+    with closing(connect()) as db:
+        for days in (1, 7, 30):
+            target = stamp - timedelta(days=days)
+            prior = db.execute("SELECT MAX(stamp) FROM scans WHERE stamp<=?",
+                               (target.isoformat(),)).fetchone()[0]
+            old = {}
+            if prior and target - datetime.fromisoformat(prior) <= timedelta(hours=12):
+                for start in range(0, len(ids), 500):
+                    chunk = ids[start:start+500]
+                    sql = ("SELECT id,json_extract(payload,'$.probabilities') FROM snapshots "
+                           "WHERE stamp=? AND id IN (" + ",".join("?" for _ in chunk) + ")")
+                    old.update((r[0], json.loads(r[1] or "{}"))
+                               for r in db.execute(sql, (prior, *chunk)))
+            for row in rows:
+                previous = old.get(row["id"], {})
+                row.setdefault("changes_pp", {})[str(days)] = {
+                    label: round((value - previous[label]) * 100, 2)
+                    for label, value in row["probabilities"].items() if label in previous
+                }
+    return rows
+
 def due():
     with closing(connect()) as db:
         if db.execute("SELECT 1 FROM checkpoint").fetchone():
