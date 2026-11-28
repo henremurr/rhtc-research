@@ -79,6 +79,7 @@ def connect():
     db.execute("CREATE TABLE IF NOT EXISTS prediction_usage (day TEXT PRIMARY KEY, requests INTEGER NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, unknown_usage INTEGER NOT NULL)")
     db.execute("CREATE TABLE IF NOT EXISTS prediction_request_ledger (id TEXT PRIMARY KEY, day TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, state TEXT NOT NULL, provider_request_id TEXT, input_tokens INTEGER, output_tokens INTEGER, reason TEXT)")
     db.execute("CREATE INDEX IF NOT EXISTS prediction_ledger_day ON prediction_request_ledger(day,state)")
+    db.execute("CREATE TABLE IF NOT EXISTS prediction_batch_metrics (request_id TEXT PRIMARY KEY, submitted INTEGER NOT NULL, saved INTEGER NOT NULL)")
     db.execute("CREATE TABLE IF NOT EXISTS market_catalog (stamp TEXT NOT NULL,id TEXT NOT NULL,fingerprint TEXT NOT NULL,topics TEXT NOT NULL,tickers TEXT NOT NULL,search_text TEXT NOT NULL,liquidity REAL NOT NULL,quality INTEGER NOT NULL,PRIMARY KEY(stamp,id))")
     db.execute("CREATE INDEX IF NOT EXISTS market_catalog_order ON market_catalog(stamp,quality DESC,liquidity DESC,id)")
     db.execute("CREATE TABLE IF NOT EXISTS market_catalog_state (stamp TEXT PRIMARY KEY,last_id TEXT NOT NULL,complete INTEGER NOT NULL DEFAULT 0)")
@@ -412,6 +413,27 @@ def daily_usage():
     totals["estimated_usd"]=round((totals["input_tokens"]*inp+totals["output_tokens"]*out)/1000000,4) if inp is not None and out is not None and inp>=0 and out>=0 and not totals["unknown_usage"] else None
     return totals
 
+def research_efficiency():
+    day=datetime.now(timezone.utc).date().isoformat()
+    with closing(connect()) as db:
+        row=db.execute("""SELECT COUNT(*) AS requests,COALESCE(SUM(m.submitted),0) AS submitted,
+            COALESCE(SUM(m.saved),0) AS saved,
+            COALESCE(SUM(CASE WHEN l.state='known' THEN m.saved ELSE 0 END),0) AS metered_saved,
+            COALESCE(SUM(CASE WHEN l.state='known' THEN l.input_tokens+l.output_tokens ELSE 0 END),0) AS tokens
+            FROM prediction_batch_metrics m JOIN prediction_request_ledger l ON l.id=m.request_id
+            WHERE l.day=?""",(day,)).fetchone()
+        totals=db.execute("SELECT requests,input_tokens,output_tokens,unknown_usage FROM prediction_usage WHERE day=?",(day,)).fetchone()
+    data=dict(row)
+    data["day"]=day
+    data["all_requests"]=totals[0] if totals else 0
+    data["all_recorded_tokens"]=totals[1]+totals[2] if totals else 0
+    data["unknown_usage"]=totals[3] if totals else 0
+    data["reviews_per_successful_request"]=round(data["saved"]/data["requests"],2) if data["requests"] else None
+    data["tokens_per_metered_review"]=round(data["tokens"]/data["metered_saved"],2) if data["metered_saved"] else None
+    data["completion_pct"]=round(100*data["saved"]/data["submitted"],2) if data["submitted"] else None
+    return data
+
+
 def reserve_request():
     day=datetime.now(timezone.utc).date().isoformat()
     request_limit,token_limit=_usage_limits()
@@ -601,6 +623,7 @@ async def enrich_pending():
                     records=validated_batch_items(result,batch)
                     with closing(connect()) as db, db:
                         db.executemany("INSERT OR REPLACE INTO market_research VALUES (?,?,?)",records)
+                        db.execute("INSERT OR REPLACE INTO prediction_batch_metrics VALUES (?,?,?)",(day,len(batch),len(records)))
                     reviewed+=len(records)
                     saved_ids={r[0] for r in records}
                     # Missing IDs remain pending for later review; do not fabricate data.
