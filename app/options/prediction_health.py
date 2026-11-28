@@ -250,6 +250,16 @@ async def execution_checks():
     _execution_checked=time.monotonic()
     return rows
 
+def kalshi_reconciliation_checks():
+    from app.options.kalshi_reconciliation import reconcile
+    result=reconcile()
+    if result["status"]=="waiting for full scan":
+        return [check("Kalshi full catalog reconciliation","pending",result["status"])]
+    return [check("Kalshi full catalog reconciliation","pass" if result["status"]=="ok" else "fail",json.dumps(result)),
+            check("Kalshi shadow synchronization","info" if os.getenv("RHTC_KALSHI_SHADOW_SYNC","0")!="1" else "pass" if result["metadata_watermark"] is not None else "pending",
+                  "Shadow feeds enabled; no automatic snapshot replacement" if os.getenv("RHTC_KALSHI_SHADOW_SYNC","0")=="1" else "Disabled pending live compatibility validation")]
+
+
 async def run_health():
     global _benchmark
     checks=[]
@@ -257,7 +267,7 @@ async def run_health():
         _benchmark=await asyncio.to_thread(catalog_benchmark)
     except Exception as exc:
         _benchmark={"status":"unavailable","reason":type(exc).__name__}
-    for name,fn in [("Storage and worker checks",storage_checks),("Kalshi storage and worker checks",kalshi_storage_checks),("Synthetic integration",synthetic_check),("Model integrations",integration_checks)]:
+    for name,fn in [("Storage and worker checks",storage_checks),("Kalshi storage and worker checks",kalshi_storage_checks),("Kalshi reconciliation",kalshi_reconciliation_checks),("Synthetic integration",synthetic_check),("Model integrations",integration_checks)]:
         try:
             value=await asyncio.to_thread(fn)
             checks.extend(value if isinstance(value,list) else [value])
