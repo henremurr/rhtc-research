@@ -13,23 +13,30 @@ class PredictionMarketTests(unittest.TestCase):
         self.assertEqual(row["quality"], "limited")
 
     def test_search_requires_contract_text_instead_of_thematic_exposure(self):
+        import json
+        import tempfile
+        from pathlib import Path
         from unittest.mock import patch
         from app.options import prediction_markets as pm
 
-        rows = []
-        for identifier, title, description in [
-            ("1", "Warriors vs. Trail Blazers", "Basketball game"),
-            ("2", "Will Oklo file an application?", ""),
-            ("3", "New reactor licensing", "Resolves based on a filing by Oklo Inc."),
-            ("4", "Different company", "A company named Roklo"),
-        ]:
-            row = pm.normalize({"id": identifier, "question": title, "description": description})
-            row.update(research=None, holdings=[], relevance=None, thematic_exposure=["OKLO"])
-            rows.append(row)
-
-        with patch.object(pm, "current_markets", return_value=(None, rows)), \
-             patch.object(pm, "read_status"), patch.object(pm, "daily_usage"), \
-             patch.object(pm, "read_research_status"):
+        rows = [
+            {"id": "1", "question": "Warriors vs. Trail Blazers", "description": "Basketball game"},
+            {"id": "2", "question": "Will Oklo file an application?"},
+            {"id": "3", "question": "New reactor licensing", "description": "Resolves based on a filing by Oklo Inc."},
+            {"id": "4", "question": "Different company", "description": "A company named Roklo"},
+        ]
+        for row in rows:
+            row.update(active=True, closed=False)
+        with tempfile.TemporaryDirectory() as folder, \
+             patch("app.options.api.watchlist_db_path", return_value=Path(folder) / "watch.sqlite3"), \
+             patch("app.options.api.read_watchlist", return_value=[]):
+            checkpoint = pm.persist_page(pm.begin_checkpoint(), rows, None)
+            pm.finish_checkpoint(checkpoint)
+            with pm.connect() as db:
+                # Exercise a legacy inline row alongside current compact snapshots.
+                row = pm.normalize(rows[2])
+                row["thematic_exposure"] = ["OKLO"]
+                db.execute("UPDATE snapshots SET payload=? WHERE id=?", (json.dumps(row), row["id"]))
             result = pm.markets(q="  $oklo  ", offset=0, limit=1, sort="volume")
             next_page = pm.markets(q="oklo", offset=1, limit=1, sort="volume")
             self.assertEqual(result["count"], 2)
