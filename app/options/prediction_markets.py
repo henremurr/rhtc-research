@@ -357,10 +357,19 @@ def fingerprint(row):
     return hashlib.sha256(json.dumps([row["title"],row["description"],row.get("resolution_source")], ensure_ascii=False).encode()).hexdigest()
 
 def attach_research(rows):
-    with closing(connect()) as db:
-        cached = {(r["id"], r["fingerprint"]):json.loads(r["payload"]) for r in db.execute("SELECT * FROM market_research")}
+    fingerprints = {row["id"]: fingerprint(row) for row in rows}
+    ids = list(fingerprints)
+    cached = {}
+    if ids:
+        with closing(connect()) as db:
+            for start in range(0, len(ids), 500):
+                chunk = ids[start:start+500]
+                sql = "SELECT id,fingerprint,payload FROM market_research WHERE id IN (" + ",".join("?" for _ in chunk) + ")"
+                for record in db.execute(sql, chunk):
+                    if record["fingerprint"] == fingerprints.get(record["id"]):
+                        cached[(record["id"], record["fingerprint"])] = json.loads(record["payload"])
     for row in rows:
-        row["research"] = cached.get((row["id"],fingerprint(row)))
+        row["research"] = cached.get((row["id"],fingerprints[row["id"]]))
         if row["research"]:
             row["topics"] = sorted(set(row["topics"]) | set(row["research"]["topics"]))
     return rows
@@ -871,10 +880,10 @@ def classify_kalshi(rows):
     return rows
 
 
-def kalshi_catalog():
+def kalshi_catalog(search=None):
     from app.options import kalshi_ingestion
     from app.options.api import read_watchlist
-    scan, rows = kalshi_ingestion.latest()
+    scan, rows = kalshi_ingestion.latest(search=search)
     classify_kalshi(rows)
     return scan, map_portfolio(kalshi_ingestion.add_history(scan, attach_research(rows)), read_watchlist())
 
@@ -897,7 +906,7 @@ def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int 
     for row in rows:
         row.setdefault("provider", "polymarket")
     if provider != "polymarket":
-        kalshi_scan, kalshi_rows = kalshi_catalog()
+        kalshi_scan, kalshi_rows = kalshi_catalog(search=search)
         provider_scans["kalshi"] = kalshi_scan
         if search:
             kalshi_rows = [row for row in kalshi_rows if search.search(row["title"]) or search.search(row["description"])]
