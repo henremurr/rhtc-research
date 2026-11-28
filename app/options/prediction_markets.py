@@ -668,6 +668,9 @@ async def catalog_scheduler():
             log.exception("Prediction catalog backfill failed")
         await asyncio.sleep(60)
 
+PROBABILITY_SORT_OUTCOMES = {"prob-yes": "yes", "prob-no": "no"}
+
+
 def catalog_page(topic,exposure,offset,limit,sort="relevance"):
     """Select a page using indexed compact metadata before hydrating records.
     Return None while an existing completed scan is still being indexed.
@@ -728,6 +731,11 @@ def catalog_page(topic,exposure,offset,limit,sort="relevance"):
             order = """(SELECT CAST(json_extract(s.payload,'$.volume24h') AS REAL)
                         FROM snapshots s WHERE s.stamp=? AND s.id=flags.id) DESC,""" + order
             order_args = (scan["stamp"],)
+        elif sort in PROBABILITY_SORT_OUTCOMES:
+            order = """(SELECT MAX(CAST(p.value AS REAL))
+                        FROM snapshots s, json_each(s.payload, '$.probabilities') p
+                        WHERE s.stamp=? AND s.id=flags.id AND lower(p.key)=?) DESC,""" + order
+            order_args = (scan["stamp"], PROBABILITY_SORT_OUTCOMES[sort])
         ids = [r[0] for r in db.execute(
             base + "SELECT id FROM flags" + where + " ORDER BY " + order + " LIMIT ? OFFSET ?",
             (*args, *order_args, limit, offset),
@@ -831,7 +839,7 @@ def without_duplicate_markets(rows):
 
 
 @router.get("")
-def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500), deduplicate: bool = False, sort: Literal["relevance", "volume", "liquidity"] = "relevance"):
+def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500), deduplicate: bool = False, sort: Literal["relevance", "volume", "liquidity", "prob-yes", "prob-no"] = "relevance"):
     search_term = q.strip().removeprefix("$")
     indexed=catalog_page(topic,exposure,offset,limit,sort) if not search_term and not deduplicate else None
     if indexed is not None:
@@ -857,6 +865,14 @@ def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int 
     metric = {"volume": "volume24h", "liquidity": "liquidity"}.get(sort)
     if metric:
         rows.sort(key=lambda row: (row[metric] is not None, row[metric] or 0), reverse=True)
+    elif sort in PROBABILITY_SORT_OUTCOMES:
+        outcome = PROBABILITY_SORT_OUTCOMES[sort]
+
+        def probability(row):
+            return max((value for label, value in row["probabilities"].items()
+                        if label.lower() == outcome), default=-1)
+
+        rows.sort(key=probability, reverse=True)
     return {"scan":scan,"reviewed":reviewed,"count":len(rows),"duplicates_removed":matching_count-len(rows),"direct_search":bool(search),"markets":rows[offset:offset+limit],
             "scanning":lock.locked(),"reviewing":enrichment_lock.locked(),"scan_status":read_status(),"ai_usage":daily_usage(),"research_status":read_research_status(),
             "caution":"Market prices are complementary evidence only; independently verify fundamentals and resolution rules."}
