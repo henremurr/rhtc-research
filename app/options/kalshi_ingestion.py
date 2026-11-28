@@ -4,6 +4,8 @@ import json
 import logging
 import sqlite3
 import shutil
+import hashlib
+import zlib
 from contextlib import closing
 from datetime import datetime, timezone, timedelta
 import httpx
@@ -24,6 +26,7 @@ def connect():
     db.execute("PRAGMA journal_mode=WAL")
     db.executescript("""
         CREATE TABLE IF NOT EXISTS scans(stamp TEXT PRIMARY KEY, count INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS market_metadata(key TEXT PRIMARY KEY,payload BLOB NOT NULL);
         CREATE TABLE IF NOT EXISTS snapshots(stamp TEXT NOT NULL,id TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(stamp,id));
         CREATE INDEX IF NOT EXISTS snapshot_history ON snapshots(id,stamp);
         CREATE TABLE IF NOT EXISTS checkpoint(id INTEGER PRIMARY KEY CHECK(id=1),stamp TEXT NOT NULL,cursor TEXT,pages INTEGER NOT NULL,exhausted INTEGER NOT NULL);
@@ -75,6 +78,36 @@ def assert_owner(db, cp):
         raise ValueError("Kalshi checkpoint changed")
 
 
+STATIC_FIELDS=("title","description","end_date","expected_expiration","resolution_source","event_ticker","slug")
+
+def compact(row):
+    static={k:row[k] for k in STATIC_FIELDS if k in row}
+    encoded=json.dumps(static,ensure_ascii=False,sort_keys=True,separators=(",",":")).encode()
+    key=hashlib.sha256(encoded).hexdigest()
+    dynamic={k:v for k,v in row.items() if k not in STATIC_FIELDS}
+    dynamic["_metadata"]=key
+    return key,zlib.compress(encoded,6),json.dumps(dynamic,allow_nan=False,separators=(",",":"))
+
+
+def hydrate_many(db, raw, schema="main"):
+    if schema not in ("main","kalshi"):
+        raise ValueError("Unknown metadata schema")
+    rows=[json.loads(p) for p in raw]
+    keys=list({r["_metadata"] for r in rows if "_metadata" in r})
+    metadata={}
+    for start in range(0,len(keys),500):
+        chunk=keys[start:start+500]
+        sql=f"SELECT key,payload FROM {schema}.market_metadata WHERE key IN ("+",".join("?" for _ in chunk)+")"
+        metadata.update((r[0],json.loads(zlib.decompress(r[1]))) for r in db.execute(sql,chunk))
+    for row in rows:
+        key=row.pop("_metadata",None)
+        if key is not None:
+            if key not in metadata:
+                raise ValueError("Kalshi snapshot metadata missing")
+            row.update(metadata[key])
+    return rows
+
+
 def persist(cp, page, cursor):
     rows = []
     for market in page:
@@ -94,8 +127,10 @@ def persist(cp, page, cursor):
             ).fetchone():
                 raise ValueError("Kalshi cursor stopped advancing")
             db.execute("INSERT INTO cursors VALUES(?,?)", (cp["stamp"], cursor))
+        packed=[(row["id"],*compact(row)) for row in rows]
+        db.executemany("INSERT OR IGNORE INTO market_metadata VALUES (?,?)",[(key,meta) for _,key,meta,_ in packed])
         db.executemany("INSERT OR REPLACE INTO snapshots VALUES(?,?,?)",
-                       [(cp["stamp"], r["id"], json.dumps(r, allow_nan=False)) for r in rows])
+                       [(cp["stamp"],mid,payload) for mid,_,_,payload in packed])
         from app.options import prediction_markets as pm
         pm.classify_kalshi(rows)
         db.executemany("INSERT OR REPLACE INTO market_catalog VALUES (?,?,?,?,?,?,?,?)", [pm.catalog_record(cp["stamp"],r) for r in rows])
@@ -151,7 +186,7 @@ def backfill_latest_catalog(batch_size=500):
                 raise ValueError("Kalshi catalog count mismatch")
             db.execute("INSERT OR REPLACE INTO market_catalog_state VALUES (?,?,1)",(stamp,last))
             return True
-        rows=[json.loads(record["payload"]) for record in records]
+        rows=hydrate_many(db,[record["payload"] for record in records])
         pm.classify_kalshi(rows)
         db.executemany("INSERT OR IGNORE INTO market_catalog VALUES (?,?,?,?,?,?,?,?)",[pm.catalog_record(stamp,r) for r in rows])
         db.execute("INSERT OR REPLACE INTO market_catalog_state VALUES (?,?,0)",(stamp,records[-1]["id"]))
@@ -167,14 +202,16 @@ def latest(search=None):
         if search is None:
             records = db.execute("SELECT payload FROM snapshots WHERE stamp=?", (scan["stamp"],))
         else:
-            def matches(title, description):
-                return int(bool(search.search(title or "") or search.search(description or "")))
-            db.create_function("kalshi_matches", 2, matches, deterministic=True)
-            records = db.execute(
-                "SELECT payload FROM snapshots WHERE stamp=? AND "
-                "kalshi_matches(json_extract(payload,'$.title'),json_extract(payload,'$.description'))",
-                (scan["stamp"],))
-        rows = [json.loads(r[0]) for r in records]
+            def matches(payload, metadata):
+                row=json.loads(zlib.decompress(metadata)) if metadata is not None else json.loads(payload)
+                return int(bool(search.search(row.get("title") or "") or search.search(row.get("description") or "")))
+            db.create_function("kalshi_matches",2,matches,deterministic=True)
+            records=db.execute("""
+                SELECT s.payload FROM snapshots s LEFT JOIN market_metadata m
+                ON m.key=json_extract(s.payload,'$._metadata')
+                WHERE s.stamp=? AND kalshi_matches(s.payload,m.payload)
+                """,(scan["stamp"],))
+        rows=hydrate_many(db,[r[0] for r in records])
         return dict(scan), rows
 
 
