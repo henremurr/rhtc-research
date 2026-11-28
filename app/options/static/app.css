@@ -1900,3 +1900,20 @@ body.news-mode .news-research-title {
   #symbol-list .symbol-extra-call{grid-template-columns:repeat(2,minmax(0,1fr))}
   #symbol-list .symbol-extra-call button{grid-column:2;justify-self:end}
 }
+
+.market-state.market-snapshot {
+  display:grid;
+  grid-template-columns:auto auto;
+  align-items:center;
+  column-gap:8px;
+  row-gap:3px;
+  line-height:1.1;
+}
+.market-snapshot .market-label {display:flex;align-items:center;gap:6px;white-space:nowrap}
+.market-snapshot .market-index {color:var(--ink);white-space:nowrap}
+.market-snapshot #market-clock,.market-snapshot #market-session {text-align:right;white-space:nowrap}
+.market-snapshot #market-session {color:var(--gold)}
+.market-snapshot .market-dot {background:var(--muted)}
+.market-snapshot[data-session="open"] .market-dot {background:var(--green)}
+.market-snapshot[data-session="premarket"] .market-dot,
+.market-snapshot[data-session="postmarket"] .market-dot {background:var(--gold)}

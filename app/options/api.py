@@ -3279,6 +3279,80 @@ async def opportunities(
     return {"rows": rows, "count": len(rows), "total": len(universe), "source": source, "as_of": utc_now().isoformat()}
 
 
+MARKET_INDEX_SYMBOLS = {"COMP": "^IXIC", "NYA": "^NYA"}
+_market_snapshot_cache: tuple[float, dict[str, Any]] | None = None
+_market_snapshot_lock = asyncio.Lock()
+
+
+async def _public_market_index(client: httpx.AsyncClient, symbol: str) -> dict[str, Any] | None:
+    try:
+        response = await client.get(
+            "/v8/finance/chart/" + symbol, params={"range": "1d", "interval": "1d"}
+        )
+        response.raise_for_status()
+        meta = response.json()["chart"]["result"][0]["meta"]
+        if meta.get("symbol") != symbol or meta.get("instrumentType") != "INDEX":
+            return None
+        price = _finnhub_finite_number(meta.get("regularMarketPrice"))
+        timestamp = _finnhub_finite_number(meta.get("regularMarketTime"))
+        if price is None or price <= 0 or timestamp is None or timestamp <= 0:
+            return None
+        return {"price": price, "trade_time_ms": timestamp * 1000, "source": "Yahoo Finance"}
+    except (httpx.HTTPError, ValueError, KeyError, TypeError, IndexError, AttributeError):
+        return None
+
+
+@app.get("/api/market-snapshot")
+async def market_snapshot() -> dict[str, Any]:
+    global _market_snapshot_cache
+    token = os.getenv("TRADIER_API_TOKEN", "").strip()
+    snapshot: dict[str, Any] = {"session": None, "indices": {}}
+    async with _market_snapshot_lock:
+        if _market_snapshot_cache and time.monotonic() - _market_snapshot_cache[0] < 60:
+            return _market_snapshot_cache[1]
+        clock_data = quote_data = None
+        if token:
+            provider = Tradier(token)
+            provider.client.timeout = httpx.Timeout(5)
+            async with provider.client:
+                clock_data, quote_data = await asyncio.gather(
+                    provider.get("/markets/clock", {}),
+                    provider.get("/markets/quotes", {"symbols": ",".join(MARKET_INDEX_SYMBOLS)}),
+                    return_exceptions=True,
+                )
+        if isinstance(clock_data, dict):
+            session = (clock_data.get("clock") or {}).get("state")
+            if session in ("premarket", "open", "postmarket", "closed"):
+                snapshot["session"] = session
+        if isinstance(quote_data, dict):
+            quotes = (quote_data.get("quotes") or {}).get("quote") or []
+            for quote in quotes if isinstance(quotes, list) else [quotes]:
+                if not isinstance(quote, dict) or quote.get("type") != "index":
+                    continue
+                symbol = quote.get("symbol")
+                price = _finnhub_finite_number(quote.get("last")) or _finnhub_finite_number(quote.get("close"))
+                if symbol in MARKET_INDEX_SYMBOLS and price is not None and price > 0:
+                    snapshot["indices"][symbol] = {
+                        "price": price,
+                        "source": "Tradier",
+                        "trade_time_ms": _finnhub_finite_number(quote.get("trade_date")),
+                    }
+        missing = [symbol for symbol in MARKET_INDEX_SYMBOLS if symbol not in snapshot["indices"]]
+        if missing:
+            async with httpx.AsyncClient(
+                base_url="https://query2.finance.yahoo.com", timeout=5,
+                headers={"User-Agent": "Mozilla/5.0"},
+            ) as client:
+                fallback = await asyncio.gather(*(
+                    _public_market_index(client, MARKET_INDEX_SYMBOLS[symbol]) for symbol in missing
+                ))
+            snapshot["indices"].update(
+                (symbol, quote) for symbol, quote in zip(missing, fallback) if quote is not None
+            )
+        _market_snapshot_cache = (time.monotonic(), snapshot)
+        return snapshot
+
+
 @app.get("/api/quote/{symbol}")
 async def stock_quote(symbol: str):
     symbol = symbol.upper()
