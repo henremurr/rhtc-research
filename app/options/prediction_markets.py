@@ -11,6 +11,7 @@ import uuid
 import shutil
 import zlib
 from pathlib import Path
+from typing import Literal
 from datetime import timedelta
 from contextlib import closing
 from datetime import datetime, timezone
@@ -654,7 +655,7 @@ async def catalog_scheduler():
             log.exception("Prediction catalog backfill failed")
         await asyncio.sleep(60)
 
-def catalog_page(topic,exposure,offset,limit):
+def catalog_page(topic,exposure,offset,limit,sort="relevance"):
     """Select a page using indexed compact metadata before hydrating records.
     Return None while an existing completed scan is still being indexed.
     """
@@ -706,7 +707,18 @@ def catalog_page(topic,exposure,offset,limit):
         where=" WHERE "+" AND ".join(clauses) if clauses else ""
         count=db.execute(base+"SELECT COUNT(*) FROM flags"+where,args).fetchone()[0]
         reviewed=db.execute(base+"SELECT COUNT(*) FROM candidates WHERE research IS NOT NULL",(scan["stamp"],)).fetchone()[0]
-        ids=[r[0] for r in db.execute(base+"SELECT id FROM flags"+where+" ORDER BY relevance DESC,held DESC,quality DESC,liquidity DESC,id LIMIT ? OFFSET ?",(*args,limit,offset))]
+        order = "relevance DESC,held DESC,quality DESC,liquidity DESC,id"
+        order_args = ()
+        if sort == "liquidity":
+            order = "liquidity DESC," + order
+        elif sort == "volume":
+            order = """(SELECT CAST(json_extract(s.payload,'$.volume24h') AS REAL)
+                        FROM snapshots s WHERE s.stamp=? AND s.id=flags.id) DESC,""" + order
+            order_args = (scan["stamp"],)
+        ids = [r[0] for r in db.execute(
+            base + "SELECT id FROM flags" + where + " ORDER BY " + order + " LIMIT ? OFFSET ?",
+            (*args, *order_args, limit, offset),
+        )]
         if not ids:
             return scan,reviewed,count,[]
         payloads={r["id"]:r["payload"] for r in db.execute("SELECT id,payload FROM snapshots WHERE stamp=? AND id IN ("+",".join("?" for _ in ids)+")",(scan["stamp"],*ids))}
@@ -806,8 +818,8 @@ def without_duplicate_markets(rows):
 
 
 @router.get("")
-def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500), deduplicate: bool = False):
-    indexed=catalog_page(topic,exposure,offset,limit) if not q and not deduplicate else None
+def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500), deduplicate: bool = False, sort: Literal["relevance", "volume", "liquidity"] = "relevance"):
+    indexed=catalog_page(topic,exposure,offset,limit,sort) if not q and not deduplicate else None
     if indexed is not None:
         scan,reviewed,count,rows=indexed
         return {"scan":scan,"reviewed":reviewed,"count":count,"markets":rows,
@@ -829,6 +841,9 @@ def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int 
     matching_count = len(rows)
     if deduplicate:
         rows = without_duplicate_markets(rows)
+    metric = {"volume": "volume24h", "liquidity": "liquidity"}.get(sort)
+    if metric:
+        rows.sort(key=lambda row: (row[metric] is not None, row[metric] or 0), reverse=True)
     return {"scan":scan,"reviewed":reviewed,"count":len(rows),"duplicates_removed":matching_count-len(rows),"markets":rows[offset:offset+limit],
             "scanning":lock.locked(),"reviewing":enrichment_lock.locked(),"scan_status":read_status(),"ai_usage":daily_usage(),"research_status":read_research_status(),
             "caution":"Market prices are complementary evidence only; independently verify fundamentals and resolution rules."}
