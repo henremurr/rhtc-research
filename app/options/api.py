@@ -3279,7 +3279,7 @@ async def opportunities(
     return {"rows": rows, "count": len(rows), "total": len(universe), "source": source, "as_of": utc_now().isoformat()}
 
 
-MARKET_INDEX_SYMBOLS = {"COMP": "^IXIC", "NYA": "^NYA"}
+MARKET_INDEX_SYMBOLS = {"COMP": "^IXIC", "SPX": "^GSPC", "NYA": "^NYA"}
 _market_snapshot_cache: tuple[float, dict[str, Any]] | None = None
 _market_snapshot_lock = asyncio.Lock()
 

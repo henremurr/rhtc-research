@@ -2476,8 +2476,8 @@ async function refreshMarketSnapshot(){
   const extended = {premarket:'Premarket',postmarket:'After hours'};
   session.textContent = extended[data.session] ? 'Extended' : '';
   session.title = extended[data.session] || ({open:'Regular session open',closed:'Market closed'})[data.session] || 'Session status unavailable';
-  session.parentElement.dataset.session = data.session || '';
-  for(const [symbol,name] of [['COMP','Nasdaq Composite'],['NYA','NYSE Composite']]){
+  session.closest('.market-snapshot').dataset.session = data.session || '';
+  for(const [symbol,name] of [['COMP','Nasdaq Composite'],['SPX','S&P 500'],['NYA','NYSE Composite']]){
     const value = $('#market-'+symbol.toLowerCase());
     const quote = data.indices?.[symbol];
     value.textContent = quote ? quote.price.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
