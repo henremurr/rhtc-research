@@ -34,6 +34,35 @@ def save(result):
         db.execute("INSERT OR REPLACE INTO prediction_health VALUES (?,?)",(result["checked_at"],json.dumps(result)))
         db.execute("DELETE FROM prediction_health WHERE stamp NOT IN (SELECT stamp FROM prediction_health ORDER BY stamp DESC LIMIT 168)")
 
+def live_progress():
+    from app.options import kalshi_ingestion as ki
+    result={}
+    for name, module, table in (("Polymarket",pm,"scan_checkpoint"),("Kalshi",ki,"checkpoint")):
+        try:
+            with closing(module.connect()) as db:
+                cp=db.execute("SELECT stamp,pages FROM "+table+" WHERE id=1").fetchone()
+                scan=db.execute("SELECT stamp,count FROM scans ORDER BY stamp DESC LIMIT 1").fetchone()
+                status=module.read_status()
+                result[name]={"state":status.get("state"),"pages":cp["pages"] if cp else status.get("pages"),
+                    "scan_started":cp["stamp"] if cp else None,"last_completed":scan["stamp"] if scan else None,
+                    "completed_count":scan["count"] if scan else None,"updated_at":status.get("updated_at"),
+                    "error":status.get("error"),"running":module.lock.locked()}
+        except Exception:
+            result[name]={"state":"unavailable"}
+    return result
+
+
+def storage_metrics():
+    from app.options.api import watchlist_db_path
+    base=watchlist_db_path().parent
+    result={}
+    for name,file in (("Polymarket","rhtc_prediction_markets.sqlite3"),("Kalshi","rhtc_kalshi.sqlite3")):
+        path=base/file
+        result[name]=sum(p.stat().st_size for p in (path,Path(str(path)+"-wal"),Path(str(path)+"-shm")) if p.exists())/1048576
+    disk=shutil.disk_usage(base)
+    return {"database_mib":result,"free_mib":disk.free/1048576,"used_pct":100*(1-disk.free/disk.total)}
+
+
 def latest_health():
     try:
         with closing(pm.connect()) as db:
@@ -42,6 +71,9 @@ def latest_health():
         result=json.loads(row[0]) if row else {"state":"pending","checks":[]}
         age=age_hours(result.get("checked_at"))
         result["stale"]=age is None or age>2
+        result["ingestion"]=live_progress()
+        result["storage"]=storage_metrics()
+        result["efficiency"]=pm.research_efficiency()
         return result
     except Exception:
         log.exception("Prediction health read failed")
@@ -212,6 +244,8 @@ async def run_health():
     result={"checked_at":datetime.now(timezone.utc).isoformat(),"state":state,"checks":checks,"scope":"Live provider, stored data, deployed wiring and isolated analytical execution fixtures; no paid model inference."}
     await asyncio.to_thread(save,result)
     log.warning("Prediction infrastructure health: %s (%d checks)",state,len(checks))
+    log.warning("Prediction storage metrics: %s",json.dumps(storage_metrics()))
+    log.warning("Prediction research efficiency: %s",json.dumps(pm.research_efficiency()))
     for c in checks:
         if c["state"] in ("fail","warn","pending"):
             log.warning("Prediction health %s: %s — %s",c["state"],c["name"],c["detail"])
