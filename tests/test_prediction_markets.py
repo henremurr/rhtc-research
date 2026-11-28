@@ -212,3 +212,26 @@ class PredictionMarketTests(unittest.TestCase):
         self.assertEqual(len({r["id"] for r in ordered}),50)
         self.assertNotEqual(ordered[0]["provider"],ordered[1]["provider"])
         self.assertTrue(all(not r["topics"] for r in ordered[8:10]))
+
+    def test_research_efficiency_measured_batches(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from contextlib import closing
+        from app.options import prediction_markets as pm
+        with tempfile.TemporaryDirectory() as folder, patch("app.options.api.watchlist_db_path",return_value=Path(folder)/"watch.sqlite3"), patch.dict("os.environ",{"RHTC_PREDICTION_DAILY_REQUESTS":"100","RHTC_PREDICTION_DAILY_TOKENS":"1000000"}):
+            first=pm.reserve_request()
+            pm.settle_request(first,"known",1000,500)
+            second=pm.reserve_request()
+            pm.settle_request(second,"unknown")
+            third=pm.reserve_request()
+            pm.settle_request(third,"known",100,100)
+            with closing(pm.connect()) as db, db:
+                db.executemany("INSERT INTO prediction_batch_metrics VALUES (?,?,?)",[(first,16,15),(second,16,10)])
+            metrics=pm.research_efficiency()
+            self.assertEqual(metrics["requests"],2)
+            self.assertEqual(metrics["all_requests"],3)
+            self.assertEqual(metrics["saved"],25)
+            self.assertEqual(metrics["reviews_per_successful_request"],12.5)
+            self.assertEqual(metrics["tokens_per_metered_review"],100)
+            self.assertEqual(metrics["completion_pct"],78.12)
