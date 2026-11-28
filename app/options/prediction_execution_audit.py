@@ -9,8 +9,6 @@ from types import SimpleNamespace
 from unittest.mock import patch, AsyncMock
 
 async def run():
-    from app.options import api, news, prediction_markets as pm, forward_intelligence as fi
-    from app.options.long_game import analyze_long_game
     now=datetime.now(timezone.utc)
     expiry=(now.date()+timedelta(days=7)).isoformat()
     marker="RHTC_EXECUTION_FIXTURE"
@@ -23,6 +21,11 @@ async def run():
         results.append({"name":name+" execution (fixture)","state":"pass" if ok else "fail","detail":detail})
     with tempfile.TemporaryDirectory(prefix="rhtc-execution-") as folder, ExitStack() as stack:
         stack.enter_context(patch.dict(os.environ,{"RHTC_DATA_DIR":folder,"OPENAI_API_KEY":"fixture-not-a-real-key"}))
+        from app.options import api, news, prediction_markets as pm, forward_intelligence as fi
+        from app.options.long_game import analyze_long_game
+        # Fail closed if a future model path attempts an unmocked HTTP request.
+        stack.enter_context(patch("httpx.AsyncClient.send",new=AsyncMock(side_effect=RuntimeError("Network disabled in execution fixture"))))
+        stack.enter_context(patch("httpx.Client.send",side_effect=RuntimeError("Network disabled in execution fixture")))
         stack.enter_context(patch.object(api,"require_watchlist_storage",lambda:None))
         stack.enter_context(patch.object(fi,"ticker_context",return_value=context))
         stack.enter_context(patch.object(pm,"research_context",return_value=context))
@@ -89,4 +92,6 @@ async def run():
     return results
 
 if __name__=="__main__":
-    print(json.dumps(asyncio.run(run())))
+    results=asyncio.run(run())
+    print(json.dumps(results))
+    raise SystemExit(0 if len(results)==7 and all(r["state"]=="pass" for r in results) else 1)
