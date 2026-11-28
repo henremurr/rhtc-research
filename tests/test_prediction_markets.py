@@ -184,3 +184,31 @@ class PredictionMarketTests(unittest.TestCase):
                 pm.recover_request_ledger()
                 self.assertEqual(pm.daily_usage()["in_flight"],0)
                 self.assertEqual(pm.daily_usage()["unresolved_usage"],1)
+
+    def test_research_batch_size_and_priority(self):
+        from unittest.mock import patch
+        from app.options import prediction_markets as pm
+        with patch.dict("os.environ", {"RHTC_PREDICTION_BATCH_SIZE": "16"}):
+            self.assertEqual(pm.research_batch_size(),16)
+        with patch.dict("os.environ", {"RHTC_PREDICTION_BATCH_SIZE": "999"}):
+            self.assertEqual(pm.research_batch_size(),20)
+        def row(mid, provider="polymarket", title="Event", topics=(), movement=0):
+            return dict(id=mid, provider=provider, title=title, description="",
+                        topics=list(topics), quality="limited", liquidity=0,
+                        changes_pp={"1":{"Yes":movement}})
+        rows=[row("macro",topics=["Macro"]),row("held","kalshi","Will OKLO report?"),
+              row("static",topics=["AI/I"]),row("moving","kalshi",topics=["AI/I"],movement=12)]
+        ordered=pm.prioritize_pending(rows,{"OKLO"},16)
+        self.assertEqual([r["id"] for r in ordered],["held","moving","static","macro"])
+
+    def test_provider_balance_and_exploration(self):
+        from app.options import prediction_markets as pm
+        rows=[dict(id=str(i),provider="polymarket" if i<20 else "kalshi",
+                   title="Event",description="",topics=["AI/I"],quality="limited",
+                   liquidity=0) for i in range(40)]
+        rows.extend(dict(id="extra"+str(i),title="Other event",description="",topics=[],
+                         quality="limited",liquidity=0) for i in range(10))
+        ordered=pm.prioritize_pending(rows,set(),2)
+        self.assertEqual(len({r["id"] for r in ordered}),50)
+        self.assertNotEqual(ordered[0]["provider"],ordered[1]["provider"])
+        self.assertTrue(all(not r["topics"] for r in ordered[8:10]))
