@@ -80,3 +80,25 @@ class KalshiIngestionTests(unittest.TestCase):
         self.assertEqual(result["30"], {"Yes": 35.0, "No": -35.0})
         other = {"id": "kalshi:B", "probabilities": {"Yes": .7}}
         self.assertEqual(k.add_history(current, [other])[0]["changes_pp"], {"1": {}, "7": {}, "30": {}})
+
+    def test_successful_refresh_requests_health_update(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        with patch.object(k, "headroom", return_value=.5), \
+             patch.object(k.kalshi_provider, "fetch_page", new=AsyncMock(return_value=([market("A")], None))), \
+             patch("app.options.prediction_health.request_refresh") as notify:
+            result = asyncio.run(k.refresh())
+            self.assertEqual(result["count"], 1)
+            self.assertEqual(k.read_status()["state"], "completed")
+            notify.assert_called_once_with()
+
+    def test_failed_refresh_does_not_request_health_update(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        with patch.object(k, "headroom", return_value=.5), \
+             patch.object(k.kalshi_provider, "fetch_page", new=AsyncMock(side_effect=ValueError("test failure"))), \
+             patch("app.options.prediction_health.request_refresh") as notify:
+            with self.assertRaisesRegex(ValueError, "test failure"):
+                asyncio.run(k.refresh())
+            self.assertEqual(k.read_status()["state"], "failed")
+            notify.assert_not_called()
