@@ -2146,11 +2146,14 @@ async function addNewsUrl(){
   finally{button.disabled=false;button.textContent=label}
 }
 async function deduplicateNews(){
-  const button=$('#dedupe-news');
+  const buttons=[$('#dedupe-news'),$('#dedupe-news-bottom')];
+  if(buttons.some(button=>button.disabled))return;
   if(!window.confirm('Compare story titles and content across all saved news. Remove reports about the same event even when outlets rewrite the headline or publish several days apart; common sector terms alone are not enough. The most complete copy is kept, along with its publication records.'))return;
-  button.disabled=true;
-  const label=button.textContent;
-  button.textContent='Removing…';
+  const labels=buttons.map(button=>button.textContent);
+  for(const button of buttons){
+    button.disabled=true;
+    button.textContent='Removing…';
+  }
   try{
     const response=await fetch('/options/api/news/deduplicate',{method:'POST',credentials:'same-origin'});
     const data=await response.json();
@@ -2158,7 +2161,12 @@ async function deduplicateNews(){
     await loadNews({quiet:true});
     toast(data.removed?'Removed '+data.removed+' duplicate '+(data.removed===1?'story':'stories')+'; '+data.remaining+' stories remain.':'No duplicate stories found.');
   }catch(error){toast(error.message||'Could not remove duplicate stories.')}
-  finally{button.disabled=false;button.textContent=label}
+  finally{
+    buttons.forEach((button,index)=>{
+      button.disabled=false;
+      button.textContent=labels[index];
+    });
+  }
 }
 function setMode(mode){state.mode=mode;const isNews=mode==='news';document.body.classList.toggle('news-mode',isNews);if(!isNews)stopNewsSpeech();$('#options-view').hidden=isNews;$('#news-view').hidden=!isNews;$('#options-toolbar-filters').hidden=isNews;$('#main-pager').hidden=mode==='history';document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.filter===mode||(!n.dataset.filter&&mode==='overview')));if(isNews){loadNews()}else if(mode==='history'){renderRows();toast('Snapshots are saved in this browser.')}else if(mode==='holdings'){state.selectedOnly=true;state.peak='All Peaks';document.querySelectorAll('.peak-item').forEach(n=>n.classList.toggle('selected',n.dataset.peak==='All Peaks'));loadRows({ai:false,snapshot:false})}else{state.selectedOnly=false;renderRows()}}
 function pageMain(delta){const next=state.expirationSet+delta;if(next<1||next>11)return;state.expirationSet=next;$('#main-page').textContent=DTE_WINDOWS[next-1];$('#main-prev').disabled=next===1;$('#main-next').disabled=next===11;loadRows({ai:false,snapshot:false})}
@@ -2438,7 +2446,7 @@ $('#news-summary-form').addEventListener('submit',event=>{
     void summarizeFilteredNews(newsSummaryPreview);
   }
 });
-$('#scan-news').addEventListener('click',()=>scanNews());$('#add-news-url').addEventListener('click',addNewsUrl);$('#paste-news-content').addEventListener('click',openPasteNewsModal);$('#paste-news-form').addEventListener('submit',submitPastedNews);$('#dedupe-news').addEventListener('click',deduplicateNews);$('#build-topic-filters').addEventListener('click',buildNewsTopicFilters);$('#rank-news-relevance').addEventListener('click',rankNewsRelevance);$('#news-search-form').addEventListener('submit',event=>{event.preventDefault();scanNews($('#news-search').value.trim())});$('#news-peak').addEventListener('change',()=>loadNews());$('#news-publication').addEventListener('change',()=>loadNews());$('#news-topic').addEventListener('change',()=>loadNews());$('#news-relevance').addEventListener('change',()=>loadNews());$('#news-story-range').addEventListener('change',()=>loadNews());let newsSearchTimer;$('#news-search').addEventListener('input',()=>{clearTimeout(newsSearchTimer);newsSearchTimer=setTimeout(()=>loadNews({quiet:true}),220)});
+$('#scan-news').addEventListener('click',()=>scanNews());$('#add-news-url').addEventListener('click',addNewsUrl);$('#paste-news-content').addEventListener('click',openPasteNewsModal);$('#paste-news-form').addEventListener('submit',submitPastedNews);$('#dedupe-news').addEventListener('click',deduplicateNews);$('#dedupe-news-bottom').addEventListener('click',deduplicateNews);$('#build-topic-filters').addEventListener('click',buildNewsTopicFilters);$('#rank-news-relevance').addEventListener('click',rankNewsRelevance);$('#news-search-form').addEventListener('submit',event=>{event.preventDefault();scanNews($('#news-search').value.trim())});$('#news-peak').addEventListener('change',()=>loadNews());$('#news-publication').addEventListener('change',()=>loadNews());$('#news-topic').addEventListener('change',()=>loadNews());$('#news-relevance').addEventListener('change',()=>loadNews());$('#news-story-range').addEventListener('change',()=>loadNews());let newsSearchTimer;$('#news-search').addEventListener('input',()=>{clearTimeout(newsSearchTimer);newsSearchTimer=setTimeout(()=>loadNews({quiet:true}),220)});
 $('#analysis-read-btn').addEventListener('click',toggleAnalysisSpeech);$('#analysis-stop-btn').addEventListener('click',()=>stopAnalysisSpeech());
 $('#analysis-mp3-btn').addEventListener('click',createAnalysisPodcast);$('#analysis-copy-transcript').addEventListener('click',copyAnalysisPodcastTranscript);$('#youtube-publish-btn').addEventListener('click',publishAnalysisToYouTube);$('#youtube-series').addEventListener('change',()=>{if(!activeNewsStory)return;const field=$('#youtube-video-title'),current=field.value,separator=current.indexOf(' | '),headline=separator>=0?current.slice(separator+3).trim():activeNewsStory.title;field.value=youtubeTitleForTheme(headline,$('#youtube-series').value)});$('#youtube-review-confirm').addEventListener('change',updateYouTubePublishButton);
 $('#news-items').addEventListener('click',event=>{const button=event.target.closest('[data-news-action]');if(!button)return;const card=button.closest('.news-item');if(!card)return;if(button.dataset.newsAction==='read')toggleNewsSpeech(card);else if(button.dataset.newsAction==='stop')stopNewsSpeech();else if(button.dataset.newsAction==='analyze')analyzeNewsStory(card,button);else if(button.dataset.newsAction==='publish')publishNewsStory(card,button);else if(button.dataset.newsAction==='republish')republishNewsStory(card,button);else if(button.dataset.newsAction==='retry-x')unlockXRetry(card);else if(button.dataset.newsAction==='translate')translateNewsStory(card,button);else if(button.dataset.newsAction==='change-peak'){const select=card.querySelector('.news-peak-select');select.hidden=!select.hidden;if(!select.hidden)select.focus()}else if(button.dataset.newsAction==='change-topic'){const select=card.querySelector('.news-topic-select');select.hidden=!select.hidden;if(!select.hidden)select.focus()}else if(button.dataset.newsAction==='change-relevance'){const select=card.querySelector('.news-relevance-select');select.hidden=!select.hidden;if(!select.hidden)select.focus()}else if(button.dataset.newsAction==='delete-story')deleteNewsStory(card,button)});
