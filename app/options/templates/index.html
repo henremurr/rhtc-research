@@ -68,6 +68,27 @@
   </section>
 </div>
 <div class="modal-backdrop infra-backdrop" id="infra-modal" role="presentation" onclick="if(event.target===this)hideInfrastructureInventory()"><section class="modal infra-modal" role="dialog" aria-modal="true" aria-labelledby="infra-title"><div class="infra-modal-header"><div><div class="eyebrow">RHTC PLATFORM REVIEW</div><h2 id="infra-title">Development &amp; deployment inventory</h2><p class="infra-subtitle">Live runtime and deployment configuration, plus the APIs, credentials, ownership, pricing, and lifecycle notes for connected services.</p></div><div class="infra-header-actions"><button id="infra-refresh" class="refresh-btn" type="button">↻ Recheck deployment</button><button class="modal-close" type="button" onclick="hideInfrastructureInventory()" aria-label="Close infrastructure inventory">×</button></div></div><div id="infra-status" class="infra-status" role="status" aria-live="polite">Checking deployed runtime…</div><div id="infra-inventory-results" class="infra-inventory-results"><div class="infra-loading">Loading current inventory…</div></div></section></div>
+<dialog id="news-summary-dialog" class="guide-menu-rename-dialog" aria-labelledby="news-summary-title">
+  <form id="news-summary-form">
+    <h2 id="news-summary-title">RHTC News Summary</h2>
+    <label class="review-limit-control">Story range
+      <select id="news-summary-range">
+        <option value="today" selected>Today</option>
+        <option value="48h">48 hours</option>
+        <option value="7d">1 week</option>
+        <option value="14d">2 weeks</option>
+        <option value="30d">1 month</option>
+        <option value="3m">3 months</option>
+        <option value="all">All time</option>
+      </select>
+    </label>
+    <p id="news-summary-count" role="status"></p>
+    <div class="guide-menu-editbar-actions">
+      <button id="news-summary-cancel" class="news-search-submit" type="button">Cancel</button>
+      <button id="news-summary-run" class="news-search-submit news-summarize-btn" type="submit" disabled>Run summary</button>
+    </div>
+  </form>
+</dialog>
 <dialog id="earnings-preview" aria-modal="true" aria-label="Earnings Calendar PDF preview">
 <nav class="earnings-preview-toolbar"><button type="button" class="trade-action" id="earnings-preview-close" onclick="closeEarningsPreview()">Close preview</button><button type="button" class="trade-action" onclick="closeEarningsPreview();closeEarningsReport()">Return to dashboard</button><button type="button" class="trade-action" id="earnings-preview-expand" onclick="toggleEarningsPreviewFullScreen()">Full screen</button><button type="button" class="trade-action" onclick="saveOrPrintEarningsPdf()">Print or save PDF</button><button type="button" class="trade-action" id="earnings-preview-save" onclick="saveEarningsReport()">Save to DB</button><button type="button" class="trade-action" onclick="openEarningsHistory()">View History</button></nav><div id="earnings-preview-save-status" role="status" aria-live="polite" style="color:#e6cf86;background:#17212a;padding:0 12px;flex-shrink:0"></div>
 <div id="earnings-preview-pages" role="region" aria-label="Scrollable Earnings Calendar preview" tabindex="0" hidden></div>
@@ -145,7 +166,7 @@
 <label class="youtube-review-label"><input id="youtube-review-confirm" type="checkbox"> I reviewed the full MP3, title, description, and selected artwork.</label>
 <div class="youtube-publish-actions"><button id="youtube-publish-btn" type="button" disabled>▶ Publish to YouTube + X</button><span id="youtube-publish-status" role="status" aria-live="polite"></span></div>
 </section></div></div></div>
-<script src="/options/static/app.js?v=forward-intelligence-20261127"></script>
+<script src="/options/static/app.js?v=news-summary-range-20261127"></script>
 <style>
 #trade-preview{padding:0;border:0;width:92vw;height:88vh;max-width:none;max-height:none;background:#222;color:white}
 #trade-preview[open]{display:flex;flex-direction:column;position:fixed;inset:0;margin:auto;z-index:10000}

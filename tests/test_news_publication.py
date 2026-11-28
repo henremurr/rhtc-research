@@ -3,6 +3,7 @@ import sqlite3
 import tempfile
 import unittest
 import asyncio
+from datetime import datetime
 from unittest.mock import patch
 
 from app.options import news
@@ -51,6 +52,31 @@ class NewsPublicationRegressionTest(unittest.TestCase):
                 ":youtube_published,:youtube_video_id,:youtube_url,:youtube_published_at,:youtube_privacy_status,"
                 ":x_published,:x_post_id,:x_post_url,:x_published_at)", values,
             )
+
+    def test_summary_preview_uses_rolling_48_hours_and_preserves_peak_filter(self):
+        recent = "https://example.com/recent"
+        boundary = "https://example.com/boundary"
+        self.insert_story(recent, published_at="2026-11-26T12:00:00-08:00")
+        self.insert_story(
+            boundary, published_at="", first_seen_at="2026-11-25T18:00:00-08:00",
+        )
+        self.insert_story(
+            "https://example.com/old",
+            published_at="2026-11-25T17:59:59-08:00",
+            last_seen="2026-11-27T17:00:00-08:00",
+        )
+        self.insert_story(
+            "https://example.com/other-peak",
+            published_at="2026-11-27T12:00:00-08:00", peak="AI/I",
+        )
+        now = datetime.fromisoformat("2026-11-27T18:00:00-08:00")
+        with patch.object(news, "now_pacific", return_value=now):
+            preview = asyncio.run(news.get_news(
+                peak="DS/I", q=None, relevance=None, topic=None,
+                story_range="48h", summary_preview=True,
+            ))
+
+        self.assertEqual(set(preview["urls"]), {recent, boundary})
 
     def test_peak_assignment_can_be_changed(self):
         url = "https://example.com/peak-story"
