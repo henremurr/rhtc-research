@@ -838,17 +838,40 @@ def without_duplicate_markets(rows):
     return sorted(winners, key=priority, reverse=True)
 
 
+def kalshi_catalog():
+    from app.options.kalshi_ingestion import latest
+    from app.options.api import read_watchlist
+    scan, rows = latest()
+    for row in rows:
+        row["topics"] = [key for key, pattern in TOPICS.items()
+                         if re.search(pattern, row["title"] + " " + row["description"], re.I)]
+        row["changes_pp"] = {}
+    return scan, map_portfolio(attach_research(rows), read_watchlist())
+
+
 @router.get("")
-def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500), deduplicate: bool = False, sort: Literal["relevance", "volume", "liquidity", "prob-yes", "prob-no"] = "relevance"):
+def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500), deduplicate: bool = False, sort: Literal["relevance", "volume", "liquidity", "prob-yes", "prob-no"] = "relevance", provider: Literal["all", "polymarket", "kalshi"] = "polymarket"):
     search_term = q.strip().removeprefix("$")
-    indexed=catalog_page(topic,exposure,offset,limit,sort) if not search_term and not deduplicate else None
+    indexed=catalog_page(topic,exposure,offset,limit,sort) if provider == "polymarket" and not search_term and not deduplicate else None
     if indexed is not None:
         scan,reviewed,count,rows=indexed
         return {"scan":scan,"reviewed":reviewed,"count":count,"markets":rows,
                 "scanning":lock.locked(),"reviewing":enrichment_lock.locked(),"scan_status":read_status(),"ai_usage":daily_usage(),"research_status":read_research_status(),
                 "query_mode":"indexed","caution":"Market prices are complementary evidence only; independently verify fundamentals and resolution rules."}
     search = re.compile(r"(?<!\w)" + re.escape(search_term) + r"(?!\w)", re.IGNORECASE) if search_term else None
-    scan, rows = current_markets(include_partial=True, search=search)
+    from app.options import kalshi_ingestion
+    scan, rows = current_markets(include_partial=True, search=search) if provider != "kalshi" else (None, [])
+    provider_scans = {"polymarket": scan}
+    for row in rows:
+        row.setdefault("provider", "polymarket")
+    if provider != "polymarket":
+        kalshi_scan, kalshi_rows = kalshi_catalog()
+        provider_scans["kalshi"] = kalshi_scan
+        if search:
+            kalshi_rows = [row for row in kalshi_rows if search.search(row["title"]) or search.search(row["description"])]
+        rows.extend(kalshi_rows)
+        if scan is None:
+            scan = kalshi_scan
     reviewed = sum(r["research"] is not None for r in rows)
     if topic != "All":
         rows = [r for r in rows if topic in r["topics"] or (topic == "Unclassified" and not r["topics"])]
@@ -861,10 +884,12 @@ def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int 
     rows.sort(key=priority,reverse=True)
     matching_count = len(rows)
     if deduplicate:
-        rows = without_duplicate_markets(rows)
+        rows = without_duplicate_markets([r for r in rows if r.get("provider") != "kalshi"]) + without_duplicate_markets([r for r in rows if r.get("provider") == "kalshi"])
+        rows.sort(key=priority, reverse=True)
     metric = {"volume": "volume24h", "liquidity": "liquidity"}.get(sort)
     if metric:
-        rows.sort(key=lambda row: (row[metric] is not None, row[metric] or 0), reverse=True)
+        # Volume units differ across exchanges. Rank within provider, not across units.
+        rows.sort(key=lambda row: (row.get("provider") or "polymarket", row[metric] is not None, row[metric] or 0), reverse=True)
     elif sort in PROBABILITY_SORT_OUTCOMES:
         outcome = PROBABILITY_SORT_OUTCOMES[sort]
 
@@ -873,7 +898,7 @@ def markets(topic: str = "All", exposure: str = "All", q: str = "", offset: int 
                         if label.lower() == outcome), default=-1)
 
         rows.sort(key=probability, reverse=True)
-    return {"scan":scan,"reviewed":reviewed,"count":len(rows),"duplicates_removed":matching_count-len(rows),"direct_search":bool(search),"markets":rows[offset:offset+limit],
+    return {"scan":scan,"reviewed":reviewed,"count":len(rows),"duplicates_removed":matching_count-len(rows),"direct_search":bool(search),"markets":rows[offset:offset+limit],"provider_scans":provider_scans,"kalshi_status":kalshi_ingestion.read_status() if provider != "polymarket" else None,
             "scanning":lock.locked(),"reviewing":enrichment_lock.locked(),"scan_status":read_status(),"ai_usage":daily_usage(),"research_status":read_research_status(),
             "caution":"Market prices are complementary evidence only; independently verify fundamentals and resolution rules."}
 
