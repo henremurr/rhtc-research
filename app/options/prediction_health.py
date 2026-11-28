@@ -63,6 +63,33 @@ def storage_metrics():
     return {"database_mib":result,"free_mib":disk.free/1048576,"used_pct":100*(1-disk.free/disk.total)}
 
 
+_benchmark = None
+
+def catalog_benchmark():
+    # Bounded read-only sample; run at audit cadence, not UI polling cadence.
+    from app.options import kalshi_ingestion as ki
+    from app.options.api import watchlist_db_path
+    import sqlite3
+    result={}
+    for name,file in (("Polymarket","rhtc_prediction_markets.sqlite3"),("Kalshi","rhtc_kalshi.sqlite3")):
+        path=watchlist_db_path().with_name(file)
+        if not path.exists():
+            result[name]={"status":"pending"}
+            continue
+        with closing(sqlite3.connect(path.resolve().as_uri()+"?mode=ro",uri=True,timeout=2)) as db:
+            scan=db.execute("SELECT stamp,count FROM scans ORDER BY stamp DESC LIMIT 1").fetchone()
+            if not scan:
+                result[name]={"status":"pending"}
+                continue
+            start=time.perf_counter()
+            rows=db.execute("SELECT id,payload FROM snapshots WHERE stamp=? ORDER BY id LIMIT 100",(scan[0],)).fetchall()
+            elapsed=(time.perf_counter()-start)*1000
+            result[name]={"status":"sampled","completed_count":scan[1],"sample_rows":len(rows),
+                "page_read_ms":round(elapsed,2),"sample_payload_bytes":sum(len(r[1].encode()) for r in rows)}
+    return {"scope":"100-row indexed storage read per provider; excludes full catalog filtering, hydration and HTTP latency",
+        "checked_at":datetime.now(timezone.utc).isoformat(),"providers":result}
+
+
 def latest_health():
     try:
         with closing(pm.connect()) as db:
@@ -74,6 +101,7 @@ def latest_health():
         result["ingestion"]=live_progress()
         result["storage"]=storage_metrics()
         result["efficiency"]=pm.research_efficiency()
+        result["benchmark"]=_benchmark or result.get("benchmark")
         return result
     except Exception:
         log.exception("Prediction health read failed")
@@ -220,7 +248,12 @@ async def execution_checks():
     return rows
 
 async def run_health():
+    global _benchmark
     checks=[]
+    try:
+        _benchmark=await asyncio.to_thread(catalog_benchmark)
+    except Exception as exc:
+        _benchmark={"status":"unavailable","reason":type(exc).__name__}
     for name,fn in [("Storage and worker checks",storage_checks),("Kalshi storage and worker checks",kalshi_storage_checks),("Synthetic integration",synthetic_check),("Model integrations",integration_checks)]:
         try:
             value=await asyncio.to_thread(fn)
@@ -241,9 +274,10 @@ async def run_health():
     except Exception as exc:
         checks.append(check("Kalshi live provider → normalization","fail",type(exc).__name__))
     state="fail" if any(c["state"]=="fail" for c in checks) else "warn" if any(c["state"] in ("warn","pending") for c in checks) else "pass"
-    result={"checked_at":datetime.now(timezone.utc).isoformat(),"state":state,"checks":checks,"scope":"Live provider, stored data, deployed wiring and isolated analytical execution fixtures; no paid model inference."}
+    result={"checked_at":datetime.now(timezone.utc).isoformat(),"state":state,"checks":checks,"benchmark":_benchmark,"scope":"Live provider, stored data, deployed wiring and isolated analytical execution fixtures; no paid model inference."}
     await asyncio.to_thread(save,result)
     log.warning("Prediction infrastructure health: %s (%d checks)",state,len(checks))
+    log.warning("Prediction catalog sample: %s",json.dumps(_benchmark))
     log.warning("Prediction storage metrics: %s",json.dumps(storage_metrics()))
     log.warning("Prediction research efficiency: %s",json.dumps(pm.research_efficiency()))
     for c in checks:
