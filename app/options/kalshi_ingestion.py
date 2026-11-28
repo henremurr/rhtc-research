@@ -29,6 +29,7 @@ def connect():
         CREATE TABLE IF NOT EXISTS checkpoint(id INTEGER PRIMARY KEY CHECK(id=1),stamp TEXT NOT NULL,cursor TEXT,pages INTEGER NOT NULL,exhausted INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS cursors(stamp TEXT NOT NULL,cursor TEXT NOT NULL,PRIMARY KEY(stamp,cursor));
         CREATE TABLE IF NOT EXISTS status(id INTEGER PRIMARY KEY CHECK(id=1),payload TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS scan_settings(stamp TEXT PRIMARY KEY,page_size INTEGER NOT NULL);
     """)
     return db
 
@@ -36,8 +37,21 @@ def connect():
 def begin():
     with closing(connect()) as db, db:
         db.execute("BEGIN IMMEDIATE")
-        db.execute("INSERT OR IGNORE INTO checkpoint VALUES(1,?,NULL,0,0)", (now().isoformat(),))
+        existing=db.execute("SELECT * FROM checkpoint WHERE id=1").fetchone()
+        if existing:
+            # Legacy checkpoints were created with 100-item pages.
+            db.execute("INSERT OR IGNORE INTO scan_settings VALUES(?,100)",(existing["stamp"],))
+        else:
+            stamp=now().isoformat()
+            db.execute("INSERT INTO checkpoint VALUES(1,?,NULL,0,0)",(stamp,))
+            db.execute("INSERT INTO scan_settings VALUES(?,1000)",(stamp,))
         return dict(db.execute("SELECT * FROM checkpoint WHERE id=1").fetchone())
+
+
+def page_size(cp):
+    with closing(connect()) as db:
+        row=db.execute("SELECT page_size FROM scan_settings WHERE stamp=?",(cp["stamp"],)).fetchone()
+        return row[0] if row else 100
 
 
 def status(state, **details):
@@ -103,6 +117,7 @@ def finish(cp):
             db.execute("DELETE FROM snapshots WHERE stamp IN (SELECT stamp FROM scans WHERE stamp<? AND stamp<>?)",
                        (cutoff, cp["stamp"]))
             db.execute("DELETE FROM scans WHERE stamp<? AND stamp<>?", (cutoff, cp["stamp"]))
+        db.execute("DELETE FROM scan_settings WHERE stamp=?",(cp["stamp"],))
     if not count:
         raise ValueError("Empty Kalshi scan; prior completed scan retained")
     return count
@@ -174,11 +189,12 @@ async def refresh():
         try:
             await asyncio.to_thread(status, "running", pages=cp["pages"])
             log.warning("Kalshi discovery started or resumed: %d pages", cp["pages"])
+            limit=await asyncio.to_thread(page_size,cp)
             async with httpx.AsyncClient(timeout=30) as client:
                 while not cp["exhausted"]:
                     if cp["pages"] % 20 == 0 and headroom() < .15:
                         raise ValueError("Storage above 85% utilization; Kalshi scan paused")
-                    page, cursor = await kalshi_provider.fetch_page(client, cp["cursor"])
+                    page, cursor = await kalshi_provider.fetch_page(client, cp["cursor"], limit=limit)
                     cp = await asyncio.to_thread(persist, cp, page, cursor)
                     await asyncio.to_thread(status, "running", pages=cp["pages"])
                     if cp["pages"] % 20 == 0:
