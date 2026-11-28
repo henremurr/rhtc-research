@@ -3,6 +3,8 @@ import asyncio
 import json
 import os
 import shutil
+import sys
+import time
 import logging
 from contextlib import closing
 from datetime import datetime, timezone
@@ -115,6 +117,42 @@ def integration_checks():
     checks.append(check("Completed evidence → report context","pass" if context.get("selected") and not context.get("stale") else "pending",f"{len(context.get('selected',[]))} selected records; {context.get('status','stale' if context.get('stale') else 'available')}"))
     return checks
 
+_execution_cache = None
+_execution_checked = 0.0
+
+async def execution_checks():
+    """Run isolated fixture workflows at startup and at most hourly thereafter."""
+    global _execution_cache, _execution_checked
+    if _execution_cache is not None and time.monotonic()-_execution_checked<3600:
+        return _execution_cache
+    # Only explicitly selected environment values are inherited: no production
+    # API keys, database paths or credentials enter the fixture process.
+    env={k:os.environ[k] for k in ("PATH","LANG","LC_ALL","PYTHONPATH","SYSTEMROOT") if k in os.environ}
+    proc=await asyncio.create_subprocess_exec(sys.executable,"-m","app.options.prediction_execution_audit",
+                    stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE,env=env)
+    try:
+        stdout,stderr=await asyncio.wait_for(proc.communicate(),timeout=60)
+        rows=json.loads(stdout.decode().strip())
+        if not isinstance(rows,list) or len(rows)!=7 or not all(isinstance(x,dict) and x.get("state") in ("pass","fail") and isinstance(x.get("name"),str) and isinstance(x.get("detail"),str) for x in rows):
+            raise ValueError("Invalid execution audit response")
+        if len({x["name"] for x in rows})!=7 or (proc.returncode==0)!=all(x["state"]=="pass" for x in rows):
+            raise ValueError("Execution audit exit code or result mismatch")
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.communicate()
+        rows=[check("Analytical execution fixture","fail","Fixture subprocess exceeded 60 seconds")]
+    except asyncio.CancelledError:
+        if proc.returncode is None:
+            proc.kill()
+            await proc.communicate()
+        raise
+    except Exception as exc:
+        rows=[check("Analytical execution fixture","fail",type(exc).__name__)]
+        log.warning("Execution fixture failed (%s)",type(exc).__name__)
+    _execution_cache=rows
+    _execution_checked=time.monotonic()
+    return rows
+
 async def run_health():
     checks=[]
     for name,fn in [("Storage and worker checks",storage_checks),("Synthetic integration",synthetic_check),("Model integrations",integration_checks)]:
@@ -125,11 +163,15 @@ async def run_health():
             checks.append(check(name,"fail",type(exc).__name__))
             log.exception("Prediction health check failed: %s",name)
     try:
+        checks.extend(await execution_checks())
+    except Exception as exc:
+        checks.append(check("Analytical execution fixture","fail",type(exc).__name__))
+    try:
         checks.append(await provider_check())
     except Exception as exc:
         checks.append(check("Live provider → normalization","fail",type(exc).__name__))
     state="fail" if any(c["state"]=="fail" for c in checks) else "warn" if any(c["state"] in ("warn","pending") for c in checks) else "pass"
-    result={"checked_at":datetime.now(timezone.utc).isoformat(),"state":state,"checks":checks,"scope":"Live provider and stored data checks, synthetic pipeline and deployed wiring; no paid model inference."}
+    result={"checked_at":datetime.now(timezone.utc).isoformat(),"state":state,"checks":checks,"scope":"Live provider, stored data, deployed wiring and isolated analytical execution fixtures; no paid model inference."}
     await asyncio.to_thread(save,result)
     log.warning("Prediction infrastructure health: %s (%d checks)",state,len(checks))
     for c in checks:
