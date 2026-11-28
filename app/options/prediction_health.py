@@ -75,6 +75,33 @@ def storage_checks():
     checks.append(check("Persistent volume headroom","fail" if used>=.85 else "warn" if used>=.70 else "pass",f"Filesystem {used:.1%} used; prediction database and sidecars {db_bytes/1048576:.1f} MiB; filesystem free {disk.free/1048576:.1f} MiB"))
     return checks
 
+def kalshi_storage_checks():
+    from app.options import kalshi_ingestion as ki
+    with closing(ki.connect()) as db:
+        scan=db.execute("SELECT stamp,count FROM scans ORDER BY stamp DESC LIMIT 1").fetchone()
+        actual=db.execute("SELECT COUNT(*) FROM snapshots WHERE stamp=?",(scan["stamp"],)).fetchone()[0] if scan else 0
+    age=age_hours(scan["stamp"]) if scan else None
+    status=ki.read_status()
+    state=status.get("state")
+    return [
+        check("Kalshi completed snapshot integrity","pass" if scan and actual==scan["count"] else "fail" if scan else "pending",f"{actual} persisted markets"),
+        check("Kalshi snapshot freshness","pass" if age is not None and 0<=age<=12 else "warn" if scan else "pending",f"{age:.1f} hours since scan start" if age is not None else "Awaiting complete scan"),
+        check("Kalshi discovery worker","fail" if state=="failed" else "warn" if state=="interrupted" or state=="running" and not ki.lock.locked() else "pass" if state=="completed" or state=="running" else "pending",f"{state}; {status.get('error','')}"),
+    ]
+
+async def kalshi_provider_check():
+    from app.options import kalshi_provider as kp
+    async with httpx.AsyncClient(timeout=20) as client:
+        first,cursor=await kp.fetch_page(client)
+        if not first:
+            raise ValueError("Kalshi returned no markets")
+        row=kp.normalize(first[0])
+        if cursor:
+            second,_=await kp.fetch_page(client,cursor)
+            if not second or not {m["ticker"] for m in first}.isdisjoint({m["ticker"] for m in second}):
+                raise ValueError("Kalshi pagination overlaps or empty")
+        return check("Kalshi live provider → normalization","pass",f"Normalized {row['id']}; pagination checked when cursor present")
+
 async def provider_check():
     async with httpx.AsyncClient(timeout=20) as client:
         first,cursor=await pm.fetch_page(client,None)
@@ -155,7 +182,7 @@ async def execution_checks():
 
 async def run_health():
     checks=[]
-    for name,fn in [("Storage and worker checks",storage_checks),("Synthetic integration",synthetic_check),("Model integrations",integration_checks)]:
+    for name,fn in [("Storage and worker checks",storage_checks),("Kalshi storage and worker checks",kalshi_storage_checks),("Synthetic integration",synthetic_check),("Model integrations",integration_checks)]:
         try:
             value=await asyncio.to_thread(fn)
             checks.extend(value if isinstance(value,list) else [value])
@@ -170,6 +197,10 @@ async def run_health():
         checks.append(await provider_check())
     except Exception as exc:
         checks.append(check("Live provider → normalization","fail",type(exc).__name__))
+    try:
+        checks.append(await kalshi_provider_check())
+    except Exception as exc:
+        checks.append(check("Kalshi live provider → normalization","fail",type(exc).__name__))
     state="fail" if any(c["state"]=="fail" for c in checks) else "warn" if any(c["state"] in ("warn","pending") for c in checks) else "pass"
     result={"checked_at":datetime.now(timezone.utc).isoformat(),"state":state,"checks":checks,"scope":"Live provider, stored data, deployed wiring and isolated analytical execution fixtures; no paid model inference."}
     await asyncio.to_thread(save,result)
