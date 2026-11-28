@@ -1916,6 +1916,7 @@ body.news-mode .news-research-title {
 .market-session-block {
   grid-column:5;
   grid-row:1/4;
+  margin-inline-start:clamp(0px, calc((100vw - 760px) / 12), 40px);
   display:grid;
   row-gap:3px;
 }
